@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
+	"resumeee/internal/api"
 	"resumeee/internal/config"
+	"resumeee/internal/profile"
+	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/validator"
 )
 
 func main() {
@@ -71,9 +78,63 @@ func run(parent context.Context) error {
 	}
 	logger.Info("database seeded with default profile, built-in templates, and presets")
 
-	// HTTP listeners and background workers will attach to this lifecycle in subsequent tasks.
-	<-ctx.Done()
+	// 3. Initialize repositories and domain services
+	profileRepo := sqlite.NewProfileRepository(db)
+	presetRepo := sqlite.NewPresetRepository(db)
+	templateRepo := sqlite.NewTemplateRepository(db)
+	profileSvc := profile.NewService(profileRepo, branchRepo)
+	templateRenderer := renderer.NewTemplateRenderer()
+	provValidator := validator.New()
 
-	logger.Info("shutting down resumeee server gracefully", "signal", ctx.Err())
+	// 4. Initialize JobEnqueuer worker queue
+	jobEnqueuer := api.NewChannelJobEnqueuer(cfg.WorkerQueueSize)
+
+	// 5. Build API router with /api/v1 routes and middlewares
+	router := api.NewRouter(api.RouterConfig{
+		ProfileRepo:    profileRepo,
+		PresetRepo:     presetRepo,
+		TemplateRepo:   templateRepo,
+		BranchRepo:     branchRepo,
+		ProfileService: profileSvc,
+		Renderer:       templateRenderer,
+		Validator:      provValidator,
+		JobEnqueuer:    jobEnqueuer,
+		DefaultUserID:  cfg.DefaultUserID,
+		Logger:         logger,
+	})
+
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		logger.Info("HTTP server listening", "addr", server.Addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+		close(serverErr)
+	}()
+
+	select {
+	case err := <-serverErr:
+		return fmt.Errorf("http server: %w", err)
+	case <-ctx.Done():
+		logger.Info("shutting down resumeee server gracefully", "signal", ctx.Err())
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("http server graceful shutdown: %w", err)
+	}
+
+	logger.Info("server shutdown complete")
 	return nil
 }
