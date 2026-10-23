@@ -14,12 +14,33 @@ import (
 	"time"
 
 	"resumeee/internal/api"
+	"resumeee/internal/branch"
 	"resumeee/internal/config"
+	"resumeee/internal/domain"
+	"resumeee/internal/llm"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
 	"resumeee/internal/validator"
+	"resumeee/internal/worker"
 )
+
+type llmServiceAdapter struct {
+	registry *llm.Registry
+}
+
+func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req domain.GenerationRequest) (*domain.GenerationResponse, error) {
+	var profile *domain.Profile
+	if req.MasterProfile != nil {
+		profile = &req.MasterProfile.Profile
+	}
+	provider, model, err := a.registry.Resolve(req, nil, profile)
+	if err != nil {
+		return nil, err
+	}
+	req.Model = model
+	return provider.GenerateTailoredResume(ctx, req)
+}
 
 func main() {
 	if err := run(context.Background()); err != nil {
@@ -86,19 +107,49 @@ func run(parent context.Context) error {
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
 
-	// 4. Initialize JobEnqueuer worker queue
-	jobEnqueuer := api.NewChannelJobEnqueuer(cfg.WorkerQueueSize)
+	// 4. Initialize LLM registry and service adapter
+	llmRegistry := llm.NewRegistry(cfg)
+	llmAdapter := &llmServiceAdapter{registry: llmRegistry}
 
-	// 5. Build API router with /api/v1 routes and middlewares
+	// 5. Initialize and start asynchronous generation worker pool
+	workerPool := worker.NewPool(worker.PoolConfig{
+		Concurrency:  cfg.WorkerConcurrency,
+		QueueSize:    cfg.WorkerQueueSize,
+		BranchRepo:   branchRepo,
+		ProfileRepo:  profileRepo,
+		PresetRepo:   presetRepo,
+		TemplateRepo: templateRepo,
+		LLMService:   llmAdapter,
+		Validator:    provValidator,
+		Renderer:     templateRenderer,
+		Logger:       logger,
+	})
+	workerPool.Start(ctx)
+	defer workerPool.Stop()
+
+	// 6. Initialize Branch Service
+	branchSvc := branch.NewService(branch.Config{
+		BranchRepo:   branchRepo,
+		ProfileRepo:  profileRepo,
+		PresetRepo:   presetRepo,
+		TemplateRepo: templateRepo,
+		JobEnqueuer:  workerPool,
+		Validator:    provValidator,
+		Renderer:     templateRenderer,
+		Logger:       logger,
+	})
+
+	// 7. Build API router with /api/v1 routes and middlewares
 	router := api.NewRouter(api.RouterConfig{
 		ProfileRepo:    profileRepo,
 		PresetRepo:     presetRepo,
 		TemplateRepo:   templateRepo,
 		BranchRepo:     branchRepo,
+		BranchService:  branchSvc,
 		ProfileService: profileSvc,
 		Renderer:       templateRenderer,
 		Validator:      provValidator,
-		JobEnqueuer:    jobEnqueuer,
+		JobEnqueuer:    workerPool,
 		DefaultUserID:  cfg.DefaultUserID,
 		Logger:         logger,
 	})
@@ -134,6 +185,8 @@ func run(parent context.Context) error {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("http server graceful shutdown: %w", err)
 	}
+
+	workerPool.Stop()
 
 	logger.Info("server shutdown complete")
 	return nil

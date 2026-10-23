@@ -1,25 +1,26 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-
+	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 )
 
 type branchHandler struct {
 	cfg RouterConfig
+	svc branch.Service
 }
 
 func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
-	h := &branchHandler{cfg: cfg}
+	h := &branchHandler{
+		cfg: cfg,
+		svc: cfg.BranchService,
+	}
 
 	mux.HandleFunc("GET /api/v1/branches", h.listBranches)
 	mux.HandleFunc("POST /api/v1/branches", h.createBranch)
@@ -82,44 +83,17 @@ type EditVersionRequest struct {
 	TailoredContent *domain.TailoredContent `json:"tailored_content"`
 }
 
-func getVersionFromPath(ctx context.Context, branchRepo domain.BranchRepository, branchID, v string) (*domain.BranchVersion, error) {
-	if num, err := strconv.Atoi(v); err == nil && num > 0 {
-		ver, err := branchRepo.GetVersionByNumber(ctx, branchID, num)
-		if err == nil {
-			return ver, nil
-		}
-	}
-	return branchRepo.GetVersion(ctx, branchID, v)
-}
-
 func (h *branchHandler) listBranches(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
+	staleOnly := strings.EqualFold(r.URL.Query().Get("stale"), "true")
 
-	branches, err := h.cfg.BranchRepo.ListBranches(ctx, userID)
+	branches, err := h.svc.ListBranches(ctx, userID, staleOnly)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	staleOnly := strings.EqualFold(r.URL.Query().Get("stale"), "true")
-	if staleOnly {
-		var filtered []domain.Branch
-		for _, b := range branches {
-			if b.IsStale {
-				filtered = append(filtered, b)
-			}
-		}
-		if filtered == nil {
-			filtered = []domain.Branch{}
-		}
-		writeJSON(w, http.StatusOK, filtered)
-		return
-	}
-
-	if branches == nil {
-		branches = []domain.Branch{}
-	}
 	writeJSON(w, http.StatusOK, branches)
 }
 
@@ -138,8 +112,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	branch := domain.Branch{
-		ID:                 "branch-" + uuid.New().String(),
+	b := &domain.Branch{
 		UserID:             userID,
 		Name:               req.Name,
 		TargetRole:         req.TargetRole,
@@ -154,23 +127,13 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		ExcludedEntityIDs:  req.ExcludedEntityIDs,
 	}
 
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	if err == nil && prof != nil {
-		branch.LastSyncedMasterRevision = prof.MasterRevision
-	}
-
-	if err := h.cfg.BranchRepo.CreateBranch(ctx, &branch); err != nil {
+	created, err := h.svc.CreateBranch(ctx, b)
+	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	created, err := h.cfg.BranchRepo.GetBranch(ctx, userID, branch.ID)
-	if err == nil && created != nil {
-		writeJSON(w, http.StatusCreated, created)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, branch)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
@@ -178,13 +141,13 @@ func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	branch, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id)
+	b, err := h.svc.GetBranch(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, branch)
+	writeJSON(w, http.StatusOK, b)
 }
 
 func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +155,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	branch, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id)
+	branch, err := h.svc.GetBranch(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -241,12 +204,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 		branch.ActiveVersionID = req.ActiveVersionID
 	}
 
-	if err := h.cfg.BranchRepo.UpdateBranch(ctx, branch); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	updated, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id)
+	updated, err := h.svc.UpdateBranch(ctx, branch)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -260,7 +218,7 @@ func (h *branchHandler) deleteBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.BranchRepo.DeleteBranch(ctx, userID, id); err != nil {
+	if err := h.svc.DeleteBranch(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -273,47 +231,9 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	branch, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id)
+	ver, err := h.svc.GenerateVersion(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	provider := branch.ProviderOverride
-	if provider == "" {
-		provider = prof.DefaultProvider
-	}
-	model := branch.ModelOverride
-	if model == "" {
-		model = prof.DefaultModel
-	}
-
-	ver := &domain.BranchVersion{
-		ID:                 "ver-" + uuid.New().String(),
-		BranchID:           branch.ID,
-		Status:             domain.VersionStatusPending,
-		MasterRevisionUsed: prof.MasterRevision,
-		TemplateSetIDUsed:  branch.TemplateSetID,
-		ProviderUsed:       provider,
-		ModelUsed:          model,
-		SourceType:         domain.SourceTypeLLMGeneration,
-		ParentVersionID:    branch.ActiveVersionID,
-	}
-
-	if err := h.cfg.BranchRepo.CreateVersion(ctx, ver); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	if err := h.cfg.JobEnqueuer.Enqueue(ver.ID); err != nil {
 		if errors.Is(err, domain.ErrQueueFull) {
-			_ = h.cfg.BranchRepo.UpdateVersionStatus(ctx, ver.ID, domain.VersionStatusFailed, "generation queue full")
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
@@ -323,7 +243,7 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 
 	writeJSON(w, http.StatusAccepted, AsyncJobEnqueued{
 		VersionID: ver.ID,
-		Status:    domain.VersionStatusPending,
+		Status:    ver.Status,
 		Message:   "Resume generation job queued",
 	})
 }
@@ -340,77 +260,14 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	enqueuedIDs, err := h.svc.SyncBranches(ctx, userID, req.BranchIDs)
 	if err != nil {
+		if errors.Is(err, domain.ErrQueueFull) {
+			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
+			return
+		}
 		writeDomainError(w, err)
 		return
-	}
-
-	var targetBranches []domain.Branch
-	if len(req.BranchIDs) > 0 {
-		for _, bID := range req.BranchIDs {
-			b, err := h.cfg.BranchRepo.GetBranch(ctx, userID, bID)
-			if err != nil {
-				writeDomainError(w, err)
-				return
-			}
-			targetBranches = append(targetBranches, *b)
-		}
-	} else {
-		allBranches, err := h.cfg.BranchRepo.ListBranches(ctx, userID)
-		if err != nil {
-			writeDomainError(w, err)
-			return
-		}
-		for _, b := range allBranches {
-			if b.IsStale {
-				targetBranches = append(targetBranches, b)
-			}
-		}
-	}
-
-	var enqueuedIDs []string
-	for _, b := range targetBranches {
-		provider := b.ProviderOverride
-		if provider == "" {
-			provider = prof.DefaultProvider
-		}
-		model := b.ModelOverride
-		if model == "" {
-			model = prof.DefaultModel
-		}
-
-		ver := &domain.BranchVersion{
-			ID:                 "ver-" + uuid.New().String(),
-			BranchID:           b.ID,
-			Status:             domain.VersionStatusPending,
-			MasterRevisionUsed: prof.MasterRevision,
-			TemplateSetIDUsed:  b.TemplateSetID,
-			ProviderUsed:       provider,
-			ModelUsed:          model,
-			SourceType:         domain.SourceTypeLLMGeneration,
-			ParentVersionID:    b.ActiveVersionID,
-		}
-
-		if err := h.cfg.BranchRepo.CreateVersion(ctx, ver); err != nil {
-			writeDomainError(w, err)
-			return
-		}
-
-		if err := h.cfg.JobEnqueuer.Enqueue(ver.ID); err != nil {
-			if errors.Is(err, domain.ErrQueueFull) {
-				_ = h.cfg.BranchRepo.UpdateVersionStatus(ctx, ver.ID, domain.VersionStatusFailed, "generation queue full")
-				writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
-				return
-			}
-			writeDomainError(w, err)
-			return
-		}
-		enqueuedIDs = append(enqueuedIDs, ver.ID)
-	}
-
-	if enqueuedIDs == nil {
-		enqueuedIDs = []string{}
 	}
 
 	writeJSON(w, http.StatusAccepted, SyncBranchesResponse{
@@ -424,18 +281,15 @@ func (h *branchHandler) listBranchVersions(w http.ResponseWriter, r *http.Reques
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if _, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id); err != nil {
+	if _, err := h.svc.GetBranch(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	versions, err := h.cfg.BranchRepo.ListVersions(ctx, id)
+	versions, err := h.svc.ListVersions(ctx, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
-	}
-	if versions == nil {
-		versions = []domain.BranchVersion{}
 	}
 	writeJSON(w, http.StatusOK, versions)
 }
@@ -446,12 +300,12 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 	v := r.PathValue("v")
 
-	if _, err := h.cfg.BranchRepo.GetBranch(ctx, userID, id); err != nil {
+	if _, err := h.svc.GetBranch(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	ver, err := getVersionFromPath(ctx, h.cfg.BranchRepo, id, v)
+	ver, err := h.svc.GetVersion(ctx, id, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -466,12 +320,12 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 	branchID := r.PathValue("id")
 	v := r.PathValue("v")
 
-	if _, err := h.cfg.BranchRepo.GetBranch(ctx, userID, branchID); err != nil {
+	if _, err := h.svc.GetBranch(ctx, userID, branchID); err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	ver, err := getVersionFromPath(ctx, h.cfg.BranchRepo, branchID, v)
+	ver, err := h.svc.GetVersion(ctx, branchID, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -496,6 +350,10 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(ver.PlainTextOutput))
 	case "jsonresume":
+		if h.cfg.ProfileService == nil {
+			writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+			return
+		}
 		res, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, &ver.ID)
 		if err != nil {
 			writeDomainError(w, err)
@@ -513,18 +371,6 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 	branchID := r.PathValue("id")
 	v := r.PathValue("v")
 
-	branch, err := h.cfg.BranchRepo.GetBranch(ctx, userID, branchID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	parentVer, err := getVersionFromPath(ctx, h.cfg.BranchRepo, branchID, v)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
 	var req EditVersionRequest
 	if err := parseJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
@@ -536,59 +382,16 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	snapshot, err := h.cfg.ProfileRepo.GetSnapshot(ctx, userID)
+	newVer, err := h.svc.EditVersion(ctx, userID, branchID, v, *req.TailoredContent)
 	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, branch.TemplateSetID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	// Provenance validation ("No Lies" invariant)
-	if err := h.cfg.Validator.ValidateStrict(req.TailoredContent, snapshot, branch); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, CodeProvenanceError, "provenance validation failed", err.Error())
-		return
-	}
-
-	// Synchronously execute Go templates to render HTML/Markdown/Text
-	rendered, err := h.cfg.Renderer.Render(ctx, tmpl, prof, req.TailoredContent)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template rendering failed", err.Error())
-		return
-	}
-
-	newVer := &domain.BranchVersion{
-		ID:                 "ver-" + uuid.New().String(),
-		BranchID:           branch.ID,
-		Status:             domain.VersionStatusCompleted,
-		MasterRevisionUsed: snapshot.MasterRevision,
-		TemplateSetIDUsed:  branch.TemplateSetID,
-		ProviderUsed:       "manual",
-		ModelUsed:          "manual",
-		SourceType:         domain.SourceTypeManualEdit,
-		ParentVersionID:    &parentVer.ID,
-		TailoredContent:    req.TailoredContent,
-		HTMLOutput:         rendered.HTML,
-		MarkdownOutput:     rendered.Markdown,
-		PlainTextOutput:    rendered.PlainText,
-	}
-
-	if err := h.cfg.BranchRepo.CreateVersion(ctx, newVer); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	if err := h.cfg.BranchRepo.CompleteVersion(ctx, newVer); err != nil {
+		if errors.Is(err, domain.ErrProvenance) {
+			writeError(w, http.StatusUnprocessableEntity, CodeProvenanceError, "provenance validation failed", err.Error())
+			return
+		}
+		if errors.Is(err, domain.ErrTemplateSyntax) {
+			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template rendering failed", err.Error())
+			return
+		}
 		writeDomainError(w, err)
 		return
 	}

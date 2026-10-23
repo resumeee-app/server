@@ -5,19 +5,19 @@ import (
 	"net/http"
 	"strings"
 
+	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 	"resumeee/internal/profile"
 	"resumeee/internal/validator"
+	"resumeee/internal/worker"
 )
 
-// JobEnqueuer defines the interface for submitting version IDs to the async generation worker pool.
-type JobEnqueuer interface {
-	Enqueue(versionID string) error
-}
+// JobEnqueuer defines the interface for submitting version jobs to the async generation worker pool.
+type JobEnqueuer = worker.JobEnqueuer
 
 // ChannelJobEnqueuer implements JobEnqueuer backed by a buffered Go channel.
 type ChannelJobEnqueuer struct {
-	ch chan string
+	ch chan worker.GenerationJob
 }
 
 // NewChannelJobEnqueuer creates a new ChannelJobEnqueuer with the given buffer capacity.
@@ -26,14 +26,14 @@ func NewChannelJobEnqueuer(capacity int) *ChannelJobEnqueuer {
 		capacity = 100
 	}
 	return &ChannelJobEnqueuer{
-		ch: make(chan string, capacity),
+		ch: make(chan worker.GenerationJob, capacity),
 	}
 }
 
-// Enqueue sends versionID to the buffered channel or returns domain.ErrQueueFull if saturated.
-func (e *ChannelJobEnqueuer) Enqueue(versionID string) error {
+// Enqueue sends a GenerationJob to the buffered channel or returns domain.ErrQueueFull if saturated.
+func (e *ChannelJobEnqueuer) Enqueue(job worker.GenerationJob) error {
 	select {
-	case e.ch <- versionID:
+	case e.ch <- job:
 		return nil
 	default:
 		return domain.ErrQueueFull
@@ -41,7 +41,7 @@ func (e *ChannelJobEnqueuer) Enqueue(versionID string) error {
 }
 
 // Channel exposes the underlying receive channel for background workers.
-func (e *ChannelJobEnqueuer) Channel() <-chan string {
+func (e *ChannelJobEnqueuer) Channel() <-chan worker.GenerationJob {
 	return e.ch
 }
 
@@ -51,6 +51,7 @@ type RouterConfig struct {
 	PresetRepo     domain.PresetRepository
 	TemplateRepo   domain.TemplateRepository
 	BranchRepo     domain.BranchRepository
+	BranchService  branch.Service
 	ProfileService profile.Service
 	Renderer       domain.TemplateRenderer
 	Validator      validator.ProvenanceValidator
@@ -73,6 +74,19 @@ func getUserID(r *http.Request, defaultID string) string {
 func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.DefaultUserID == "" {
 		cfg.DefaultUserID = "default"
+	}
+
+	if cfg.BranchService == nil && cfg.BranchRepo != nil {
+		cfg.BranchService = branch.NewService(branch.Config{
+			BranchRepo:   cfg.BranchRepo,
+			ProfileRepo:  cfg.ProfileRepo,
+			PresetRepo:   cfg.PresetRepo,
+			TemplateRepo: cfg.TemplateRepo,
+			JobEnqueuer:  cfg.JobEnqueuer,
+			Validator:    cfg.Validator,
+			Renderer:     cfg.Renderer,
+			Logger:       cfg.Logger,
+		})
 	}
 
 	mux := http.NewServeMux()
