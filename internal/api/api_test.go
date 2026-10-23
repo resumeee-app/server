@@ -937,3 +937,32 @@ func TestCORSAndMiddleware(t *testing.T) {
 		}
 	})
 }
+
+// TestHealthEndpoints verifies that /api/v1/health, /healthz, and /health return 200 OK with status ok.
+func TestHealthEndpoints(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	endpoints := []string{
+		"/api/v1/health",
+		"/healthz",
+		"/health",
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint, func(t *testing.T) {
+			resp, body := doRequest(t, client, http.MethodGet, baseURL+endpoint, nil, nil)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200 OK for %s, got %d", endpoint, resp.StatusCode)
+			}
+			if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+				t.Errorf("expected application/json, got %s", ct)
+			}
+			res := decodeJSON[map[string]string](t, body)
+			if res["status"] != "ok" {
+				t.Errorf("expected status 'ok', got %q", res["status"])
+			}
+		})
+	}
+}

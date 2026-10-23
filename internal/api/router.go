@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -91,6 +92,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	mux := http.NewServeMux()
 
+	registerHealthRoutes(mux)
 	registerProfileRoutes(mux, cfg)
 	registerPresetRoutes(mux, cfg)
 	registerTemplateRoutes(mux, cfg)
@@ -104,4 +106,18 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	handler = CORSMiddleware(handler)
 
 	return handler
+}
+
+func registerHealthRoutes(mux *http.ServeMux) {
+	healthHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+		})
+	}
+
+	mux.HandleFunc("GET /api/v1/health", healthHandler)
+	mux.HandleFunc("GET /healthz", healthHandler)
+	mux.HandleFunc("GET /health", healthHandler)
 }

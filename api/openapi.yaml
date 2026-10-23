@@ -21,8 +21,30 @@ tags:
     description: Tier-2 reusable instruction presets and database-stored Go template sets
   - name: Branches & Versions
     description: Tier-3 tailored resume lines, asynchronous generation, and immutable version snapshots
+  - name: System
+    description: Service health, liveness probes, and diagnostics
 
 paths:
+  /health:
+    get:
+      tags:
+        - System
+      summary: Service health check
+      description: Returns service liveness and operational health status.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy and operational
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: ok
   /profile:
     get:
       tags:
