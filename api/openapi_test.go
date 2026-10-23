@@ -1,0 +1,95 @@
+package api_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestOpenAPISpecificationIntegrity(t *testing.T) {
+	specPath := filepath.Join(".", "openapi.yaml")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("failed to read OpenAPI spec at %s: %v", specPath, err)
+	}
+
+	content := string(data)
+	if len(content) == 0 {
+		t.Fatalf("OpenAPI spec is empty")
+	}
+
+	// Verify OpenAPI 3.1.0 version header
+	if !strings.Contains(content, "openapi: 3.1.0") {
+		t.Errorf("spec does not specify openapi: 3.1.0")
+	}
+
+	// Verify server prefix
+	if !strings.Contains(content, "url: /api/v1") {
+		t.Errorf("spec does not specify /api/v1 server url")
+	}
+
+	// Verify key endpoints discovered from design doc Section 5
+	expectedEndpoints := []string{
+		"/profile:",
+		"/profile/full:",
+		"/profile/jsonresume/import:",
+		"/profile/jsonresume/export:",
+		"/skills:",
+		"/skills/{id}:",
+		"/experiences:",
+		"/experiences/{id}:",
+		"/projects:",
+		"/projects/{id}:",
+		"/education:",
+		"/education/{id}:",
+		"/certifications:",
+		"/certifications/{id}:",
+		"/facts:",
+		"/facts/{id}:",
+		"/presets:",
+		"/presets/{id}:",
+		"/templates:",
+		"/templates/{id}:",
+		"/branches:",
+		"/branches/{id}:",
+		"/branches/{id}/generate:",
+		"/branches/sync:",
+		"/branches/{id}/versions:",
+		"/branches/{id}/versions/{v}:",
+		"/branches/{id}/versions/{v}/export:",
+		"/branches/{id}/versions/{v}/edit:",
+	}
+
+	for _, endpoint := range expectedEndpoints {
+		if !strings.Contains(content, endpoint) {
+			t.Errorf("spec is missing documented endpoint: %s", endpoint)
+		}
+	}
+
+	// Verify key schemas and error envelopes
+	expectedSchemas := []string{
+		"ErrorResponse:",
+		"ErrorDetail:",
+		"Profile:",
+		"Skill:",
+		"WorkExperience:",
+		"Project:",
+		"Education:",
+		"Certification:",
+		"Fact:",
+		"Preset:",
+		"TemplateSet:",
+		"Branch:",
+		"BranchVersion:",
+		"AsyncJobEnqueued:",
+		"SyncBranchesResponse:",
+		"EditVersionRequest:",
+	}
+
+	for _, schema := range expectedSchemas {
+		if !strings.Contains(content, schema) {
+			t.Errorf("spec is missing required component schema: %s", schema)
+		}
+	}
+}
