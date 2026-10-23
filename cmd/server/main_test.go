@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"net"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -10,10 +12,22 @@ import (
 	"resumeee/internal/repository/sqlite"
 )
 
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	_ = l.Close()
+	return port
+}
+
 func TestRunGracefulShutdown(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	t.Setenv("DB_PATH", dbPath)
+	t.Setenv("PORT", freePort(t))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -57,6 +71,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "recover.db")
 	t.Setenv("DB_PATH", dbPath)
+	t.Setenv("PORT", freePort(t))
 
 	// Pre-create database with an in-flight branch version
 	db, err := sqlite.New(dbPath)
