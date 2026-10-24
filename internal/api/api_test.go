@@ -966,3 +966,32 @@ func TestHealthEndpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestFactHandlers_OwnerValidation(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	// 1. Invalid OwnerType
+	badTypeReq := api.CreateFactRequest{
+		OwnerID:   "exp-123",
+		OwnerType: domain.OwnerType("department"),
+		Statement: "Led quarterly OKR reviews.",
+	}
+	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/facts", badTypeReq, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for invalid owner_type, got %d (body: %s)", resp.StatusCode, string(body))
+	}
+
+	// 2. Non-existent OwnerID
+	nonExistentOwnerReq := api.CreateFactRequest{
+		OwnerID:   "exp-non-existent-999",
+		OwnerType: domain.OwnerTypeWorkExperience,
+		Statement: "Led quarterly OKR reviews.",
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/facts", nonExistentOwnerReq, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for non-existent owner_id, got %d (body: %s)", resp.StatusCode, string(body))
+	}
+}
+

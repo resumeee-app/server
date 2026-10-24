@@ -34,7 +34,7 @@ func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req doma
 	if req.MasterProfile != nil {
 		profile = &req.MasterProfile.Profile
 	}
-	provider, model, err := a.registry.Resolve(req, nil, profile)
+	provider, model, err := a.registry.Resolve(req, req.Preset, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +124,9 @@ func run(parent context.Context) error {
 		Renderer:     templateRenderer,
 		Logger:       logger,
 	})
+	if err := workerPool.RecoverStaleJobs(ctx, "server restarted during job processing"); err != nil {
+		logger.Warn("failed to recover stale jobs", "err", err)
+	}
 	workerPool.Start(ctx)
 	defer workerPool.Stop()
 
@@ -185,8 +188,6 @@ func run(parent context.Context) error {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("http server graceful shutdown: %w", err)
 	}
-
-	workerPool.Stop()
 
 	logger.Info("server shutdown complete")
 	return nil

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -1103,6 +1104,27 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 
 	if req.OwnerID == "" || req.OwnerType == "" || req.Statement == "" {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "owner_id, owner_type, and statement are required", "")
+		return
+	}
+
+	switch req.OwnerType {
+	case domain.OwnerTypeWorkExperience:
+		if _, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, req.OwnerID); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
+			return
+		}
+	case domain.OwnerTypeProject:
+		if _, err := h.cfg.ProfileRepo.GetProject(ctx, userID, req.OwnerID); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
+			return
+		}
+	case domain.OwnerTypeEducation:
+		if _, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, req.OwnerID); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("invalid owner_type: %q", req.OwnerType), "")
 		return
 	}
 
