@@ -21,6 +21,9 @@ import (
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/ui"
+	uiClient "resumeee/internal/ui/client"
+	uiConfig "resumeee/internal/ui/config"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -143,7 +146,7 @@ func run(parent context.Context) error {
 	})
 
 	// 7. Build API router with /api/v1 routes and middlewares
-	router := api.NewRouter(api.RouterConfig{
+	apiRouter := api.NewRouter(api.RouterConfig{
 		ProfileRepo:    profileRepo,
 		PresetRepo:     presetRepo,
 		TemplateRepo:   templateRepo,
@@ -157,9 +160,22 @@ func run(parent context.Context) error {
 		Logger:         logger,
 	})
 
+	// 8. Build Web UI handler with in-process API client
+	uiCfg, err := uiConfig.Load()
+	if err != nil {
+		return fmt.Errorf("loading ui configuration: %w", err)
+	}
+	uiCfg.Environment = cfg.Environment
+
+	apiClient := uiClient.NewInProcess(apiRouter)
+	uiHandler := ui.NewServer(uiCfg, apiClient, logger)
+
+	// 9. Unify API and UI routes under single root router
+	rootHandler := buildRootHandler(apiRouter, uiHandler)
+
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           router,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -191,4 +207,31 @@ func run(parent context.Context) error {
 
 	logger.Info("server shutdown complete")
 	return nil
+}
+
+// buildRootHandler unifies the API router and Web UI server into a single http.Handler.
+// - /api/v1/... and health endpoints are dispatched to the API router.
+// - /web/... and static assets are dispatched to the Web UI handler.
+// - Root path (/) issues a 302 Found redirect to /web.
+func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler) http.Handler {
+	rootMux := http.NewServeMux()
+
+	// API and health routes
+	rootMux.Handle("/api/v1/", apiRouter)
+	rootMux.Handle("GET /healthz", apiRouter)
+	rootMux.Handle("GET /health", apiRouter)
+
+	// Root path redirect to /web
+	rootMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web", http.StatusFound)
+	})
+
+	// Web UI routes
+	rootMux.Handle("/web/", uiHandler)
+	rootMux.Handle("/web", uiHandler)
+
+	// Static asset backward-compatibility alias
+	rootMux.Handle("/static/", uiHandler)
+
+	return rootMux
 }

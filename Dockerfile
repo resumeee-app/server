@@ -64,22 +64,20 @@ ENV PORT=8080 \
     WORKER_CONCURRENCY=2 \
     WORKER_QUEUE_SIZE=100 \
     ENV=production \
-    LOG_LEVEL=INFO \
-    RESUMEEE_WEB_PORT=3000 \
-    RESUMEEE_API_URL=http://localhost:8080/api/v1
+    LOG_LEVEL=INFO
 
 # Drop root privileges immediately
 USER 10001:10001
 
-# Expose standard API server (8080) and web UI (3000) ports
-EXPOSE 8080 3000
+# Expose unified server port (8080)
+EXPOSE 8080
 
 # Persistent SQLite database volume
 VOLUME ["/data"]
 
-# Healthcheck monitoring server or web
+# Healthcheck monitoring unified server
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || curl -f http://localhost:${RESUMEEE_WEB_PORT:-3000}/healthz || exit 1
+    CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["server"]
