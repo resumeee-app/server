@@ -2,7 +2,7 @@
 # ==============================================================================
 # Stage 1: Hermetic Go Builder
 # ==============================================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Install build prerequisites
 RUN apk add --no-cache git ca-certificates tzdata
