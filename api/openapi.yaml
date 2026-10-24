@@ -838,6 +838,8 @@ paths:
                 $ref: '#/components/schemas/Preset'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -850,6 +852,8 @@ paths:
       responses:
         '204':
           description: Preset deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1281,6 +1285,17 @@ components:
             error:
               code: NOT_FOUND
               message: Resource with specified ID was not found
+
+    Forbidden:
+      description: Action is forbidden (e.g. attempting to modify or delete built-in system presets)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: FORBIDDEN
+              message: Built-in system presets cannot be modified or deleted
 
     TemplateValidationError:
       description: Go template failed syntax or security validation
@@ -2023,6 +2038,10 @@ components:
           type: string
         include_admin_fields:
           type: boolean
+        is_built_in:
+          type: boolean
+          description: Whether this is a system-provided built-in preset
+          readOnly: true
         created_at:
           type: string
           format: date-time
