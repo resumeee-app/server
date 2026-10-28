@@ -157,6 +157,71 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /profile/pdf/parse:
+    post:
+      tags:
+        - Master Profile
+      summary: Parse PDF resume using LLM
+      description: Extracts raw text from an uploaded PDF resume (max 10MB) and invokes structured LLM extraction into candidate JSON Resume format for interactive staging and review.
+      operationId: parsePDFResume
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Binary PDF resume file to parse (max 10MB)
+                provider:
+                  type: string
+                  description: Optional LLM provider override
+                model:
+                  type: string
+                  description: Optional LLM model override
+      responses:
+        '200':
+          description: Successfully parsed PDF into candidate JSON Resume
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Candidate JSON Resume draft
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /profile/pdf/commit:
+    post:
+      tags:
+        - Master Profile
+      summary: Commit reviewed PDF resume into Master Profile
+      description: Ingests verified/edited JSON Resume draft, updates the Master Profile career graph, initializes profile for new users if not previously present, and increments master_revision.
+      operationId: commitPDFResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Standard JSON Resume compliant object
+      responses:
+        '200':
+          description: Successfully committed resume into Master Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterProfileSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /skills:
     get:
       tags:

@@ -18,6 +18,7 @@ import (
 	"resumeee/internal/config"
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
+	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
@@ -147,17 +148,19 @@ func run(parent context.Context) error {
 
 	// 7. Build API router with /api/v1 routes and middlewares
 	apiRouter := api.NewRouter(api.RouterConfig{
-		ProfileRepo:    profileRepo,
-		PresetRepo:     presetRepo,
-		TemplateRepo:   templateRepo,
-		BranchRepo:     branchRepo,
-		BranchService:  branchSvc,
-		ProfileService: profileSvc,
-		Renderer:       templateRenderer,
-		Validator:      provValidator,
-		JobEnqueuer:    workerPool,
-		DefaultUserID:  cfg.DefaultUserID,
-		Logger:         logger,
+		ProfileRepo:     profileRepo,
+		PresetRepo:      presetRepo,
+		TemplateRepo:    templateRepo,
+		BranchRepo:      branchRepo,
+		BranchService:   branchSvc,
+		ProfileService:  profileSvc,
+		PDFExtractor:    pdf.NewExtractor(),
+		ResumeExtractor: llm.NewDefaultResumeExtractor(llmRegistry),
+		Renderer:        templateRenderer,
+		Validator:       provValidator,
+		JobEnqueuer:     workerPool,
+		DefaultUserID:   cfg.DefaultUserID,
+		Logger:          logger,
 	})
 
 	// 8. Build Web UI handler with in-process API client

@@ -36,6 +36,8 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"/profile/full:",
 		"/profile/jsonresume/import:",
 		"/profile/jsonresume/export:",
+		"/profile/pdf/parse:",
+		"/profile/pdf/commit:",
 		"/skills:",
 		"/skills/{id}:",
 		"/experiences:",

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,8 @@ import (
 
 	"resumeee/internal/api"
 	"resumeee/internal/domain"
+	"resumeee/internal/llm"
+	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
@@ -993,5 +997,369 @@ func TestFactHandlers_OwnerValidation(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request for non-existent owner_id, got %d (body: %s)", resp.StatusCode, string(body))
 	}
+}
+
+func buildTestPDF(text string) []byte {
+	stream := fmt.Sprintf("BT\n/F1 12 Tf\n100 700 Td\n(%s) Tj\nET", text)
+	body := fmt.Sprintf("%%PDF-1.4\n"+
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"+
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"+
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"+
+		"4 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n"+
+		"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+		len(stream), stream)
+
+	off1 := 9
+	off2 := off1 + len("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	off3 := off2 + len("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+	off4 := off3 + len("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n")
+	off5 := off4 + len(fmt.Sprintf("4 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(stream), stream))
+	startXref := len(body)
+
+	xrefAndTrailer := fmt.Sprintf("xref\n0 6\n0000000000 65535 f \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF",
+		off1, off2, off3, off4, off5, startXref)
+
+	return []byte(body + xrefAndTrailer)
+}
+
+func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtractor) *testEnv {
+	t.Helper()
+
+	db, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to initialize sqlite: %v", err)
+	}
+
+	ctx := context.Background()
+	defaultUserID := "default"
+	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
+		t.Fatalf("failed to seed default data: %v", err)
+	}
+
+	profileRepo := sqlite.NewProfileRepository(db)
+	presetRepo := sqlite.NewPresetRepository(db)
+	templateRepo := sqlite.NewTemplateRepository(db)
+	branchRepo := sqlite.NewBranchRepository(db)
+	profileSvc := profile.NewService(profileRepo, branchRepo)
+	templateRenderer := renderer.NewTemplateRenderer()
+	provValidator := validator.New()
+	enqueuer := api.NewChannelJobEnqueuer(100)
+
+	router := api.NewRouter(api.RouterConfig{
+		ProfileRepo:     profileRepo,
+		PresetRepo:      presetRepo,
+		TemplateRepo:    templateRepo,
+		BranchRepo:      branchRepo,
+		ProfileService:  profileSvc,
+		PDFExtractor:    pdf.NewExtractor(),
+		ResumeExtractor: resumeExtractor,
+		Renderer:        templateRenderer,
+		Validator:       provValidator,
+		JobEnqueuer:     enqueuer,
+		DefaultUserID:   defaultUserID,
+	})
+
+	server := httptest.NewServer(router)
+	t.Cleanup(func() {
+		server.Close()
+	})
+
+	return &testEnv{
+		server:       server,
+		db:           db,
+		profileRepo:  profileRepo,
+		presetRepo:   presetRepo,
+		templateRepo: templateRepo,
+		branchRepo:   branchRepo,
+		profileSvc:   profileSvc,
+		enqueuer:     enqueuer,
+	}
+}
+
+func TestProfilePDF_Parse(t *testing.T) {
+	mockResume := &profile.JSONResume{
+		Basics: profile.JSONResumeBasics{
+			Name:    "Morgan BrandNew",
+			Email:   "morgan@brandnew.dev",
+			Summary: "Full-Stack Engineer with 5 years experience.",
+		},
+		Skills: []profile.JSONResumeSkill{
+			{Name: "Go", Level: "Expert"},
+			{Name: "PostgreSQL", Level: "Senior"},
+		},
+		Work: []profile.JSONResumeWork{
+			{
+				Name:       "BrandNew Tech",
+				Position:   "Senior Developer",
+				StartDate:  "2022-01-01",
+				Summary:    "Built cloud platforms.",
+				Highlights: []string{"Reduced latency by 50%"},
+			},
+		},
+	}
+
+	mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		data, _ := json.Marshal(mockResume)
+		return string(data), nil
+	}))
+
+	env := setupTestServerWithExtractor(t, mockExtractor)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	t.Run("Missing file field returns 400 Bad Request", func(t *testing.T) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("provider", "mock")
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Empty file returns 400 Bad Request", func(t *testing.T) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, _ := mw.CreateFormFile("file", "empty.pdf")
+		_, _ = part.Write([]byte{})
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Corrupted PDF returns 400 Bad Request", func(t *testing.T) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, _ := mw.CreateFormFile("file", "corrupt.pdf")
+		_, _ = part.Write([]byte("not a valid pdf file"))
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Valid PDF parses and returns JSONResume draft", func(t *testing.T) {
+		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.WriteField("provider", "mock")
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+
+		var parsed profile.JSONResume
+		if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if parsed.Basics.Name != "Morgan BrandNew" {
+			t.Errorf("expected name 'Morgan BrandNew', got: %q", parsed.Basics.Name)
+		}
+		if len(parsed.Skills) != 2 {
+			t.Errorf("expected 2 skills, got: %d", len(parsed.Skills))
+		}
+		if len(parsed.Work) != 1 || parsed.Work[0].GetCompany() != "BrandNew Tech" {
+			t.Errorf("expected 1 work at BrandNew Tech, got: %+v", parsed.Work)
+		}
+	})
+}
+
+func TestProfilePDF_Commit(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	candidateJSON := `{
+		"basics": {
+			"name": "Morgan BrandNew",
+			"email": "morgan@brandnew.dev",
+			"phone": "+1-555-4321",
+			"summary": "Full-Stack Engineer with 5 years experience.",
+			"location": {
+				"city": "Austin",
+				"region": "TX",
+				"countryCode": "US"
+			}
+		},
+		"skills": [
+			{"name": "Go", "level": "Expert"},
+			{"name": "PostgreSQL", "level": "Senior"}
+		],
+		"work": [
+			{
+				"name": "BrandNew Tech",
+				"position": "Senior Developer",
+				"startDate": "2022-01-01",
+				"summary": "Built cloud platforms.",
+				"highlights": ["Reduced latency by 50%"]
+			}
+		],
+		"education": [
+			{
+				"institution": "UT Austin",
+				"area": "Computer Science",
+				"studyType": "B.S.",
+				"startDate": "2016-09-01",
+				"endDate": "2020-05-01"
+			}
+		],
+		"projects": [
+			{
+				"name": "CloudEngine",
+				"description": "Distributed task queue in Go",
+				"highlights": ["Zero dependencies"]
+			}
+		]
+	}`
+
+	t.Run("Empty payload returns 400 Bad Request", func(t *testing.T) {
+		resp, _ := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/profile/pdf/commit", []byte{}, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Malformed JSON returns 400 Bad Request", func(t *testing.T) {
+		resp, _ := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/profile/pdf/commit", []byte("{not json"), nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Valid commit for existing user updates profile and increments revision", func(t *testing.T) {
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/profile/pdf/commit", []byte(candidateJSON), nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+
+		var snap domain.MasterProfileSnapshot
+		if err := json.Unmarshal(body, &snap); err != nil {
+			t.Fatalf("failed to decode snapshot: %v", err)
+		}
+
+		if snap.Profile.FullName != "Morgan BrandNew" {
+			t.Errorf("expected FullName 'Morgan BrandNew', got: %q", snap.Profile.FullName)
+		}
+		if snap.MasterRevision < 2 {
+			t.Errorf("expected MasterRevision >= 2, got: %d", snap.MasterRevision)
+		}
+		if len(snap.Skills) != 2 {
+			t.Errorf("expected 2 skills, got: %d", len(snap.Skills))
+		}
+		if len(snap.Experiences) != 1 {
+			t.Errorf("expected 1 experience, got: %d", len(snap.Experiences))
+		}
+	})
+
+	t.Run("Valid commit for NEW user who has never filled anything initializes master resume", func(t *testing.T) {
+		newUserID := "new-user-fresh-9999"
+		headers := map[string]string{
+			"X-User-ID": newUserID,
+		}
+
+		// 1. Commit draft to brand new user
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/profile/pdf/commit", []byte(candidateJSON), headers)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200 for new user commit, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+
+		var snap domain.MasterProfileSnapshot
+		if err := json.Unmarshal(body, &snap); err != nil {
+			t.Fatalf("failed to decode snapshot: %v", err)
+		}
+
+		if snap.Profile.FullName != "Morgan BrandNew" {
+			t.Errorf("expected FullName 'Morgan BrandNew', got: %q", snap.Profile.FullName)
+		}
+		if snap.Profile.Email != "morgan@brandnew.dev" {
+			t.Errorf("expected Email 'morgan@brandnew.dev', got: %q", snap.Profile.Email)
+		}
+		if snap.MasterRevision != 1 {
+			t.Errorf("expected MasterRevision 1 for fresh user, got: %d", snap.MasterRevision)
+		}
+		if len(snap.Skills) != 2 {
+			t.Errorf("expected 2 skills, got: %d", len(snap.Skills))
+		}
+		if len(snap.Experiences) != 1 {
+			t.Errorf("expected 1 experience, got: %d", len(snap.Experiences))
+		}
+		if len(snap.Education) != 1 {
+			t.Errorf("expected 1 education, got: %d", len(snap.Education))
+		}
+		if len(snap.Projects) != 1 {
+			t.Errorf("expected 1 project, got: %d", len(snap.Projects))
+		}
+
+		// 2. Query GET /api/v1/profile for this new user to ensure master profile is fully persisted
+		getResp, getBody := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile", nil, headers)
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for GET /profile on new user, got %d (body: %s)", getResp.StatusCode, string(getBody))
+		}
+		var prof domain.Profile
+		if err := json.Unmarshal(getBody, &prof); err != nil {
+			t.Fatalf("failed to decode profile: %v", err)
+		}
+		if prof.FullName != "Morgan BrandNew" {
+			t.Errorf("expected FullName 'Morgan BrandNew', got: %q", prof.FullName)
+		}
+		if prof.MasterRevision != 1 {
+			t.Errorf("expected MasterRevision 1, got: %d", prof.MasterRevision)
+		}
+	})
 }
 

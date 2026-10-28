@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,8 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("GET /api/v1/profile/full", h.getFullProfile)
 	mux.HandleFunc("POST /api/v1/profile/jsonresume/import", h.importJSONResume)
 	mux.HandleFunc("GET /api/v1/profile/jsonresume/export", h.exportJSONResume)
+	mux.HandleFunc("POST /api/v1/profile/pdf/parse", h.parsePDFResume)
+	mux.HandleFunc("POST /api/v1/profile/pdf/commit", h.commitPDFResume)
 
 	// Skills
 	mux.HandleFunc("GET /api/v1/skills", h.listSkills)
@@ -375,6 +378,104 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, resume)
+}
+
+func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// 10 MB maximum upload size
+	const maxUploadSize = 10 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "file exceeds maximum allowed size (10MB) or invalid form data", err.Error())
+		return
+	}
+
+	file, fileHeader, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "missing required 'file' form field", err.Error())
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	provider := strings.TrimSpace(r.FormValue("provider"))
+	model := strings.TrimSpace(r.FormValue("model"))
+
+	fileSize := fileHeader.Size
+	if fileSize <= 0 {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty file uploaded", "")
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "failed to read uploaded file", err.Error())
+		return
+	}
+
+	readerAt := bytes.NewReader(data)
+	text, err := h.cfg.PDFExtractor.ExtractText(ctx, readerAt, int64(len(data)))
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	if h.cfg.ResumeExtractor == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "LLM resume extractor not configured", "")
+		return
+	}
+
+	extracted, err := h.cfg.ResumeExtractor.ExtractResume(ctx, text, provider, model)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "failed to extract structured resume: "+err.Error(), "")
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, extracted)
+}
+
+func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+
+	if r.Body == nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty request body", "")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	payload, err := io.ReadAll(r.Body)
+	if err != nil || len(payload) == 0 {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty or unreadable payload", "")
+		return
+	}
+
+	var testMap map[string]any
+	if err := json.Unmarshal(payload, &testMap); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed JSON payload", err.Error())
+		return
+	}
+
+	snap, err := h.cfg.ProfileService.ImportJSONResume(ctx, userID, payload)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid JSON Resume payload", err.Error())
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, snap)
 }
 
 // --- Skills Handlers ---

@@ -95,6 +95,10 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 			hasBody := r.ContentLength > 0 || r.Header.Get("Transfer-Encoding") != ""
 			if hasBody {
 				ct := r.Header.Get("Content-Type")
+				if strings.Contains(strings.ToLower(ct), "multipart/form-data") && strings.HasSuffix(r.URL.Path, "/pdf/parse") {
+					next.ServeHTTP(w, r)
+					return
+				}
 				if ct == "" || !strings.Contains(strings.ToLower(ct), "application/json") {
 					writeError(w, http.StatusBadRequest, CodeInvalidRequest, "Content-Type must be application/json", "")
 					return

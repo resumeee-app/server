@@ -8,6 +8,8 @@ import (
 
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
+	"resumeee/internal/llm"
+	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
@@ -48,17 +50,19 @@ func (e *ChannelJobEnqueuer) Channel() <-chan worker.GenerationJob {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileRepo    domain.ProfileRepository
-	PresetRepo     domain.PresetRepository
-	TemplateRepo   domain.TemplateRepository
-	BranchRepo     domain.BranchRepository
-	BranchService  branch.Service
-	ProfileService profile.Service
-	Renderer       domain.TemplateRenderer
-	Validator      validator.ProvenanceValidator
-	JobEnqueuer    JobEnqueuer
-	DefaultUserID  string
-	Logger         *slog.Logger
+	ProfileRepo     domain.ProfileRepository
+	PresetRepo      domain.PresetRepository
+	TemplateRepo    domain.TemplateRepository
+	BranchRepo      domain.BranchRepository
+	BranchService   branch.Service
+	ProfileService  profile.Service
+	PDFExtractor    pdf.PDFTextExtractor
+	ResumeExtractor llm.ResumeExtractor
+	Renderer        domain.TemplateRenderer
+	Validator       validator.ProvenanceValidator
+	JobEnqueuer     JobEnqueuer
+	DefaultUserID   string
+	Logger          *slog.Logger
 }
 
 func getUserID(r *http.Request, defaultID string) string {
@@ -75,6 +79,12 @@ func getUserID(r *http.Request, defaultID string) string {
 func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.DefaultUserID == "" {
 		cfg.DefaultUserID = "default"
+	}
+	if cfg.PDFExtractor == nil {
+		cfg.PDFExtractor = pdf.NewExtractor()
+	}
+	if cfg.ResumeExtractor == nil {
+		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
 	}
 
 	if cfg.BranchService == nil && cfg.BranchRepo != nil {
