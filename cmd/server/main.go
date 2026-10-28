@@ -177,15 +177,16 @@ func run(parent context.Context) error {
 	// 9. Unify API and UI routes under single root router
 	rootHandler := buildRootHandler(apiRouter, uiHandler)
 
+	const defaultServerWriteTimeout = 10*time.Minute + 30*time.Second
 	writeTimeout := uiCfg.ClientTimeout
-	if writeTimeout <= 0 {
-		writeTimeout = uiConfig.DefaultClientTimeout
+	if writeTimeout < defaultServerWriteTimeout {
+		writeTimeout = defaultServerWriteTimeout
 	}
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
 		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
+		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       writeTimeout * 2,
 	}

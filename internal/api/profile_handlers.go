@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -383,8 +384,12 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resume)
 }
 
+// DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
+const DefaultPDFParseTimeout = 10 * time.Minute
+
 func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), DefaultPDFParseTimeout)
+	defer cancel()
 
 	// 10 MB maximum upload size
 	const maxUploadSize = 10 << 20
@@ -511,6 +516,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 			logMsg = "upstream LLM request timed out"
 			statusCode = http.StatusGatewayTimeout
 			errorCode = CodeUpstreamError
+			respMsg = "upstream LLM parsing timed out after 10 minutes"
 		case errors.Is(err, domain.ErrValidation):
 			logLevel = slog.LevelWarn
 			logMsg = "failed to extract structured resume validation error"

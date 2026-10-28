@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"resumeee/internal/api"
 	"resumeee/internal/domain"
@@ -1222,6 +1223,52 @@ func TestProfilePDF_Parse(t *testing.T) {
 		}
 		if len(parsed.Work) != 1 || parsed.Work[0].GetCompany() != "BrandNew Tech" {
 			t.Errorf("expected 1 work at BrandNew Tech, got: %+v", parsed.Work)
+		}
+	})
+
+	t.Run("Context deadline is enforced to 10 minutes", func(t *testing.T) {
+		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+		var capturedDeadline time.Time
+		var hasDeadline bool
+
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			capturedDeadline, hasDeadline = ctx.Deadline()
+			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+		}))
+
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+
+		if !hasDeadline {
+			t.Fatalf("expected extractor context to have a deadline")
+		}
+
+		remaining := time.Until(capturedDeadline)
+		if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute {
+			t.Fatalf("expected deadline around 10 minutes, got %v", remaining)
 		}
 	})
 }
