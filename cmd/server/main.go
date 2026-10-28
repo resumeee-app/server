@@ -112,7 +112,7 @@ func run(parent context.Context) error {
 	provValidator := validator.New()
 
 	// 4. Initialize LLM registry and service adapter
-	llmRegistry := llm.NewRegistry(cfg)
+	llmRegistry := llm.NewRegistry(cfg, llm.WithLogger(logger))
 	llmAdapter := &llmServiceAdapter{registry: llmRegistry}
 
 	// 5. Initialize and start asynchronous generation worker pool
