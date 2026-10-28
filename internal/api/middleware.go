@@ -39,13 +39,23 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rec, r)
 
 			if logger != nil {
-				logger.Info("http request",
-					"method", r.Method,
-					"path", r.URL.Path,
-					"status", rec.statusCode,
-					"duration_ms", time.Since(start).Milliseconds(),
-					"remote_addr", r.RemoteAddr,
-				)
+				if rec.statusCode >= 500 {
+					logger.Error("http request",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", rec.statusCode,
+						"duration_ms", time.Since(start).Milliseconds(),
+						"remote_addr", r.RemoteAddr,
+					)
+				} else {
+					logger.Info("http request",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", rec.statusCode,
+						"duration_ms", time.Since(start).Milliseconds(),
+						"remote_addr", r.RemoteAddr,
+					)
+				}
 			}
 		})
 	}

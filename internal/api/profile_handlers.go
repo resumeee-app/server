@@ -2,16 +2,19 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"resumeee/internal/domain"
+	"resumeee/internal/llm"
 )
 
 type profileHandler struct {
@@ -388,12 +391,26 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			if h.cfg.Logger != nil {
+				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxUploadSize, "error", err)
+			}
+			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
+			return
+		}
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.WarnContext(ctx, "failed to parse multipart form for pdf upload", "error", err)
+		}
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "file exceeds maximum allowed size (10MB) or invalid form data", err.Error())
 		return
 	}
 
 	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.WarnContext(ctx, "missing required 'file' form field", "error", err)
+		}
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "missing required 'file' form field", err.Error())
 		return
 	}
@@ -404,12 +421,26 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 
 	fileSize := fileHeader.Size
 	if fileSize <= 0 {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.WarnContext(ctx, "empty file uploaded", "filename", fileHeader.Filename)
+		}
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty file uploaded", "")
 		return
 	}
 
 	data, err := io.ReadAll(file)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			if h.cfg.Logger != nil {
+				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxUploadSize, "error", err)
+			}
+			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
+			return
+		}
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.ErrorContext(ctx, "failed to read uploaded file", "filename", fileHeader.Filename, "error", err)
+		}
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "failed to read uploaded file", err.Error())
 		return
 	}
@@ -418,28 +449,97 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	text, err := h.cfg.PDFExtractor.ExtractText(ctx, readerAt, int64(len(data)))
 	if err != nil {
 		if errors.Is(err, domain.ErrValidation) {
+			if h.cfg.Logger != nil {
+				h.cfg.Logger.WarnContext(ctx, "pdf text extraction validation failed", "filename", fileHeader.Filename, "error", err)
+			}
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 			return
+		}
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.ErrorContext(ctx, "unexpected pdf extraction error", "filename", fileHeader.Filename, "error", err)
 		}
 		writeDomainError(w, err)
 		return
 	}
 
 	if h.cfg.ResumeExtractor == nil {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.ErrorContext(ctx, "LLM resume extractor not configured", "filename", fileHeader.Filename)
+		}
 		writeError(w, http.StatusInternalServerError, CodeInternalError, "LLM resume extractor not configured", "")
 		return
 	}
 
 	extracted, err := h.cfg.ResumeExtractor.ExtractResume(ctx, text, provider, model)
 	if err != nil {
-		if errors.Is(err, domain.ErrValidation) {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "failed to extract structured resume: "+err.Error(), "")
-			return
+		logLevel := slog.LevelError
+		var (
+			logMsg     string
+			statusCode int
+			errorCode  string
+			respMsg    string
+		)
+
+		switch {
+		case errors.Is(err, llm.ErrNoProviders):
+			logMsg = "no LLM provider configured on server"
+			statusCode = http.StatusServiceUnavailable
+			errorCode = CodeServiceUnavailable
+		case errors.Is(err, llm.ErrUnauthorized):
+			logMsg = "upstream LLM provider authentication failed"
+			statusCode = http.StatusBadGateway
+			errorCode = CodeUpstreamError
+		case errors.Is(err, llm.ErrRateLimited):
+			logMsg = "upstream LLM provider rate limit exceeded"
+			statusCode = http.StatusTooManyRequests
+			errorCode = CodeUpstreamError
+			respMsg = "upstream LLM provider rate limit exceeded; retry shortly"
+		case errors.Is(err, llm.ErrUpstream):
+			logMsg = "upstream LLM provider returned server error"
+			statusCode = http.StatusBadGateway
+			errorCode = CodeUpstreamError
+		case errors.Is(err, llm.ErrInvalidResponse):
+			logMsg = "upstream LLM provider returned invalid response"
+			statusCode = http.StatusBadGateway
+			errorCode = CodeUpstreamError
+		case errors.Is(err, llm.ErrProviderNotFound):
+			logLevel = slog.LevelWarn
+			logMsg = "requested LLM provider not configured"
+			statusCode = http.StatusBadRequest
+			errorCode = CodeInvalidRequest
+		case errors.Is(err, context.DeadlineExceeded):
+			logMsg = "upstream LLM request timed out"
+			statusCode = http.StatusGatewayTimeout
+			errorCode = CodeUpstreamError
+		case errors.Is(err, domain.ErrValidation):
+			logLevel = slog.LevelWarn
+			logMsg = "failed to extract structured resume validation error"
+			statusCode = http.StatusBadRequest
+			errorCode = CodeInvalidRequest
+			respMsg = "failed to extract structured resume: " + err.Error()
+		default:
+			logMsg = "unexpected error during resume extraction"
 		}
-		writeDomainError(w, err)
+
+		if respMsg == "" {
+			respMsg = logMsg
+		}
+
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.Log(ctx, logLevel, logMsg, "error", err, "provider", provider)
+		}
+
+		if statusCode > 0 {
+			writeError(w, statusCode, errorCode, respMsg, "")
+		} else {
+			writeDomainError(w, err)
+		}
 		return
 	}
 
+	if h.cfg.Logger != nil {
+		h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume", "filename", fileHeader.Filename, "provider", provider, "model", model)
+	}
 	writeJSON(w, http.StatusOK, extracted)
 }
 

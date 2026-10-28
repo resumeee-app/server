@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1029,6 +1031,10 @@ func buildTestPDF(text string) []byte {
 }
 
 func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtractor) *testEnv {
+	return setupTestServerWithExtractorAndLogger(t, resumeExtractor, nil)
+}
+
+func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger) *testEnv {
 	t.Helper()
 
 	db, err := sqlite.New(":memory:")
@@ -1063,6 +1069,7 @@ func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtrac
 		Validator:       provValidator,
 		JobEnqueuer:     enqueuer,
 		DefaultUserID:   defaultUserID,
+		Logger:          logger,
 	})
 
 	server := httptest.NewServer(router)
@@ -1215,6 +1222,239 @@ func TestProfilePDF_Parse(t *testing.T) {
 		}
 		if len(parsed.Work) != 1 || parsed.Work[0].GetCompany() != "BrandNew Tech" {
 			t.Errorf("expected 1 work at BrandNew Tech, got: %+v", parsed.Work)
+		}
+	})
+}
+
+func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
+	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+
+	t.Run("Oversized payload returns 413 Payload Too Large", func(t *testing.T) {
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return `{}`, nil
+		}))
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		// Create 11MB body
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "large.pdf")
+		if err != nil {
+			t.Fatalf("failed to create form file: %v", err)
+		}
+		// Write 11 MB of zeros
+		zeros := make([]byte, 11<<20)
+		if _, err := part.Write(zeros); err != nil {
+			t.Fatalf("failed to write zeros: %v", err)
+		}
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected status 413, got %d", resp.StatusCode)
+		}
+
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodePayloadTooLarge {
+			t.Errorf("expected code %s, got %s", api.CodePayloadTooLarge, errResp.Error.Code)
+		}
+	})
+
+	tests := []struct {
+		name           string
+		extractorErr   error
+		expectedStatus int
+		expectedCode   string
+	}{
+		{
+			name:           "ErrNoProviders returns 503 SERVICE_UNAVAILABLE",
+			extractorErr:   llm.ErrNoProviders,
+			expectedStatus: http.StatusServiceUnavailable,
+			expectedCode:   api.CodeServiceUnavailable,
+		},
+		{
+			name:           "ErrUnauthorized returns 502 UPSTREAM_ERROR",
+			extractorErr:   llm.ErrUnauthorized,
+			expectedStatus: http.StatusBadGateway,
+			expectedCode:   api.CodeUpstreamError,
+		},
+		{
+			name:           "ErrRateLimited returns 429 UPSTREAM_ERROR",
+			extractorErr:   llm.ErrRateLimited,
+			expectedStatus: http.StatusTooManyRequests,
+			expectedCode:   api.CodeUpstreamError,
+		},
+		{
+			name:           "ErrUpstream returns 502 UPSTREAM_ERROR",
+			extractorErr:   llm.ErrUpstream,
+			expectedStatus: http.StatusBadGateway,
+			expectedCode:   api.CodeUpstreamError,
+		},
+		{
+			name:           "ErrInvalidResponse returns 502 UPSTREAM_ERROR",
+			extractorErr:   llm.ErrInvalidResponse,
+			expectedStatus: http.StatusBadGateway,
+			expectedCode:   api.CodeUpstreamError,
+		},
+		{
+			name:           "ErrProviderNotFound returns 400 INVALID_REQUEST",
+			extractorErr:   llm.ErrProviderNotFound,
+			expectedStatus: http.StatusBadRequest,
+			expectedCode:   api.CodeInvalidRequest,
+		},
+		{
+			name:           "context.DeadlineExceeded returns 504 UPSTREAM_ERROR",
+			extractorErr:   context.DeadlineExceeded,
+			expectedStatus: http.StatusGatewayTimeout,
+			expectedCode:   api.CodeUpstreamError,
+		},
+		{
+			name:           "domain.ErrValidation returns 400 INVALID_REQUEST",
+			extractorErr:   domain.ErrValidation,
+			expectedStatus: http.StatusBadRequest,
+			expectedCode:   api.CodeInvalidRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+				return "", tc.extractorErr
+			}))
+
+			env := setupTestServerWithExtractor(t, mockExtractor)
+			client := env.server.Client()
+			baseURL := env.server.URL
+
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			part, err := mw.CreateFormFile("file", "resume.pdf")
+			if err != nil {
+				t.Fatalf("create form file failed: %v", err)
+			}
+			_, _ = part.Write(pdfBytes)
+			_ = mw.Close()
+
+			req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+			req.Header.Set("Content-Type", mw.FormDataContentType())
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != tc.expectedStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("expected status %d, got %d (body: %s)", tc.expectedStatus, resp.StatusCode, string(body))
+			}
+
+			var errResp api.ErrorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+				t.Fatalf("failed to decode error response: %v", err)
+			}
+			if errResp.Error.Code != tc.expectedCode {
+				t.Errorf("expected code %s, got %s", tc.expectedCode, errResp.Error.Code)
+			}
+		})
+	}
+
+	t.Run("Unexpected extractor error logs structured ERROR and returns 500", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return "", errors.New("unexpected catastrophic failure")
+		}))
+
+		env := setupTestServerWithExtractorAndLogger(t, mockExtractor, logger)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d", resp.StatusCode)
+		}
+
+		logOutput := logBuf.String()
+		if !strings.Contains(logOutput, "ERROR") {
+			t.Errorf("expected logs to contain ERROR level, got:\n%s", logOutput)
+		}
+		if !strings.Contains(logOutput, "unexpected catastrophic failure") {
+			t.Errorf("expected logs to contain error details, got:\n%s", logOutput)
+		}
+	})
+
+	t.Run("Client error like ErrProviderNotFound logs structured WARN and returns 400", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return "", llm.ErrProviderNotFound
+		}))
+
+		env := setupTestServerWithExtractorAndLogger(t, mockExtractor, logger)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", resp.StatusCode)
+		}
+
+		logOutput := logBuf.String()
+		if !strings.Contains(logOutput, "WARN") {
+			t.Errorf("expected logs to contain WARN level, got:\n%s", logOutput)
+		}
+		if !strings.Contains(logOutput, "requested LLM provider not configured") {
+			t.Errorf("expected logs to contain warning message, got:\n%s", logOutput)
 		}
 	})
 }

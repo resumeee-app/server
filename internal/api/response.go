@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"resumeee/internal/domain"
@@ -16,6 +17,9 @@ const (
 	CodeProvenanceError         = "PROVENANCE_ERROR"
 	CodeQueueFull               = "QUEUE_FULL"
 	CodeInternalError           = "INTERNAL_ERROR"
+	CodePayloadTooLarge         = "PAYLOAD_TOO_LARGE"
+	CodeUpstreamError           = "UPSTREAM_ERROR"
+	CodeServiceUnavailable      = "SERVICE_UNAVAILABLE"
 )
 
 // ErrorDetail describes an error payload in the uniform JSON error envelope.
@@ -77,5 +81,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		return
 	}
 
+	slog.Default().Error("unhandled internal api error", "error", err)
 	writeError(w, http.StatusInternalServerError, CodeInternalError, "an internal error occurred while processing the request", "")
 }
