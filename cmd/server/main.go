@@ -171,19 +171,23 @@ func run(parent context.Context) error {
 	}
 	uiCfg.Environment = cfg.Environment
 
-	apiClient := uiClient.NewInProcess(apiRouter)
+	apiClient := uiClient.NewInProcess(apiRouter, uiClient.WithTimeout(uiCfg.ClientTimeout))
 	uiHandler := ui.NewServer(uiCfg, apiClient, logger)
 
 	// 9. Unify API and UI routes under single root router
 	rootHandler := buildRootHandler(apiRouter, uiHandler)
 
+	writeTimeout := uiCfg.ClientTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = uiConfig.DefaultClientTimeout
+	}
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
 		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       writeTimeout * 2,
 	}
 
 	serverErr := make(chan error, 1)
