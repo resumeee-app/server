@@ -1442,11 +1442,11 @@ components:
           description: LLM provider identifier (e.g. gemini, openai, anthropic, compat)
         model:
           type: string
-          example: gemini-2.5-pro
+          example: gemini-3.8-flash
           description: Specific model name identifier
         display_name:
           type: string
-          example: Google Gemini — gemini-2.5-pro
+          example: Google Gemini — gemini-3.8-flash
           description: Human-readable provider and model label for UI dropdowns
         is_default:
           type: boolean
@@ -1572,7 +1572,7 @@ components:
           default: gemini
         default_model:
           type: string
-          default: gemini-2.5-pro
+          default: gemini-3.8-flash
         master_revision:
           type: integer
           format: int64
