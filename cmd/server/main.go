@@ -159,6 +159,7 @@ func run(parent context.Context) error {
 		Renderer:        templateRenderer,
 		Validator:       provValidator,
 		JobEnqueuer:     workerPool,
+		ModelEnumerator: llmRegistry,
 		DefaultUserID:   cfg.DefaultUserID,
 		Logger:          logger,
 	})

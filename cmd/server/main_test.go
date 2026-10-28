@@ -420,8 +420,8 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 		}
 		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "Purpose Presets") {
-			t.Errorf("expected body to contain 'Purpose Presets'")
+		if !strings.Contains(string(body), "Presets") {
+			t.Errorf("expected body to contain 'Presets'")
 		}
 	})
 

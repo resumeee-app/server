@@ -48,6 +48,11 @@ func (e *ChannelJobEnqueuer) Channel() <-chan worker.GenerationJob {
 	return e.ch
 }
 
+// ModelEnumerator defines the interface for enumerating available configured LLM models.
+type ModelEnumerator interface {
+	AvailableModels() []domain.ModelOption
+}
+
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
 	ProfileRepo     domain.ProfileRepository
@@ -61,6 +66,7 @@ type RouterConfig struct {
 	Renderer        domain.TemplateRenderer
 	Validator       validator.ProvenanceValidator
 	JobEnqueuer     JobEnqueuer
+	ModelEnumerator ModelEnumerator
 	DefaultUserID   string
 	Logger          *slog.Logger
 }
@@ -103,6 +109,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	registerHealthRoutes(mux)
+	registerModelRoutes(mux, cfg)
 	registerProfileRoutes(mux, cfg)
 	registerPresetRoutes(mux, cfg)
 	registerTemplateRoutes(mux, cfg)
@@ -131,3 +138,20 @@ func registerHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /health", healthHandler)
 }
+
+func registerModelRoutes(mux *http.ServeMux, cfg RouterConfig) {
+	modelsHandler := func(w http.ResponseWriter, _ *http.Request) {
+		var models []domain.ModelOption
+		if cfg.ModelEnumerator != nil {
+			models = cfg.ModelEnumerator.AvailableModels()
+		}
+		if models == nil {
+			models = []domain.ModelOption{}
+		}
+		writeJSON(w, http.StatusOK, models)
+	}
+
+	mux.HandleFunc("GET /api/v1/models", modelsHandler)
+	mux.HandleFunc("GET /models", modelsHandler)
+}
+

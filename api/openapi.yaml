@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: >-
     Headless resume tailoring and career graph engine. Provides Master Profile
-    CRUD with transactional atomic revision tracking, reusable purpose presets,
+    CRUD with transactional atomic revision tracking, reusable presets,
     multi-format Go templates (HTML, Markdown, Plain Text), dynamic resume
     branches, asynchronous LLM generation with provenance validation ("No
     Lies"), and rendered artifact exports.
@@ -25,6 +25,25 @@ tags:
     description: Service health, liveness probes, and diagnostics
 
 paths:
+  /models:
+    get:
+      tags:
+        - System
+      summary: List available LLM models
+      description: >-
+        Returns all configured LLM providers and their supported models based on active
+        environment credentials. Only providers with active API keys or endpoints are returned.
+        Zero credential leakage invariant.
+      operationId: listAvailableModels
+      responses:
+        '200':
+          description: List of available model options
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelOption'
   /health:
     get:
       tags:
@@ -1409,6 +1428,30 @@ components:
               message: An internal error occurred while processing the request
 
   schemas:
+    ModelOption:
+      type: object
+      required:
+        - provider
+        - model
+        - display_name
+        - is_default
+      properties:
+        provider:
+          type: string
+          example: gemini
+          description: LLM provider identifier (e.g. gemini, openai, anthropic, compat)
+        model:
+          type: string
+          example: gemini-2.5-pro
+          description: Specific model name identifier
+        display_name:
+          type: string
+          example: Google Gemini — gemini-2.5-pro
+          description: Human-readable provider and model label for UI dropdowns
+        is_default:
+          type: boolean
+          example: true
+          description: Whether this provider/model is configured as the system default
     OwnerType:
       type: string
       enum:

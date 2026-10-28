@@ -32,6 +32,7 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 	// Verify key endpoints discovered from design doc Section 5
 	expectedEndpoints := []string{
 		"/health:",
+		"/models:",
 		"/profile:",
 		"/profile/full:",
 		"/profile/jsonresume/import:",
@@ -74,6 +75,7 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 	expectedSchemas := []string{
 		"ErrorResponse:",
 		"ErrorDetail:",
+		"ModelOption:",
 		"Profile:",
 		"Skill:",
 		"WorkExperience:",

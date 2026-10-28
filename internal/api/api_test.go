@@ -1363,3 +1363,60 @@ func TestProfilePDF_Commit(t *testing.T) {
 	})
 }
 
+type mockModelEnumerator struct {
+	models []domain.ModelOption
+}
+
+func (m *mockModelEnumerator) AvailableModels() []domain.ModelOption {
+	return m.models
+}
+
+func TestModelsHandler_ListAvailableModels(t *testing.T) {
+	mockModels := []domain.ModelOption{
+		{
+			Provider:    "gemini",
+			Model:       "gemini-2.5-pro",
+			DisplayName: "Google Gemini — gemini-2.5-pro",
+			IsDefault:   true,
+		},
+		{
+			Provider:    "openai",
+			Model:       "gpt-4o",
+			DisplayName: "OpenAI — gpt-4o",
+			IsDefault:   false,
+		},
+	}
+
+	router := api.NewRouter(api.RouterConfig{
+		ModelEnumerator: &mockModelEnumerator{models: mockModels},
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	resp, body := doRequest(t, server.Client(), http.MethodGet, server.URL+"/api/v1/models", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	var models []domain.ModelOption
+	if err := json.Unmarshal(body, &models); err != nil {
+		t.Fatalf("failed to decode models: %v", err)
+	}
+
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].Model != "gemini-2.5-pro" || !models[0].IsDefault {
+		t.Errorf("unexpected model[0]: %+v", models[0])
+	}
+
+	// Security audit: check that no secret credentials appear in raw body
+	raw := string(body)
+	for _, forbidden := range []string{"api_key", "apiKey", "secret", "token"} {
+		if strings.Contains(strings.ToLower(raw), forbidden) {
+			t.Fatalf("forbidden credential field %q found in /api/v1/models response: %s", forbidden, raw)
+		}
+	}
+}
+
+
