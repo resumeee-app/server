@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
 )
@@ -102,6 +100,7 @@ type UpdateProfileRequest struct {
 }
 
 type CreateSkillRequest struct {
+	ShortID         string         `json:"short_id,omitempty"`
 	Name            string         `json:"name"`
 	Category        string         `json:"category"`
 	Proficiency     string         `json:"proficiency"`
@@ -111,6 +110,7 @@ type CreateSkillRequest struct {
 }
 
 type UpdateSkillRequest struct {
+	ShortID         *string        `json:"short_id,omitempty"`
 	Name            *string        `json:"name"`
 	Category        *string        `json:"category"`
 	Proficiency     *string        `json:"proficiency"`
@@ -120,6 +120,7 @@ type UpdateSkillRequest struct {
 }
 
 type CreateExperienceRequest struct {
+	ShortID           string                `json:"short_id,omitempty"`
 	Company           string                `json:"company"`
 	RoleTitle         string                `json:"role_title"`
 	EmploymentType    domain.EmploymentType `json:"employment_type"`
@@ -138,6 +139,7 @@ type CreateExperienceRequest struct {
 }
 
 type UpdateExperienceRequest struct {
+	ShortID           *string                `json:"short_id,omitempty"`
 	Company           *string                `json:"company"`
 	RoleTitle         *string                `json:"role_title"`
 	EmploymentType    *domain.EmploymentType `json:"employment_type"`
@@ -156,6 +158,7 @@ type UpdateExperienceRequest struct {
 }
 
 type CreateProjectRequest struct {
+	ShortID   string         `json:"short_id,omitempty"`
 	Name      string         `json:"name"`
 	Role      string         `json:"role"`
 	URL       string         `json:"url"`
@@ -167,6 +170,7 @@ type CreateProjectRequest struct {
 }
 
 type UpdateProjectRequest struct {
+	ShortID   *string        `json:"short_id,omitempty"`
 	Name      *string        `json:"name"`
 	Role      *string        `json:"role"`
 	URL       *string        `json:"url"`
@@ -178,6 +182,7 @@ type UpdateProjectRequest struct {
 }
 
 type CreateEducationRequest struct {
+	ShortID     string          `json:"short_id,omitempty"`
 	Institution string          `json:"institution"`
 	Degree      string          `json:"degree"`
 	Field       string          `json:"field"`
@@ -189,6 +194,7 @@ type CreateEducationRequest struct {
 }
 
 type UpdateEducationRequest struct {
+	ShortID     *string          `json:"short_id,omitempty"`
 	Institution *string          `json:"institution"`
 	Degree      *string          `json:"degree"`
 	Field       *string          `json:"field"`
@@ -200,6 +206,7 @@ type UpdateEducationRequest struct {
 }
 
 type CreateCertificationRequest struct {
+	ShortID  string         `json:"short_id,omitempty"`
 	Name     string         `json:"name"`
 	Issuer   string         `json:"issuer"`
 	Date     string         `json:"date"`
@@ -209,6 +216,7 @@ type CreateCertificationRequest struct {
 }
 
 type UpdateCertificationRequest struct {
+	ShortID  *string        `json:"short_id,omitempty"`
 	Name     *string        `json:"name"`
 	Issuer   *string        `json:"issuer"`
 	Date     *string        `json:"date"`
@@ -218,6 +226,7 @@ type UpdateCertificationRequest struct {
 }
 
 type CreateFactRequest struct {
+	ShortID   string           `json:"short_id,omitempty"`
 	OwnerID   string           `json:"owner_id"`
 	OwnerType domain.OwnerType `json:"owner_type"`
 	Statement string           `json:"statement"`
@@ -226,6 +235,7 @@ type CreateFactRequest struct {
 }
 
 type UpdateFactRequest struct {
+	ShortID   *string  `json:"short_id,omitempty"`
 	Statement *string  `json:"statement"`
 	Impact    *string  `json:"impact"`
 	SkillIDs  []string `json:"skill_ids"`
@@ -601,6 +611,8 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, skills)
 }
 
+// createSkill handles POST /api/v1/skills requests, persisting a new Skill.
+// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
 func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -616,8 +628,14 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("skill")
+	}
+
 	skill := domain.Skill{
-		ID:              "skill-" + uuid.New().String(),
+		ID:              domain.GenerateID("skill"),
+		ShortID:         shortID,
 		UserID:          userID,
 		Name:            req.Name,
 		Category:        req.Category,
@@ -649,6 +667,8 @@ func (h *profileHandler) getSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, skill)
 }
 
+// updateSkill handles PUT/PATCH /api/v1/skills/{id} requests, updating skill attributes
+// including optional short_id updates.
 func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -666,6 +686,9 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		skill.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Name != nil {
 		skill.Name = *req.Name
 	}
@@ -723,6 +746,8 @@ func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, exps)
 }
 
+// createExperience handles POST /api/v1/experiences requests, persisting a new WorkExperience.
+// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
 func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -746,8 +771,14 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("exp")
+	}
+
 	exp := domain.WorkExperience{
-		ID:                "exp-" + uuid.New().String(),
+		ID:                domain.GenerateID("exp"),
+		ShortID:           shortID,
 		UserID:            userID,
 		Company:           req.Company,
 		RoleTitle:         req.RoleTitle,
@@ -792,6 +823,8 @@ func (h *profileHandler) getExperience(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, exp)
 }
 
+// updateExperience handles PUT/PATCH /api/v1/experiences/{id} requests, updating experience attributes
+// including optional short_id updates.
 func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -809,6 +842,9 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		exp.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Company != nil {
 		exp.Company = *req.Company
 	}
@@ -897,6 +933,8 @@ func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projs)
 }
 
+// createProject handles POST /api/v1/projects requests, persisting a new Project.
+// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
 func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -920,8 +958,14 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("proj")
+	}
+
 	proj := domain.Project{
-		ID:        "proj-" + uuid.New().String(),
+		ID:        domain.GenerateID("proj"),
+		ShortID:   shortID,
 		UserID:    userID,
 		Name:      req.Name,
 		Role:      req.Role,
@@ -955,6 +999,8 @@ func (h *profileHandler) getProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, proj)
 }
 
+// updateProject handles PUT/PATCH /api/v1/projects/{id} requests, updating project attributes
+// including optional short_id updates.
 func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -972,6 +1018,9 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		proj.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Name != nil {
 		proj.Name = *req.Name
 	}
@@ -1039,6 +1088,8 @@ func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, edus)
 }
 
+// createEducation handles POST /api/v1/education requests, persisting a new Education record.
+// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
 func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1054,8 +1105,14 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("edu")
+	}
+
 	edu := domain.Education{
-		ID:          "edu-" + uuid.New().String(),
+		ID:          domain.GenerateID("edu"),
+		ShortID:     shortID,
 		UserID:      userID,
 		Institution: req.Institution,
 		Degree:      req.Degree,
@@ -1089,6 +1146,8 @@ func (h *profileHandler) getEducation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, edu)
 }
 
+// updateEducation handles PUT/PATCH /api/v1/education/{id} requests, updating education attributes
+// including optional short_id updates.
 func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1106,6 +1165,9 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		edu.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Institution != nil {
 		edu.Institution = *req.Institution
 	}
@@ -1169,6 +1231,8 @@ func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, certs)
 }
 
+// createCertification handles POST /api/v1/certifications requests, persisting a new Certification.
+// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
 func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1184,8 +1248,14 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("cert")
+	}
+
 	cert := domain.Certification{
-		ID:       "cert-" + uuid.New().String(),
+		ID:       domain.GenerateID("cert"),
+		ShortID:  shortID,
 		UserID:   userID,
 		Name:     req.Name,
 		Issuer:   req.Issuer,
@@ -1217,6 +1287,8 @@ func (h *profileHandler) getCertification(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, cert)
 }
 
+// updateCertification handles PUT/PATCH /api/v1/certifications/{id} requests, updating certification attributes
+// including optional short_id updates.
 func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1234,6 +1306,9 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		cert.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Name != nil {
 		cert.Name = *req.Name
 	}
@@ -1299,6 +1374,8 @@ func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, facts)
 }
 
+// createFact handles POST /api/v1/facts requests, persisting a new child Fact.
+// It generates a canonical UUID, auto-generates a short_id if omitted, and resolves owner_id to its canonical UUID.
 func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1314,22 +1391,29 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var canonicalOwnerID string
 	switch req.OwnerType {
 	case domain.OwnerTypeWorkExperience:
-		if _, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, req.OwnerID); err != nil {
+		exp, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, req.OwnerID)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
 			return
 		}
+		canonicalOwnerID = exp.ID
 	case domain.OwnerTypeProject:
-		if _, err := h.cfg.ProfileRepo.GetProject(ctx, userID, req.OwnerID); err != nil {
+		proj, err := h.cfg.ProfileRepo.GetProject(ctx, userID, req.OwnerID)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
 			return
 		}
+		canonicalOwnerID = proj.ID
 	case domain.OwnerTypeEducation:
-		if _, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, req.OwnerID); err != nil {
+		edu, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, req.OwnerID)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
 			return
 		}
+		canonicalOwnerID = edu.ID
 	default:
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("invalid owner_type: %q", req.OwnerType), "")
 		return
@@ -1343,10 +1427,16 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	shortID := strings.TrimSpace(req.ShortID)
+	if shortID == "" {
+		shortID = domain.GenerateShortID("fact")
+	}
+
 	fact := domain.Fact{
-		ID:        "fact-" + uuid.New().String(),
+		ID:        domain.GenerateID("fact"),
+		ShortID:   shortID,
 		UserID:    userID,
-		OwnerID:   req.OwnerID,
+		OwnerID:   canonicalOwnerID,
 		OwnerType: req.OwnerType,
 		Statement: req.Statement,
 		Impact:    req.Impact,
@@ -1375,6 +1465,8 @@ func (h *profileHandler) getFact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, fact)
 }
 
+// updateFact handles PUT/PATCH /api/v1/facts/{id} requests, updating fact attributes
+// including optional short_id updates.
 func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1392,6 +1484,9 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
+		fact.ShortID = strings.TrimSpace(*req.ShortID)
+	}
 	if req.Statement != nil {
 		fact.Statement = *req.Statement
 	}

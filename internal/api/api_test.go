@@ -1763,4 +1763,118 @@ func TestDefaultBranchAPI(t *testing.T) {
 	})
 }
 
+// TestEntityCreation_ShortID verifies that REST API endpoints for experiences, skills, and facts
+// auto-populate short_id with compact alphanumeric strings, respect custom user-supplied short_id values,
+// and correctly resolve parent entity short IDs for child facts.
+func TestEntityCreation_ShortID(t *testing.T) {
+	env := setupTestServer(t, 100)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	t.Run("CreateExperience_AutoShortID", func(t *testing.T) {
+		req := map[string]any{
+			"company":    "Google",
+			"role_title": "Software Engineer",
+			"start_date": "2022-01-01",
+		}
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", req, nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
+		}
+		var exp domain.WorkExperience
+		if err := json.Unmarshal(body, &exp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !strings.HasPrefix(exp.ID, "exp-") || len(exp.ID) < 30 {
+			t.Errorf("expected long UUID id for experience, got %q", exp.ID)
+		}
+		if !strings.HasPrefix(exp.ShortID, "exp-") || len(exp.ShortID) > 15 {
+			t.Errorf("expected compact short_id for experience, got %q", exp.ShortID)
+		}
+	})
+
+	t.Run("CreateExperience_CustomShortID", func(t *testing.T) {
+		req := map[string]any{
+			"company":    "Google",
+			"role_title": "Senior Engineer",
+			"start_date": "2022-01-01",
+			"short_id":   "exp-google",
+		}
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", req, nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
+		}
+		var exp domain.WorkExperience
+		if err := json.Unmarshal(body, &exp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if exp.ShortID != "exp-google" {
+			t.Errorf("expected short_id == 'exp-google', got %q", exp.ShortID)
+		}
+	})
+
+	t.Run("CreateFact_AutoShortID", func(t *testing.T) {
+		// First create an experience with custom short ID
+		expReq := map[string]any{
+			"company":    "Stripe",
+			"role_title": "Staff Engineer",
+			"start_date": "2021-01-01",
+			"short_id":   "exp-stripe",
+		}
+		respExp, bodyExp := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", expReq, nil)
+		if respExp.StatusCode != http.StatusCreated {
+			t.Fatalf("failed to create experience: %d: %s", respExp.StatusCode, string(bodyExp))
+		}
+		var exp domain.WorkExperience
+		_ = json.Unmarshal(bodyExp, &exp)
+
+		// Create fact referencing the experience by short_id "exp-stripe"
+		factReq := map[string]any{
+			"owner_id":   "exp-stripe",
+			"owner_type": "work_experience",
+			"statement":  "Architected distributed idempotency engine",
+		}
+		respFact, bodyFact := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/facts", factReq, nil)
+		if respFact.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", respFact.StatusCode, string(bodyFact))
+		}
+		var fact domain.Fact
+		if err := json.Unmarshal(bodyFact, &fact); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !strings.HasPrefix(fact.ID, "fact-") || len(fact.ID) < 30 {
+			t.Errorf("expected long UUID for fact id, got %q", fact.ID)
+		}
+		if !strings.HasPrefix(fact.ShortID, "fact-") || len(fact.ShortID) > 15 {
+			t.Errorf("expected compact short_id for fact, got %q", fact.ShortID)
+		}
+		// Fact OwnerID should resolve to canonical exp.ID
+		if fact.OwnerID != exp.ID {
+			t.Errorf("expected fact OwnerID to resolve to canonical exp.ID %q, got %q", exp.ID, fact.OwnerID)
+		}
+	})
+
+	t.Run("CreateSkill_AutoShortID", func(t *testing.T) {
+		req := map[string]any{
+			"name":     "Go",
+			"category": "Backend",
+		}
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/skills", req, nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
+		}
+		var skill domain.Skill
+		if err := json.Unmarshal(body, &skill); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !strings.HasPrefix(skill.ID, "skill-") || len(skill.ID) < 30 {
+			t.Errorf("expected long UUID for skill id, got %q", skill.ID)
+		}
+		if !strings.HasPrefix(skill.ShortID, "skill-") || len(skill.ShortID) > 15 {
+			t.Errorf("expected compact short_id for skill, got %q", skill.ShortID)
+		}
+	})
+}
+
+
 
