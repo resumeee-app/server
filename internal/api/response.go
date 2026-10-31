@@ -80,6 +80,10 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request data", err.Error())
 		return
 	}
+	if errors.Is(err, domain.ErrDefaultBranchImmutable) {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "default branch is immutable", err.Error())
+		return
+	}
 
 	slog.Default().Error("unhandled internal api error", "error", err)
 	writeError(w, http.StatusInternalServerError, CodeInternalError, "an internal error occurred while processing the request", "")

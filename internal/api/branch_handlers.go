@@ -37,6 +37,7 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 
 type CreateBranchRequest struct {
 	Name               string   `json:"name"`
+	IsDefault          *bool    `json:"is_default,omitempty"`
 	TargetRole         string   `json:"target_role"`
 	TargetCompany      string   `json:"target_company"`
 	TargetRequirements string   `json:"target_requirements"`
@@ -109,6 +110,11 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.TemplateSetID == "" {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name and template_set_id are required", "")
+		return
+	}
+
+	if req.IsDefault != nil && *req.IsDefault {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "custom default branches cannot be created", "")
 		return
 	}
 
@@ -238,6 +244,15 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 			return
 		}
 		writeDomainError(w, err)
+		return
+	}
+
+	if ver.Status == domain.VersionStatusCompleted {
+		writeJSON(w, http.StatusOK, AsyncJobEnqueued{
+			VersionID: ver.ID,
+			Status:    ver.Status,
+			Message:   "Resume rendered from master profile",
+		})
 		return
 	}
 

@@ -1706,4 +1706,61 @@ func TestModelsHandler_ListAvailableModels(t *testing.T) {
 	}
 }
 
+func TestDefaultBranchAPI(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+	defaultBranchID := domain.DefaultBranchID("default")
+
+	t.Run("DELETE /api/v1/branches/{id} on default branch returns 400 Bad Request", func(t *testing.T) {
+		resp, body := doRequest(t, client, http.MethodDelete, baseURL+"/api/v1/branches/"+defaultBranchID, nil, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request, got %d: %s", resp.StatusCode, string(body))
+		}
+		errEnv := decodeJSON[api.ErrorResponse](t, body)
+		if errEnv.Error.Code != api.CodeInvalidRequest {
+			t.Errorf("expected code %s, got %s", api.CodeInvalidRequest, errEnv.Error.Code)
+		}
+	})
+
+	t.Run("POST /api/v1/branches with is_default=true returns 400 Bad Request", func(t *testing.T) {
+		isDef := true
+		req := api.CreateBranchRequest{
+			Name:          "Duplicate Default",
+			TemplateSetID: sqlite.TemplateStandardCleanID,
+			IsDefault:     &isDef,
+		}
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", req, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request, got %d: %s", resp.StatusCode, string(body))
+		}
+	})
+
+	t.Run("PUT /api/v1/branches/{id} updates template_set_id and re-renders", func(t *testing.T) {
+		newTmpl := sqlite.TemplateDetailedImmigrationCVID
+		req := api.UpdateBranchRequest{
+			TemplateSetID: &newTmpl,
+		}
+		resp, body := doRequest(t, client, http.MethodPut, baseURL+"/api/v1/branches/"+defaultBranchID, req, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
+		}
+		updated := decodeJSON[domain.Branch](t, body)
+		if updated.TemplateSetID != newTmpl {
+			t.Errorf("expected template %s, got %s", newTmpl, updated.TemplateSetID)
+		}
+	})
+
+	t.Run("POST /api/v1/branches/{id}/generate executes direct render with status completed", func(t *testing.T) {
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+defaultBranchID+"/generate", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
+		}
+		jobResp := decodeJSON[api.AsyncJobEnqueued](t, body)
+		if jobResp.Status != domain.VersionStatusCompleted {
+			t.Errorf("expected status completed, got %s", jobResp.Status)
+		}
+	})
+}
+
 
