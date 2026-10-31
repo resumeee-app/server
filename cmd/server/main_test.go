@@ -437,6 +437,7 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 	})
 
 	// Clean shutdown
+	clientNoRedirect.CloseIdleConnections()
 	cancel()
 	select {
 	case err := <-errCh:
