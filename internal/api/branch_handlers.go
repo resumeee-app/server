@@ -16,6 +16,7 @@ type branchHandler struct {
 	svc branch.Service
 }
 
+// registerBranchRoutes binds REST endpoints for branch creation, modification, version generation, and exports.
 func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &branchHandler{
 		cfg: cfg,
@@ -84,6 +85,7 @@ type EditVersionRequest struct {
 	TailoredContent *domain.TailoredContent `json:"tailored_content"`
 }
 
+// listBranches retrieves all branches for the authenticated user, optionally filtering for stale branches.
 func (h *branchHandler) listBranches(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -98,6 +100,7 @@ func (h *branchHandler) listBranches(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, branches)
 }
 
+// createBranch validates and registers a new resume branch.
 func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -142,6 +145,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
+// getBranch retrieves a branch record by its identifier.
 func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -156,6 +160,7 @@ func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, b)
 }
 
+// updateBranch modifies fields of an existing branch.
 func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -219,6 +224,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+// deleteBranch removes a branch and associated versions.
 func (h *branchHandler) deleteBranch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -232,6 +238,7 @@ func (h *branchHandler) deleteBranch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// generateBranchVersion enqueues or renders a new resume version for the specified branch.
 func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -263,15 +270,19 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// syncBranches enqueues regeneration jobs for stale branches matching the filter.
 func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req SyncBranchesRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request body", err.Error())
-			return
+	if r.Body != nil {
+		defer func() { _ = r.Body.Close() }()
+		if r.ContentLength > 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request body", err.Error())
+				return
+			}
 		}
 	}
 
@@ -291,6 +302,7 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// listBranchVersions returns all generated versions belonging to a branch.
 func (h *branchHandler) listBranchVersions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -309,6 +321,7 @@ func (h *branchHandler) listBranchVersions(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, versions)
 }
 
+// getBranchVersion retrieves a specific branch version by version number.
 func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -329,6 +342,7 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, ver)
 }
 
+// exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
 func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -380,6 +394,7 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// editBranchVersion validates provenance and creates an edited resume version with updated tailored content.
 func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)

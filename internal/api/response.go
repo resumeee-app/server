@@ -34,6 +34,17 @@ type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`
 }
 
+// parseJSON decodes the JSON request body into dst, strictly rejecting unknown fields and ensuring the body is closed.
+func parseJSON(r *http.Request, dst any) error {
+	if r.Body == nil {
+		return errors.New("request body is nil")
+	}
+	defer func() { _ = r.Body.Close() }()
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
+}
+
 // writeJSON serializes data as JSON with the given HTTP status code.
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

@@ -33,6 +33,7 @@ type llmServiceAdapter struct {
 	registry *llm.Registry
 }
 
+// GenerateTailoredResume resolves the target LLM provider and generates a tailored resume response.
 func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req domain.GenerationRequest) (*domain.GenerationResponse, error) {
 	var profile *domain.Profile
 	if req.MasterProfile != nil {
@@ -46,6 +47,7 @@ func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req doma
 	return provider.GenerateTailoredResume(ctx, req)
 }
 
+// main initializes runtime context and executes the primary resumeee server process.
 func main() {
 	if err := run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal error: %v\n", err)
@@ -53,6 +55,7 @@ func main() {
 	}
 }
 
+// run orchestrates database initialization, migrations, seeding, background worker startup, and HTTP serving.
 func run(parent context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {

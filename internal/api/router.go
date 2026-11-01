@@ -71,6 +71,7 @@ type RouterConfig struct {
 	Logger          *slog.Logger
 }
 
+// getUserID extracts the user ID from the X-User-ID request header or falls back to defaultID.
 func getUserID(r *http.Request, defaultID string) string {
 	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
 		return uid
@@ -125,6 +126,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	return handler
 }
 
+// registerHealthRoutes registers HTTP health check probes on /healthz and /api/v1/health.
 func registerHealthRoutes(mux *http.ServeMux) {
 	healthHandler := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -139,6 +141,7 @@ func registerHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", healthHandler)
 }
 
+// registerModelRoutes registers endpoints exposing configured LLM provider and model options.
 func registerModelRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	modelsHandler := func(w http.ResponseWriter, _ *http.Request) {
 		var models []domain.ModelOption

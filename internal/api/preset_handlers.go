@@ -12,6 +12,7 @@ type presetHandler struct {
 	cfg RouterConfig
 }
 
+// registerPresetRoutes registers REST handlers for listing, creating, and modifying resume tailoring presets.
 func registerPresetRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &presetHandler{cfg: cfg}
 
@@ -42,6 +43,7 @@ type UpdatePresetRequest struct {
 	IncludeAdminFields *bool   `json:"include_admin_fields"`
 }
 
+// listPresets retrieves all user and built-in tailoring presets.
 func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -57,6 +59,7 @@ func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, presets)
 }
 
+// createPreset validates and saves a new custom preset.
 func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -92,6 +95,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, preset)
 }
 
+// getPreset retrieves a tailoring preset by its identifier.
 func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -106,6 +110,7 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, preset)
 }
 
+// updatePreset updates mutable fields of an existing user-created preset.
 func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -153,6 +158,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, preset)
 }
 
+// deletePreset removes a custom preset by its identifier.
 func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)

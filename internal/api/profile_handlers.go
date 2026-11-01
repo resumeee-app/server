@@ -20,14 +20,7 @@ type profileHandler struct {
 	cfg RouterConfig
 }
 
-func parseJSON(r *http.Request, dst any) error {
-	if r.Body == nil {
-		return errors.New("empty request body")
-	}
-	defer func() { _ = r.Body.Close() }()
-	return json.NewDecoder(r.Body).Decode(dst)
-}
-
+// registerProfileRoutes registers all profile and career graph endpoints on the HTTP mux.
 func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &profileHandler{cfg: cfg}
 
@@ -243,6 +236,7 @@ type UpdateFactRequest struct {
 
 // --- Master Profile Handlers ---
 
+// getProfile retrieves basic profile fields for the authenticated user.
 func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -256,6 +250,7 @@ func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, prof)
 }
 
+// updateProfile validates and upserts the user's master profile record.
 func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -328,6 +323,7 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+// getFullProfile returns the full Career Graph snapshot for the authenticated user.
 func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -341,6 +337,7 @@ func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// importJSONResume imports an entire profile and career graph from raw JSON Resume bytes.
 func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -376,6 +373,7 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// exportJSONResume exports the user's master career graph as a standard JSON Resume document.
 func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -397,6 +395,7 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 // DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
 const DefaultPDFParseTimeout = 10 * time.Minute
 
+// parsePDFResume parses an uploaded candidate resume PDF and extracts structured data via an LLM.
 func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), DefaultPDFParseTimeout)
 	defer cancel()
@@ -559,6 +558,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, extracted)
 }
 
+// commitPDFResume commits approved JSON Resume data into the user's master career graph.
 func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -596,6 +596,7 @@ func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request)
 
 // --- Skills Handlers ---
 
+// listSkills returns all skills registered under the authenticated user.
 func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -653,6 +654,7 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, skill)
 }
 
+// getSkill retrieves a single skill by ID.
 func (h *profileHandler) getSkill(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -716,6 +718,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, skill)
 }
 
+// deleteSkill deletes a skill by ID.
 func (h *profileHandler) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -731,6 +734,7 @@ func (h *profileHandler) deleteSkill(w http.ResponseWriter, r *http.Request) {
 
 // --- Work Experiences Handlers ---
 
+// listExperiences retrieves all work experience entries for the authenticated user.
 func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -809,6 +813,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, exp)
 }
 
+// getExperience retrieves a specific work experience entry by its identifier.
 func (h *profileHandler) getExperience(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -903,6 +908,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, exp)
 }
 
+// deleteExperience removes a work experience entry by its identifier.
 func (h *profileHandler) deleteExperience(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -918,6 +924,7 @@ func (h *profileHandler) deleteExperience(w http.ResponseWriter, r *http.Request
 
 // --- Projects Handlers ---
 
+// listProjects returns all portfolio projects for the authenticated user.
 func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -985,6 +992,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, proj)
 }
 
+// getProject retrieves a project record by its identifier.
 func (h *profileHandler) getProject(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1058,6 +1066,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, proj)
 }
 
+// deleteProject removes a project entry by its identifier.
 func (h *profileHandler) deleteProject(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1073,6 +1082,7 @@ func (h *profileHandler) deleteProject(w http.ResponseWriter, r *http.Request) {
 
 // --- Education Handlers ---
 
+// listEducation returns all education records for the authenticated user.
 func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1132,6 +1142,7 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, edu)
 }
 
+// getEducation retrieves an education record by its identifier.
 func (h *profileHandler) getEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1201,6 +1212,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, edu)
 }
 
+// deleteEducation removes an education entry by its identifier.
 func (h *profileHandler) deleteEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1216,6 +1228,7 @@ func (h *profileHandler) deleteEducation(w http.ResponseWriter, r *http.Request)
 
 // --- Certifications Handlers ---
 
+// listCertifications returns all professional certifications recorded for the user.
 func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1273,6 +1286,7 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusCreated, cert)
 }
 
+// getCertification retrieves a certification record by its identifier.
 func (h *profileHandler) getCertification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1336,6 +1350,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, cert)
 }
 
+// deleteCertification deletes a certification record by its identifier.
 func (h *profileHandler) deleteCertification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1351,6 +1366,7 @@ func (h *profileHandler) deleteCertification(w http.ResponseWriter, r *http.Requ
 
 // --- Facts Handlers ---
 
+// listFacts returns career facts associated with an entity specified by owner_type and owner_id query params.
 func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1451,6 +1467,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, fact)
 }
 
+// getFact retrieves an individual fact by its identifier.
 func (h *profileHandler) getFact(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -1509,6 +1526,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, fact)
 }
 
+// deleteFact removes a fact record by its identifier.
 func (h *profileHandler) deleteFact(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)

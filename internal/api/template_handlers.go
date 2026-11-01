@@ -13,6 +13,7 @@ type templateHandler struct {
 	cfg RouterConfig
 }
 
+// registerTemplateRoutes configures HTTP endpoints for template set CRUD operations.
 func registerTemplateRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &templateHandler{cfg: cfg}
 
@@ -41,6 +42,7 @@ type UpdateTemplateRequest struct {
 	TextTemplate     *string `json:"text_template"`
 }
 
+// listTemplates returns all custom and built-in template sets for the user.
 func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -56,6 +58,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, templates)
 }
 
+// createTemplate validates syntax across templates and saves a new template set.
 func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -99,6 +102,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, tmpl)
 }
 
+// getTemplate retrieves a template set by its identifier.
 func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -113,6 +117,7 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tmpl)
 }
 
+// updateTemplate validates updated templates and updates the template set.
 func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -166,6 +171,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, tmpl)
 }
 
+// deleteTemplate removes a custom template set by its identifier.
 func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
