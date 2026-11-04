@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"resumeee/internal/domain"
 )
@@ -115,4 +116,25 @@ func writeDomainError(w http.ResponseWriter, err error) {
 
 	slog.Default().Error("unhandled internal api error", "error", err)
 	writeError(w, http.StatusInternalServerError, CodeInternalError, "an internal error occurred while processing the request", "")
+}
+
+// writeRenderOutput writes rendered resume output according to the format query parameter (html, markdown, text, or default json).
+func writeRenderOutput(w http.ResponseWriter, r *http.Request, out domain.RenderOutput) {
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.HTML))
+	case "markdown", "md":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.Markdown))
+	case "text", "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.PlainText))
+	default:
+		writeJSON(w, http.StatusOK, out)
+	}
 }

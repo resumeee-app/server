@@ -2073,3 +2073,208 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 		t.Errorf("expected Golang, Kubernetes, and AWS in snapshot skills, got: %+v", snapshot.Skills)
 	}
 }
+
+// TestTemplateAndBranchPreview_GoServerRendering verifies server-side rendering
+// of templates and branch version outputs using Go's template engine and server values.
+func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	// 1. Create a custom template set
+	tmplReq := api.CreateTemplateRequest{
+		Name:             "Go Render Test Template",
+		HTMLTemplate:     `<div class="resume"><h1>{{.FullName}}</h1><p class="role">{{.Headline}}</p><p>{{.Summary}}</p></div>`,
+		CSSStyles:        `.resume { font-family: sans-serif; }`,
+		MarkdownTemplate: `# {{.FullName}} - {{.Headline}}` + "\n\n" + `{{.Summary}}`,
+		TextTemplate:     `{{.FullName}} | {{.Headline}}` + "\n" + `{{.Summary}}`,
+	}
+	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/templates", tmplReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create template: %d: %s", resp.StatusCode, string(body))
+	}
+	tmpl := decodeJSON[domain.TemplateSet](t, body)
+
+	// 2. Test GET /api/v1/templates/{id}/preview (default JSON)
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/"+tmpl.ID+"/preview", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from GET /templates/{id}/preview, got %d: %s", resp.StatusCode, string(body))
+	}
+	var previewOut domain.RenderOutput
+	if err := json.Unmarshal(body, &previewOut); err != nil {
+		t.Fatalf("failed to parse preview JSON: %v, body: %s", err, string(body))
+	}
+	if !strings.Contains(previewOut.HTML, "Jane Doe") && !strings.Contains(previewOut.HTML, "Alex Morgan") {
+		t.Errorf("expected server-rendered FullName in HTML output, got: %s", previewOut.HTML)
+	}
+	if !strings.Contains(previewOut.Markdown, "# ") {
+		t.Errorf("expected markdown header in markdown output, got: %s", previewOut.Markdown)
+	}
+	if !strings.Contains(previewOut.PlainText, "|") {
+		t.Errorf("expected plain text content in plain_text output, got: %s", previewOut.PlainText)
+	}
+
+	// 3. Test GET /api/v1/templates/{id}/preview with format query params
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/"+tmpl.ID+"/preview?format=html", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for ?format=html, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("expected text/html content-type, got %s", ct)
+	}
+	if !strings.Contains(string(body), "class=\"resume\"") {
+		t.Errorf("expected resume html in body, got: %s", string(body))
+	}
+
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/"+tmpl.ID+"/preview?format=markdown", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for ?format=markdown, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Errorf("expected text/markdown content-type, got %s", ct)
+	}
+	if !strings.Contains(string(body), "# ") || (!strings.Contains(string(body), "Jane Doe") && !strings.Contains(string(body), "Alex Morgan")) {
+		t.Errorf("expected rendered markdown content with full name, got: %s", string(body))
+	}
+
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/"+tmpl.ID+"/preview?format=text", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for ?format=text, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("expected text/plain content-type, got %s", ct)
+	}
+	if !strings.Contains(string(body), "|") || (!strings.Contains(string(body), "Jane Doe") && !strings.Contains(string(body), "Alex Morgan")) {
+		t.Errorf("expected rendered plain text content with full name, got: %s", string(body))
+	}
+
+	// 4. Test GET /api/v1/templates/{id}/preview 404
+	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/nonexistent-id/preview", nil, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent template preview, got %d", resp.StatusCode)
+	}
+
+	// 5. Test POST /api/v1/templates/preview (live draft preview for editor)
+	draftReq := map[string]string{
+		"html_template":     `<h1>Draft {{.FullName}}</h1><p>{{upper .Headline}}</p>`,
+		"css_styles":        `h1 { color: red; }`,
+		"markdown_template": `## Draft {{.FullName}}`,
+		"text_template":     `Draft {{.FullName}}`,
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/templates/preview", draftReq, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from POST /templates/preview, got %d: %s", resp.StatusCode, string(body))
+	}
+	var draftOut domain.RenderOutput
+	if err := json.Unmarshal(body, &draftOut); err != nil {
+		t.Fatalf("failed to decode draft preview: %v", err)
+	}
+	if !strings.Contains(draftOut.HTML, "Draft") {
+		t.Errorf("expected 'Draft' in HTML output, got: %s", draftOut.HTML)
+	}
+	// Verify SafeFuncMap was evaluated on server (upper)
+	if !strings.Contains(draftOut.HTML, "STAFF SOFTWARE ENGINEER") {
+		t.Errorf("expected upper func applied by Go template engine, got: %s", draftOut.HTML)
+	}
+
+	// 6. Test POST /api/v1/templates/preview with syntax error -> 422
+	badDraftReq := map[string]string{
+		"html_template": `<h1>{{.Unclosed`,
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/templates/preview", badDraftReq, nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422 for syntax error in POST /templates/preview, got %d: %s", resp.StatusCode, string(body))
+	}
+	var errResp api.ErrorResponse
+	_ = json.Unmarshal(body, &errResp)
+	if errResp.Error.Code != api.CodeTemplateValidationError {
+		t.Errorf("expected TEMPLATE_VALIDATION_ERROR code, got %s", errResp.Error.Code)
+	}
+
+	// 7. Test GET /api/v1/branches/{id}/versions/{v}/preview
+	// Create a branch and render default branch version
+	branchReq := api.CreateBranchRequest{
+		Name:          "Preview Test Branch",
+		TemplateSetID: tmpl.ID,
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create branch: %d: %s", resp.StatusCode, string(body))
+	}
+	createdBranch := decodeJSON[domain.Branch](t, body)
+
+	// Fetch versions
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to list branch versions: %d", resp.StatusCode)
+	}
+	var versions []domain.BranchVersion
+	_ = json.Unmarshal(body, &versions)
+	if len(versions) == 0 {
+		// Generate default version
+		genResp, gBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+createdBranch.ID+"/generate", nil, nil)
+		if genResp.StatusCode != http.StatusOK && genResp.StatusCode != http.StatusAccepted {
+			t.Fatalf("failed to generate version: %d: %s", genResp.StatusCode, string(gBody))
+		}
+		resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("failed to list branch versions after generate: %d", resp.StatusCode)
+		}
+		_ = json.Unmarshal(body, &versions)
+	}
+	if len(versions) == 0 {
+		t.Fatalf("expected branch versions to be populated")
+	}
+
+	vNum := fmt.Sprintf("%d", versions[0].VersionNumber)
+
+	// JSON format (default)
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions/"+vNum+"/preview", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for branch version preview JSON, got %d: %s", resp.StatusCode, string(body))
+	}
+	var branchOut domain.RenderOutput
+	if err := json.Unmarshal(body, &branchOut); err != nil {
+		t.Fatalf("failed to decode branch preview JSON: %v", err)
+	}
+	if branchOut.HTML == "" {
+		t.Errorf("expected non-empty HTML in branch preview JSON")
+	}
+
+	// HTML format
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions/"+vNum+"/preview?format=html", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for branch version preview ?format=html, got %d: %s", resp.StatusCode, string(body))
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("expected text/html for branch version preview ?format=html, got %s", ct)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty html in branch preview")
+	}
+
+	// Markdown format
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions/"+vNum+"/preview?format=markdown", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for branch version preview ?format=markdown, got %d: %s", resp.StatusCode, string(body))
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Errorf("expected text/markdown for branch version preview ?format=markdown, got %s", ct)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty markdown in branch preview")
+	}
+
+	// Text format
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions/"+vNum+"/preview?format=text", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for branch version preview ?format=text, got %d: %s", resp.StatusCode, string(body))
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("expected text/plain for branch version preview ?format=text, got %s", ct)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty text in branch preview")
+	}
+}
+

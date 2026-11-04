@@ -7,6 +7,7 @@ import (
 
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
+	"resumeee/internal/renderer"
 )
 
 type branchHandler struct {
@@ -30,6 +31,7 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("POST /api/v1/branches/{id}/generate", h.generateBranchVersion)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions", h.listBranchVersions)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}", h.getBranchVersion)
+	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/preview", h.previewBranchVersion)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/export", h.exportBranchVersion)
 	mux.HandleFunc("POST /api/v1/branches/{id}/versions/{v}/edit", h.editBranchVersion)
 }
@@ -384,6 +386,62 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 	default:
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "unsupported export format: "+format, "")
 	}
+}
+
+// previewBranchVersion serves rendered branch version resume outputs across HTML, Markdown, and text formats.
+func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	v := r.PathValue("v")
+
+	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	htmlOut := ver.HTMLOutput
+	mdOut := ver.MarkdownOutput
+	txtOut := ver.PlainTextOutput
+
+	if (htmlOut == "" || mdOut == "" || txtOut == "") && h.cfg.Renderer != nil && h.cfg.TemplateRepo != nil {
+		tmpl, tErr := h.cfg.TemplateRepo.GetTemplate(ctx, userID, b.TemplateSetID)
+		if tErr == nil && tmpl != nil {
+			var prof *domain.Profile
+			if h.cfg.ProfileRepo != nil {
+				prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
+			}
+			renderCtx := renderer.NewRenderContext(tmpl, prof, ver.TailoredContent)
+			if htmlOut == "" && tmpl.HTMLTemplate != "" {
+				if hOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx); rErr == nil {
+					htmlOut = hOut
+				}
+			}
+			if mdOut == "" && tmpl.MarkdownTemplate != "" {
+				if mOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx); rErr == nil {
+					mdOut = mOut
+				}
+			}
+			if txtOut == "" && tmpl.TextTemplate != "" {
+				if tOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx); rErr == nil {
+					txtOut = tOut
+				}
+			}
+		}
+	}
+
+	writeRenderOutput(w, r, domain.RenderOutput{
+		HTML:      htmlOut,
+		Markdown:  mdOut,
+		PlainText: txtOut,
+	})
 }
 
 // editBranchVersion validates provenance and creates an edited resume version with updated tailored content.

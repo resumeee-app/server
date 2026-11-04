@@ -1,27 +1,42 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	htmltemplate "html/template"
 	"net/http"
 
 	"github.com/google/uuid"
 
 	"resumeee/internal/domain"
+	"resumeee/internal/renderer"
 )
 
 type templateHandler struct {
 	cfg RouterConfig
 }
 
-// registerTemplateRoutes configures HTTP endpoints for template set CRUD operations.
+// registerTemplateRoutes configures HTTP endpoints for template set CRUD and server-side preview operations.
 func registerTemplateRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &templateHandler{cfg: cfg}
 
 	mux.HandleFunc("GET /api/v1/templates", h.listTemplates)
 	mux.HandleFunc("POST /api/v1/templates", h.createTemplate)
+	mux.HandleFunc("POST /api/v1/templates/preview", h.renderPreview)
 	mux.HandleFunc("GET /api/v1/templates/{id}", h.getTemplate)
+	mux.HandleFunc("GET /api/v1/templates/{id}/preview", h.previewTemplate)
 	mux.HandleFunc("PUT /api/v1/templates/{id}", h.updateTemplate)
 	mux.HandleFunc("DELETE /api/v1/templates/{id}", h.deleteTemplate)
+}
+
+// RenderTemplatePreviewRequest defines parameters for rendering arbitrary Go template snippets on the server.
+type RenderTemplatePreviewRequest struct {
+	TemplateID       string `json:"template_id"`
+	HTMLTemplate     string `json:"html_template"`
+	CSSStyles        string `json:"css_styles"`
+	MarkdownTemplate string `json:"markdown_template"`
+	TextTemplate     string `json:"text_template"`
 }
 
 type CreateTemplateRequest struct {
@@ -182,3 +197,176 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// defaultSeededProfileName identifies the default placeholder name seeded upon database initialization.
+const defaultSeededProfileName = "Default User"
+
+// hasCustomProfileData returns true if the profile contains non-empty custom user data rather than unconfigured defaults.
+func hasCustomProfileData(prof *domain.Profile, snap *domain.MasterProfileSnapshot) bool {
+	if prof == nil {
+		return false
+	}
+	if prof.FullName != "" && prof.FullName != defaultSeededProfileName {
+		return true
+	}
+	if snap != nil && (len(snap.Experiences) > 0 || len(snap.Skills) > 0 || len(snap.Projects) > 0 || len(snap.Education) > 0) {
+		return true
+	}
+	return false
+}
+
+// getRenderContext constructs a comprehensive execution context for template rendering.
+// Prefers actual user profile facts when present, merging with synthetic sample data for empty sections.
+func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *domain.TemplateSet) *renderer.RenderContext {
+	synth := renderer.SyntheticRenderContext()
+	if tmpl != nil && tmpl.CSSStyles != "" {
+		synth.CSSStyles = htmltemplate.CSS(tmpl.CSSStyles)
+	}
+
+	if h.cfg.ProfileRepo == nil {
+		return synth
+	}
+
+	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	if err == nil && prof != nil {
+		snapshot, _ := h.cfg.ProfileRepo.GetSnapshot(ctx, userID)
+		if hasCustomProfileData(prof, snapshot) {
+			var tailored *domain.TailoredContent
+			if snapshot != nil {
+				tailored = domain.SnapshotToTailoredContent(snapshot)
+			}
+			userCtx := renderer.NewRenderContext(tmpl, prof, tailored)
+			if len(userCtx.Experiences) == 0 {
+				userCtx.Experiences = synth.Experiences
+			}
+			if len(userCtx.SkillGroups) == 0 {
+				userCtx.SkillGroups = synth.SkillGroups
+			}
+			if len(userCtx.Projects) == 0 {
+				userCtx.Projects = synth.Projects
+			}
+			if len(userCtx.Education) == 0 {
+				userCtx.Education = synth.Education
+			}
+			if len(userCtx.Certifications) == 0 {
+				userCtx.Certifications = synth.Certifications
+			}
+			if userCtx.Summary == "" {
+				userCtx.Summary = synth.Summary
+			}
+			return userCtx
+		}
+	}
+
+	return synth
+}
+
+// renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
+func (h *templateHandler) renderAllFormats(tmpl *domain.TemplateSet, renderCtx *renderer.RenderContext) (domain.RenderOutput, error) {
+	if tmpl == nil {
+		return domain.RenderOutput{}, nil
+	}
+
+	var out domain.RenderOutput
+	if tmpl.HTMLTemplate != "" {
+		htmlOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx)
+		if err != nil {
+			return domain.RenderOutput{}, fmt.Errorf("html template rendering failed: %w", err)
+		}
+		out.HTML = htmlOut
+	}
+
+	if tmpl.MarkdownTemplate != "" {
+		mdOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx)
+		if err != nil {
+			return domain.RenderOutput{}, fmt.Errorf("markdown template rendering failed: %w", err)
+		}
+		out.Markdown = mdOut
+	}
+
+	if tmpl.TextTemplate != "" {
+		txtOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx)
+		if err != nil {
+			return domain.RenderOutput{}, fmt.Errorf("text template rendering failed: %w", err)
+		}
+		out.PlainText = txtOut
+	}
+
+	return out, nil
+}
+
+// previewTemplate renders a saved template set on the server across HTML, Markdown, and text formats.
+func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	id := r.PathValue("id")
+
+	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	renderCtx := h.getRenderContext(ctx, userID, tmpl)
+	out, err := h.renderAllFormats(tmpl, renderCtx)
+	if err != nil {
+		if errors.Is(err, domain.ErrTemplateSyntax) {
+			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	writeRenderOutput(w, r, out)
+}
+
+// renderPreview renders draft Go template definitions on the server for real-time editor previews.
+func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+
+	var req RenderTemplatePreviewRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	htmlTmpl := req.HTMLTemplate
+	cssStyles := req.CSSStyles
+	mdTmpl := req.MarkdownTemplate
+	txtTmpl := req.TextTemplate
+
+	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
+		if orig, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateID); err == nil && orig != nil {
+			htmlTmpl = orig.HTMLTemplate
+			cssStyles = orig.CSSStyles
+			mdTmpl = orig.MarkdownTemplate
+			txtTmpl = orig.TextTemplate
+		}
+	}
+
+	tmpl := &domain.TemplateSet{
+		HTMLTemplate:     htmlTmpl,
+		CSSStyles:        cssStyles,
+		MarkdownTemplate: mdTmpl,
+		TextTemplate:     txtTmpl,
+	}
+
+	renderCtx := h.getRenderContext(ctx, userID, tmpl)
+	if cssStyles != "" {
+		renderCtx.CSSStyles = htmltemplate.CSS(cssStyles)
+	}
+
+	out, err := h.renderAllFormats(tmpl, renderCtx)
+	if err != nil {
+		if errors.Is(err, domain.ErrTemplateSyntax) {
+			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	writeRenderOutput(w, r, out)
+}
+
