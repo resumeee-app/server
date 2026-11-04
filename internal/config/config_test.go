@@ -289,3 +289,155 @@ func TestLoad(t *testing.T) {
 		t.Fatal("expected non-nil config from Load()")
 	}
 }
+
+func TestLoadFrom_LLMDebugPrompts(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts to default to false, got true")
+		}
+		if cfg.LLMDebugDir != "data/llm" {
+			t.Errorf("expected LLMDebugDir to default to %q, got %q", "data/llm", cfg.LLMDebugDir)
+		}
+	})
+
+	t.Run("enabled via true", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_PROMPTS" {
+				return "true"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts to be true")
+		}
+	})
+
+	t.Run("enabled via 1", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_PROMPTS" {
+				return "1"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts to be true")
+		}
+	})
+
+	t.Run("explicitly disabled via false", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_PROMPTS" {
+				return "false"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts to be false")
+		}
+	})
+
+	t.Run("invalid boolean returns error", func(t *testing.T) {
+		_, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_PROMPTS" {
+				return "notabool"
+			}
+			return ""
+		})
+		if err == nil {
+			t.Fatalf("expected error for invalid LLM_DEBUG_PROMPTS, got nil")
+		}
+	})
+
+	t.Run("custom debug directory", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_DIR" {
+				return "/custom/debug/llm"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugDir != "/custom/debug/llm" {
+			t.Errorf("expected LLMDebugDir %q, got %q", "/custom/debug/llm", cfg.LLMDebugDir)
+		}
+	})
+}
+
+func TestConfig_ParseFlags(t *testing.T) {
+	t.Run("debug-llm-prompts flag", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-debug-llm-prompts"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if !cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts true, got false")
+		}
+	})
+
+	t.Run("llm-debug-prompts alias flag", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-llm-debug-prompts"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if !cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts true, got false")
+		}
+	})
+
+	t.Run("llm-debug-dir flag", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-llm-debug-dir", "/tmp/debug-llm"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.LLMDebugDir != "/tmp/debug-llm" {
+			t.Errorf("expected LLMDebugDir '/tmp/debug-llm', got %q", cfg.LLMDebugDir)
+		}
+	})
+
+	t.Run("empty args does nothing", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags(nil); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts false")
+		}
+	})
+
+	t.Run("unknown flag returns error", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-unknown-flag"}); err == nil {
+			t.Fatalf("expected error for unknown flag, got nil")
+		}
+	})
+}
+

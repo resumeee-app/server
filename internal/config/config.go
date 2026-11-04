@@ -2,6 +2,7 @@
 package config
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,6 +25,8 @@ type Config struct {
 	OpenAICompatAPIKey  string
 	Environment         string
 	LogLevel            slog.Level
+	LLMDebugPrompts     bool
+	LLMDebugDir         string
 }
 
 // Default configuration constants.
@@ -34,6 +37,7 @@ const (
 	DefaultWorkerConcurrency = 2
 	DefaultWorkerQueueSize   = 100
 	DefaultEnvironment       = "development"
+	DefaultLLMDebugDir       = "data/llm"
 )
 
 // Load reads configuration from process environment variables using os.Getenv.
@@ -55,6 +59,8 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		WorkerQueueSize:   DefaultWorkerQueueSize,
 		Environment:       DefaultEnvironment,
 		LogLevel:          slog.LevelInfo,
+		LLMDebugPrompts:   false,
+		LLMDebugDir:       DefaultLLMDebugDir,
 	}
 
 	// Port
@@ -133,7 +139,43 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		}
 	}
 
+	// LLM Debug Prompts
+	if val := strings.TrimSpace(lookup("LLM_DEBUG_PROMPTS")); val != "" {
+		p, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid LLM_DEBUG_PROMPTS value %q: must be a boolean", val)
+		}
+		cfg.LLMDebugPrompts = p
+	}
+
+	// LLM Debug Directory
+	if val := strings.TrimSpace(lookup("LLM_DEBUG_DIR")); val != "" {
+		cfg.LLMDebugDir = val
+	}
+
 	return cfg, nil
+}
+
+// ParseFlags parses command-line flags to override configuration fields.
+func (c *Config) ParseFlags(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	fs := flag.NewFlagSet("resumeee", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
+	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
+	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")
+
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parsing flags: %w", err)
+	}
+
+	c.LLMDebugPrompts = *debugPrompts
+	c.LLMDebugDir = *debugDir
+	return nil
 }
 
 // NewLogger constructs a structured slog.Logger for the given configuration.

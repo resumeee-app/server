@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -472,4 +473,40 @@ func TestBuildServer_Configuration(t *testing.T) {
 		t.Errorf("expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
 	}
 }
+
+func TestRun_WithLLMDebugFlags(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "debug_test.db")
+	debugDir := filepath.Join(tmpDir, "llm_dumps")
+	t.Setenv("DB_PATH", dbPath)
+	t.Setenv("PORT", freePort(t))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, "-debug-llm-prompts", "-llm-debug-dir", debugDir)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected clean shutdown with debug flags, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for graceful shutdown")
+	}
+
+	info, err := os.Stat(debugDir)
+	if err != nil {
+		t.Fatalf("expected llm debug directory %s to be created on server startup: %v", debugDir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", debugDir)
+	}
+}
+
 

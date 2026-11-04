@@ -50,17 +50,21 @@ func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req doma
 
 // main initializes runtime context and executes the primary resumeee server process.
 func main() {
-	if err := run(context.Background()); err != nil {
+	if err := run(context.Background(), os.Args[1:]...); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 // run orchestrates database initialization, migrations, seeding, background worker startup, and HTTP serving.
-func run(parent context.Context) error {
+func run(parent context.Context, args ...string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
+	}
+
+	if err := cfg.ParseFlags(args); err != nil {
+		return fmt.Errorf("parsing command line flags: %w", err)
 	}
 
 	logger := config.NewLogger(cfg, os.Stdout)
@@ -76,6 +80,8 @@ func run(parent context.Context) error {
 		"default_user_id", cfg.DefaultUserID,
 		"worker_concurrency", cfg.WorkerConcurrency,
 		"worker_queue_size", cfg.WorkerQueueSize,
+		"llm_debug_prompts", cfg.LLMDebugPrompts,
+		"llm_debug_dir", cfg.LLMDebugDir,
 	)
 
 	// Ensure DB directory exists if file-backed
@@ -85,6 +91,13 @@ func run(parent context.Context) error {
 			if err := os.MkdirAll(dir, 0750); err != nil {
 				return fmt.Errorf("creating db directory: %w", err)
 			}
+		}
+	}
+
+	// Ensure LLM debug directory exists if prompt debugging is enabled
+	if cfg.LLMDebugPrompts && strings.TrimSpace(cfg.LLMDebugDir) != "" {
+		if err := os.MkdirAll(cfg.LLMDebugDir, 0750); err != nil {
+			return fmt.Errorf("creating llm debug directory: %w", err)
 		}
 	}
 
