@@ -65,8 +65,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreatePresetRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -123,8 +122,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdatePresetRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

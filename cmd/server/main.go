@@ -186,14 +186,7 @@ func run(parent context.Context) error {
 	if writeTimeout < defaultServerWriteTimeout {
 		writeTimeout = defaultServerWriteTimeout
 	}
-	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           rootHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       writeTimeout * 2,
-	}
+	server := buildServer(fmt.Sprintf(":%d", cfg.Port), rootHandler, writeTimeout)
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -247,4 +240,17 @@ func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler) http.Handl
 	rootMux.Handle("/static/", uiHandler)
 
 	return rootMux
+}
+
+// buildServer configures an http.Server instance with defense-in-depth timeouts and header size boundaries.
+func buildServer(addr string, handler http.Handler, writeTimeout time.Duration) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB boundary protects against HTTP header exhaustion attacks
+	}
 }

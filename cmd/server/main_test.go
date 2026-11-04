@@ -448,3 +448,28 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 		t.Fatal("timed out waiting for shutdown")
 	}
 }
+
+func TestBuildServer_Configuration(t *testing.T) {
+	mux := http.NewServeMux()
+	server := buildServer(":8080", mux, 11*time.Minute)
+
+	if server.Addr != ":8080" {
+		t.Errorf("expected Addr :8080, got %s", server.Addr)
+	}
+	if server.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("expected ReadHeaderTimeout 5s, got %v", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout != 60*time.Second {
+		t.Errorf("expected ReadTimeout 60s, got %v", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 11*time.Minute {
+		t.Errorf("expected WriteTimeout 11m, got %v", server.WriteTimeout)
+	}
+	if server.IdleTimeout != 120*time.Second {
+		t.Errorf("expected IdleTimeout 120s, got %v", server.IdleTimeout)
+	}
+	if server.MaxHeaderBytes != 1<<20 {
+		t.Errorf("expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
+	}
+}
+

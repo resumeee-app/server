@@ -768,6 +768,19 @@ func TestErrorEnvelopes(t *testing.T) {
 		}
 	})
 
+	t.Run("413 PAYLOAD_TOO_LARGE on oversized JSON body", func(t *testing.T) {
+		oversized := fmt.Sprintf(`{"name": "%s"}`, strings.Repeat("A", 11<<20))
+		headers := map[string]string{"Content-Type": "application/json"}
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/skills", oversized, headers)
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected 413 Payload Too Large, got: %d", resp.StatusCode)
+		}
+		errResp := decodeJSON[api.ErrorResponse](t, body)
+		if errResp.Error.Code != api.CodePayloadTooLarge {
+			t.Errorf("expected code %s, got: %s", api.CodePayloadTooLarge, errResp.Error.Code)
+		}
+	})
+
 	t.Run("404 NOT_FOUND on non-existent resource", func(t *testing.T) {
 		resp, body := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/non-existent-id", nil, nil)
 		if resp.StatusCode != http.StatusNotFound {

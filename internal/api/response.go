@@ -34,15 +34,31 @@ type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`
 }
 
-// parseJSON decodes the JSON request body into dst, strictly rejecting unknown fields and ensuring the body is closed.
-func parseJSON(r *http.Request, dst any) error {
+// MaxRequestBodyBytes defines the maximum allowed size for incoming JSON request bodies (10 MB).
+const MaxRequestBodyBytes = 10 << 20
+
+// decodeJSON decodes a bounded JSON request body into dst.
+// If decoding fails, it writes the appropriate HTTP error response (413 or 400) and returns false.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if r.Body == nil {
-		return errors.New("request body is nil")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "request body is empty", "")
+		return false
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
 	defer func() { _ = r.Body.Close() }()
+
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(dst)
+	if err := dec.Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body exceeds maximum allowed size", maxBytesErr.Error())
+			return false
+		}
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request body", err.Error())
+		return false
+	}
+	return true
 }
 
 // writeJSON serializes data as JSON with the given HTTP status code.

@@ -256,8 +256,7 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req UpdateProfileRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -619,8 +618,7 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateSkillRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -683,8 +681,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateSkillRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -757,8 +754,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateExperienceRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -842,8 +838,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 	}
 
 	var req UpdateExperienceRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -947,8 +942,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateProjectRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1021,8 +1015,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateProjectRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1105,8 +1098,7 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateEducationRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1171,8 +1163,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req UpdateEducationRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1251,8 +1242,7 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateCertificationRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1315,8 +1305,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req UpdateCertificationRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1397,8 +1386,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateFactRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1496,8 +1484,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateFactRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

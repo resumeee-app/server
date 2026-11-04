@@ -64,8 +64,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateTemplateRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -130,8 +129,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req UpdateTemplateRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

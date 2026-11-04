@@ -1,9 +1,7 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -106,8 +104,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateBranchRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -173,8 +170,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateBranchRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -276,13 +272,9 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var req SyncBranchesRequest
-	if r.Body != nil {
-		defer func() { _ = r.Body.Close() }()
-		if r.ContentLength > 0 {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-				writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request body", err.Error())
-				return
-			}
+	if r.Body != nil && r.ContentLength > 0 {
+		if !decodeJSON(w, r, &req) {
+			return
 		}
 	}
 
@@ -402,8 +394,7 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 	v := r.PathValue("v")
 
 	var req EditVersionRequest
-	if err := parseJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed json payload", err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
