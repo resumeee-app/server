@@ -1,3 +1,4 @@
+// Package config parses process environment variables and initializes structured logging for Resumeee.
 package config
 
 import (

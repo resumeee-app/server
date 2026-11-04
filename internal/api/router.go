@@ -1,3 +1,4 @@
+// Package api implements the REST HTTP API for Resumeee, strictly adhering to the OpenAPI 3.1 specification.
 package api
 
 import (

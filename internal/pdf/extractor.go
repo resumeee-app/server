@@ -1,3 +1,4 @@
+// Package pdf provides PDF text extraction capabilities for resume parsing.
 package pdf
 
 import (
