@@ -2144,6 +2144,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         include_admin_fields:
           type: boolean
         is_built_in:
@@ -2176,6 +2185,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         include_admin_fields:
           type: boolean
 
@@ -2194,6 +2212,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         include_admin_fields:
           type: boolean
 

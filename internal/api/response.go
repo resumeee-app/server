@@ -12,6 +12,7 @@ import (
 // Standard OpenAPI error codes.
 const (
 	CodeInvalidRequest          = "INVALID_REQUEST"
+	CodeForbidden               = "FORBIDDEN"
 	CodeNotFound                = "NOT_FOUND"
 	CodeTemplateValidationError = "TEMPLATE_VALIDATION_ERROR"
 	CodeProvenanceError         = "PROVENANCE_ERROR"

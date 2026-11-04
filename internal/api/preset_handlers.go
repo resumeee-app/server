@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -30,6 +32,8 @@ type CreatePresetRequest struct {
 	TemplateSetID      string `json:"template_set_id"`
 	ProviderOverride   string `json:"provider_override"`
 	ModelOverride      string `json:"model_override"`
+	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "none", "low", "medium", "high").
+	ReasoningLevel     string `json:"reasoning_level,omitempty"`
 	IncludeAdminFields bool   `json:"include_admin_fields"`
 }
 
@@ -40,7 +44,49 @@ type UpdatePresetRequest struct {
 	TemplateSetID      *string `json:"template_set_id"`
 	ProviderOverride   *string `json:"provider_override"`
 	ModelOverride      *string `json:"model_override"`
+	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "", "none", "low", "medium", "high").
+	ReasoningLevel     *string `json:"reasoning_level,omitempty"`
 	IncludeAdminFields *bool   `json:"include_admin_fields"`
+}
+
+// validateReasoningLevel verifies that the given reasoning effort level is empty or
+// matches one of the accepted enum values ("none", "low", "medium", "high").
+func validateReasoningLevel(level string) error {
+	switch level {
+	case "", "none", "low", "medium", "high":
+		return nil
+	default:
+		return errors.New("reasoning_level must be one of: none, low, medium, high")
+	}
+}
+
+// validateModelOverride verifies that the specified model override and optional provider override
+// correspond to an available LLM model option registered in the enumerator catalog.
+func validateModelOverride(enumerator ModelEnumerator, providerOverride, modelOverride string) error {
+	if enumerator == nil || modelOverride == "" {
+		return nil
+	}
+
+	available := enumerator.AvailableModels()
+	if len(available) == 0 {
+		return nil
+	}
+
+	var found bool
+	for _, m := range available {
+		if strings.EqualFold(m.Model, modelOverride) {
+			if providerOverride == "" || strings.EqualFold(m.Provider, providerOverride) {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return errors.New("model_override is not available for the specified provider")
+	}
+
+	return nil
 }
 
 // listPresets retrieves all user and built-in tailoring presets.
@@ -74,6 +120,16 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateReasoningLevel(req.ReasoningLevel); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+		return
+	}
+
+	if err := validateModelOverride(h.cfg.ModelEnumerator, req.ProviderOverride, req.ModelOverride); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+		return
+	}
+
 	preset := domain.Preset{
 		ID:                 "preset-" + uuid.New().String(),
 		UserID:             userID,
@@ -83,6 +139,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		TemplateSetID:      req.TemplateSetID,
 		ProviderOverride:   req.ProviderOverride,
 		ModelOverride:      req.ModelOverride,
+		ReasoningLevel:     req.ReasoningLevel,
 		IncludeAdminFields: req.IncludeAdminFields,
 	}
 
@@ -121,8 +178,35 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if preset.IsBuiltIn() {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be modified", "")
+		return
+	}
+
 	var req UpdatePresetRequest
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if req.ReasoningLevel != nil {
+		if err := validateReasoningLevel(*req.ReasoningLevel); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+			return
+		}
+	}
+
+	effectiveProvider := preset.ProviderOverride
+	if req.ProviderOverride != nil {
+		effectiveProvider = *req.ProviderOverride
+	}
+
+	effectiveModel := preset.ModelOverride
+	if req.ModelOverride != nil {
+		effectiveModel = *req.ModelOverride
+	}
+
+	if err := validateModelOverride(h.cfg.ModelEnumerator, effectiveProvider, effectiveModel); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 		return
 	}
 
@@ -144,6 +228,9 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	if req.ModelOverride != nil {
 		preset.ModelOverride = *req.ModelOverride
 	}
+	if req.ReasoningLevel != nil {
+		preset.ReasoningLevel = *req.ReasoningLevel
+	}
 	if req.IncludeAdminFields != nil {
 		preset.IncludeAdminFields = *req.IncludeAdminFields
 	}
@@ -161,6 +248,22 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
+
+	if strings.HasPrefix(id, "builtin-") {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be deleted", "")
+		return
+	}
+
+	preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, id)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	if preset.IsBuiltIn() {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be deleted", "")
+		return
+	}
 
 	if err := h.cfg.PresetRepo.DeletePreset(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
