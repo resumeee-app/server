@@ -1889,5 +1889,100 @@ func TestEntityCreation_ShortID(t *testing.T) {
 	})
 }
 
+func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	// 1. Create a skill
+	skillReq := map[string]any{
+		"name":        "TypeScript",
+		"category":    "Languages",
+		"proficiency": "Expert",
+	}
+	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/skills", skillReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create skill: %d: %s", resp.StatusCode, string(body))
+	}
+	var skill domain.Skill
+	_ = json.Unmarshal(body, &skill)
+
+	// 2. Create work experience with full extended details
+	hours := 40
+	empType := domain.EmploymentTypeFullTime
+	createReq := api.CreateExperienceRequest{
+		Company:        "Initial Corp",
+		RoleTitle:      "Architect",
+		EmploymentType: empType,
+		StartDate:      "2022-01-01",
+		HoursPerWeek:   &hours,
+		CompanyContact: &domain.ContactDetail{
+			Type:  domain.ContactTypeEmail,
+			Value: "hr@initial.corp",
+		},
+		SupervisorName: "Sarah Connor",
+		SkillIDs:       []string{skill.ID},
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", createReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create experience: %d: %s", resp.StatusCode, string(body))
+	}
+	var exp domain.WorkExperience
+	_ = json.Unmarshal(body, &exp)
+	if exp.CompanyContact == nil || exp.HoursPerWeek == nil || len(exp.Skills) == 0 {
+		t.Fatalf("expected initial experience to have contact, hours, and skills: %+v", exp)
+	}
+
+	// 3. Clear extended fields on PUT: empty contact value, hours = 0, skill_ids = []
+	zeroHours := 0
+	emptySupervisor := ""
+	updateReq := api.UpdateExperienceRequest{
+		CompanyContact: &domain.ContactDetail{
+			Type:  domain.ContactTypeEmail,
+			Value: "",
+		},
+		HoursPerWeek:   &zeroHours,
+		SupervisorName: &emptySupervisor,
+		SkillIDs:       []string{},
+	}
+	resp, body = doRequest(t, client, http.MethodPut, baseURL+"/api/v1/experiences/"+exp.ID, updateReq, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to update experience: %d: %s", resp.StatusCode, string(body))
+	}
+	var updatedExp domain.WorkExperience
+	_ = json.Unmarshal(body, &updatedExp)
+
+	if updatedExp.CompanyContact != nil {
+		t.Errorf("expected CompanyContact to be nil after clearing, got %+v", updatedExp.CompanyContact)
+	}
+	if updatedExp.HoursPerWeek != nil {
+		t.Errorf("expected HoursPerWeek to be nil after clearing, got %v", *updatedExp.HoursPerWeek)
+	}
+	if updatedExp.SupervisorName != "" {
+		t.Errorf("expected SupervisorName to be empty string, got %q", updatedExp.SupervisorName)
+	}
+	if len(updatedExp.Skills) != 0 {
+		t.Errorf("expected Skills to be empty after clearing, got %d skills", len(updatedExp.Skills))
+	}
+
+	// 4. Verify via GET
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/experiences/"+exp.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to get experience: %d: %s", resp.StatusCode, string(body))
+	}
+	var fetchedExp domain.WorkExperience
+	_ = json.Unmarshal(body, &fetchedExp)
+	if fetchedExp.CompanyContact != nil {
+		t.Errorf("expected fetched CompanyContact to be nil, got %+v", fetchedExp.CompanyContact)
+	}
+	if fetchedExp.HoursPerWeek != nil {
+		t.Errorf("expected fetched HoursPerWeek to be nil, got %v", *fetchedExp.HoursPerWeek)
+	}
+	if len(fetchedExp.Skills) != 0 {
+		t.Errorf("expected fetched Skills to be empty, got %d", len(fetchedExp.Skills))
+	}
+}
+
+
 
 

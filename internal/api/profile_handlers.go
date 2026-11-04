@@ -870,10 +870,18 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 		exp.CompanyLocation = *req.CompanyLocation
 	}
 	if req.CompanyContact != nil {
-		exp.CompanyContact = req.CompanyContact
+		if req.CompanyContact.Value == "" {
+			exp.CompanyContact = nil
+		} else {
+			exp.CompanyContact = req.CompanyContact
+		}
 	}
 	if req.HoursPerWeek != nil {
-		exp.HoursPerWeek = req.HoursPerWeek
+		if *req.HoursPerWeek <= 0 {
+			exp.HoursPerWeek = nil
+		} else {
+			exp.HoursPerWeek = req.HoursPerWeek
+		}
 	}
 	if req.SupervisorName != nil {
 		exp.SupervisorName = *req.SupervisorName
