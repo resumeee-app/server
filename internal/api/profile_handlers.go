@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
 )
@@ -232,6 +234,30 @@ type UpdateFactRequest struct {
 	Statement *string  `json:"statement"`
 	Impact    *string  `json:"impact"`
 	SkillIDs  []string `json:"skill_ids"`
+}
+
+// parseSkillsInput converts raw skill identifier/name strings from user payloads into domain.Skill instances.
+// Tokens matching UUID formats (with or without prefixes) route to domain.Skill{ID: ...}.
+// Plain text names (e.g. "Kubernetes", "Go") route to domain.Skill{Name: ...} for canonical resolution.
+func parseSkillsInput(skillIDs []string) []domain.Skill {
+	if len(skillIDs) == 0 {
+		return []domain.Skill{}
+	}
+	skills := make([]domain.Skill, 0, len(skillIDs))
+	for _, s := range skillIDs {
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			continue
+		}
+		rawUUID := strings.TrimPrefix(trimmed, "skill-")
+		rawUUID = strings.TrimPrefix(rawUUID, "sk-")
+		if _, err := uuid.Parse(rawUUID); err == nil {
+			skills = append(skills, domain.Skill{ID: trimmed})
+		} else {
+			skills = append(skills, domain.Skill{Name: trimmed})
+		}
+	}
+	return skills
 }
 
 // --- Master Profile Handlers ---
@@ -765,10 +791,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 
 	var skills []domain.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
+		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
@@ -896,11 +919,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 		exp.Metadata = req.Metadata
 	}
 	if req.SkillIDs != nil {
-		skills := make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
-		exp.Skills = skills
+		exp.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	if err := h.cfg.ProfileRepo.UpdateExperience(ctx, exp); err != nil {
@@ -961,10 +980,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 
 	var skills []domain.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
+		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
@@ -1052,11 +1068,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 		proj.Metadata = req.Metadata
 	}
 	if req.SkillIDs != nil {
-		skills := make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
-		proj.Skills = skills
+		proj.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	if err := h.cfg.ProfileRepo.UpdateProject(ctx, proj); err != nil {
@@ -1433,10 +1445,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 
 	var skills []domain.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
+		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
@@ -1506,11 +1515,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 		fact.Impact = *req.Impact
 	}
 	if req.SkillIDs != nil {
-		skills := make([]domain.Skill, len(req.SkillIDs))
-		for i, sID := range req.SkillIDs {
-			skills[i] = domain.Skill{ID: sID}
-		}
-		fact.Skills = skills
+		fact.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	if err := h.cfg.ProfileRepo.UpdateFact(ctx, fact); err != nil {

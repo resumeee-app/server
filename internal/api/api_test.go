@@ -1983,6 +1983,93 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	}
 }
 
+func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T) {
+	env := setupTestServer(t, 10)
+	defer env.server.Close()
 
+	client := env.server.Client()
+	baseURL := env.server.URL
 
+	// 1. Create Experience with skill names
+	expReq := api.CreateExperienceRequest{
+		Company:   "Stripe",
+		RoleTitle: "Software Engineer",
+		StartDate: "2023-01-01",
+		SkillIDs:  []string{"Golang", "Kubernetes"},
+	}
+	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", expReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create experience: %d: %s", resp.StatusCode, string(body))
+	}
 
+	var createdExp domain.WorkExperience
+	if err := json.Unmarshal(body, &createdExp); err != nil {
+		t.Fatalf("failed to unmarshal experience: %v", err)
+	}
+	if len(createdExp.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(createdExp.Skills))
+	}
+	for _, s := range createdExp.Skills {
+		if s.Name != "Golang" && s.Name != "Kubernetes" {
+			t.Errorf("unexpected skill name: %q", s.Name)
+		}
+		if s.UserID != "default" {
+			t.Errorf("expected skill UserID to be default, got %q", s.UserID)
+		}
+	}
+
+	// 2. Verify skills appear in GET /api/v1/skills
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/skills", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to list skills: %d: %s", resp.StatusCode, string(body))
+	}
+	var skills []domain.Skill
+	if err := json.Unmarshal(body, &skills); err != nil {
+		t.Fatalf("failed to unmarshal skills: %v", err)
+	}
+	skillNameMap := make(map[string]domain.Skill)
+	for _, s := range skills {
+		skillNameMap[s.Name] = s
+	}
+	if _, ok := skillNameMap["Golang"]; !ok {
+		t.Errorf("expected 'Golang' in list of skills, got: %+v", skills)
+	}
+	if _, ok := skillNameMap["Kubernetes"]; !ok {
+		t.Errorf("expected 'Kubernetes' in list of skills, got: %+v", skills)
+	}
+
+	// 3. Create Project reusing "golang" (case-insensitive) and introducing "AWS"
+	projReq := api.CreateProjectRequest{
+		Name:     "Cloud Observability",
+		SkillIDs: []string{"golang", "AWS"},
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/projects", projReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed to create project: %d: %s", resp.StatusCode, string(body))
+	}
+	var createdProj domain.Project
+	if err := json.Unmarshal(body, &createdProj); err != nil {
+		t.Fatalf("failed to unmarshal project: %v", err)
+	}
+	if len(createdProj.Skills) != 2 {
+		t.Fatalf("expected 2 skills on project, got %d", len(createdProj.Skills))
+	}
+
+	// 4. Verify snapshot consolidates all skills
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/full", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to get full profile: %d: %s", resp.StatusCode, string(body))
+	}
+	var snapshot domain.MasterProfileSnapshot
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		t.Fatalf("failed to unmarshal profile snapshot: %v", err)
+	}
+
+	snapSkillNames := make(map[string]bool)
+	for _, s := range snapshot.Skills {
+		snapSkillNames[s.Name] = true
+	}
+	if !snapSkillNames["Golang"] || !snapSkillNames["Kubernetes"] || !snapSkillNames["AWS"] {
+		t.Errorf("expected Golang, Kubernetes, and AWS in snapshot skills, got: %+v", snapshot.Skills)
+	}
+}
