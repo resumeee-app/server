@@ -420,6 +420,82 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 // DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
 const DefaultPDFParseTimeout = 10 * time.Minute
 
+// resolveExtractionProviderAndModel determines the active LLM provider and model for resume parsing.
+// Explicit request values take precedence; omitted fields fall back to the authenticated user's master
+// profile defaults, verified against configured models when ModelEnumerator is present.
+func (h *profileHandler) resolveExtractionProviderAndModel(ctx context.Context, userID, reqProvider, reqModel string) (string, string) {
+	provider := strings.TrimSpace(reqProvider)
+	model := strings.TrimSpace(reqModel)
+
+	if h.cfg.ProfileRepo == nil || (provider != "" && model != "") {
+		return provider, model
+	}
+
+	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	if err != nil || prof == nil {
+		return provider, model
+	}
+
+	var availableModels []domain.ModelOption
+	if h.cfg.ModelEnumerator != nil {
+		availableModels = h.cfg.ModelEnumerator.AvailableModels()
+	}
+
+	isProviderConfigured := func(candidate string) bool {
+		if len(availableModels) == 0 {
+			return true
+		}
+		for _, opt := range availableModels {
+			if strings.EqualFold(opt.Provider, candidate) ||
+				(strings.EqualFold(candidate, "openai-compat") && strings.EqualFold(opt.Provider, "compat")) ||
+				(strings.EqualFold(candidate, "compat") && strings.EqualFold(opt.Provider, "openai-compat")) {
+				return true
+			}
+		}
+		return false
+	}
+
+	profileProviderAccepted := false
+	if provider == "" && strings.TrimSpace(prof.DefaultProvider) != "" {
+		candidate := strings.TrimSpace(prof.DefaultProvider)
+		if isProviderConfigured(candidate) {
+			provider = candidate
+			profileProviderAccepted = true
+		}
+	} else if provider != "" {
+		if strings.EqualFold(provider, strings.TrimSpace(prof.DefaultProvider)) {
+			profileProviderAccepted = true
+		}
+	}
+
+	if model == "" && strings.TrimSpace(prof.DefaultModel) != "" {
+		candidateModel := strings.TrimSpace(prof.DefaultModel)
+		if len(availableModels) == 0 {
+			if profileProviderAccepted || strings.TrimSpace(prof.DefaultProvider) == "" {
+				model = candidateModel
+			}
+		} else {
+			if profileProviderAccepted || strings.TrimSpace(prof.DefaultProvider) == "" {
+				for _, opt := range availableModels {
+					providerMatches := provider == "" || strings.EqualFold(opt.Provider, provider) ||
+						(strings.EqualFold(provider, "openai-compat") && strings.EqualFold(opt.Provider, "compat")) ||
+						(strings.EqualFold(provider, "compat") && strings.EqualFold(opt.Provider, "openai-compat"))
+
+					if providerMatches && strings.EqualFold(opt.Model, candidateModel) {
+						model = candidateModel
+						break
+					}
+				}
+				if model == "" && strings.TrimSpace(provider) != "" && strings.EqualFold(provider, strings.TrimSpace(prof.DefaultProvider)) {
+					model = candidateModel
+				}
+			}
+		}
+	}
+
+	return provider, model
+}
+
 // parsePDFResume parses an uploaded candidate resume PDF and extracts structured data via an LLM.
 func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), DefaultPDFParseTimeout)
@@ -455,8 +531,8 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	}
 	defer func() { _ = file.Close() }()
 
-	provider := strings.TrimSpace(r.FormValue("provider"))
-	model := strings.TrimSpace(r.FormValue("model"))
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	provider, model := h.resolveExtractionProviderAndModel(ctx, userID, r.FormValue("provider"), r.FormValue("model"))
 
 	fileSize := fileHeader.Size
 	if fileSize <= 0 {

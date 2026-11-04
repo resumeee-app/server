@@ -94,6 +94,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.ResumeExtractor == nil {
 		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
 	}
+	if cfg.ModelEnumerator == nil {
+		if me, ok := cfg.ResumeExtractor.(ModelEnumerator); ok {
+			cfg.ModelEnumerator = me
+		}
+	}
 
 	if cfg.BranchService == nil && cfg.BranchRepo != nil {
 		cfg.BranchService = branch.NewService(branch.Config{

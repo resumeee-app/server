@@ -11,11 +11,14 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"resumeee/internal/api"
+	"resumeee/internal/config"
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
 	"resumeee/internal/pdf"
@@ -1044,6 +1047,27 @@ func buildTestPDF(text string) []byte {
 	return []byte(body + xrefAndTrailer)
 }
 
+type mockModelEnumeratingExtractor struct {
+	completer func(ctx context.Context, sys, user, prov, model string) (string, error)
+	models    []domain.ModelOption
+}
+
+func (m *mockModelEnumeratingExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, error) {
+	if m.completer != nil {
+		_, err := m.completer(ctx, "", text, provider, model)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &profile.JSONResume{
+		Basics: profile.JSONResumeBasics{Name: "Morgan BrandNew"},
+	}, nil
+}
+
+func (m *mockModelEnumeratingExtractor) AvailableModels() []domain.ModelOption {
+	return m.models
+}
+
 func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtractor) *testEnv {
 	return setupTestServerWithExtractorAndLogger(t, resumeExtractor, nil)
 }
@@ -1515,6 +1539,285 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		}
 		if !strings.Contains(logOutput, "requested LLM provider not configured") {
 			t.Errorf("expected logs to contain warning message, got:\n%s", logOutput)
+		}
+	})
+
+	t.Run("Omitting provider and model resolves from user master profile", func(t *testing.T) {
+		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+		var capturedProvider, capturedModel string
+
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			capturedProvider = prov
+			capturedModel = model
+			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+		}))
+
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		// Set default provider and model on user's profile
+		prof, err := env.profileRepo.GetProfile(context.Background(), "default")
+		if err != nil {
+			t.Fatalf("failed to get profile: %v", err)
+		}
+		prof.DefaultProvider = "custom-provider"
+		prof.DefaultModel = "custom-model"
+		if err := env.profileRepo.UpsertProfile(context.Background(), prof); err != nil {
+			t.Fatalf("failed to update profile: %v", err)
+		}
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+
+		if capturedProvider != "custom-provider" {
+			t.Errorf("expected provider 'custom-provider', got %q", capturedProvider)
+		}
+		if capturedModel != "custom-model" {
+			t.Errorf("expected model 'custom-model', got %q", capturedModel)
+		}
+	})
+
+	t.Run("ModelEnumerator validates profile defaults and handles aliases", func(t *testing.T) {
+		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+
+		testCases := []struct {
+			name             string
+			profileProvider  string
+			profileModel     string
+			reqProvider      string
+			reqModel         string
+			availableModels  []domain.ModelOption
+			expectedProvider string
+			expectedModel    string
+		}{
+			{
+				name:            "profile provider matching available model is selected",
+				profileProvider: "openai",
+				profileModel:    "gpt-4o",
+				availableModels: []domain.ModelOption{
+					{Provider: "openai", Model: "gpt-4o"},
+					{Provider: "gemini", Model: "gemini-2.5-flash"},
+				},
+				expectedProvider: "openai",
+				expectedModel:    "gpt-4o",
+			},
+			{
+				name:            "profile provider unavailable gracefully defaults to empty",
+				profileProvider: "unsupported-cloud",
+				profileModel:    "unknown-model",
+				availableModels: []domain.ModelOption{
+					{Provider: "openai", Model: "gpt-4o"},
+				},
+				expectedProvider: "",
+				expectedModel:    "",
+			},
+			{
+				name:            "provider alias matching for openai-compat and compat",
+				profileProvider: "openai-compat",
+				profileModel:    "llama-3.3-70b",
+				availableModels: []domain.ModelOption{
+					{Provider: "compat", Model: "llama-3.3-70b"},
+				},
+				expectedProvider: "openai-compat",
+				expectedModel:    "llama-3.3-70b",
+			},
+			{
+				name:             "reqProvider supplied with empty model resolves model from profile default",
+				profileProvider:  "openai",
+				profileModel:     "gpt-4o",
+				reqProvider:      "openai",
+				reqModel:         "",
+				availableModels:  []domain.ModelOption{{Provider: "openai", Model: "gpt-4o"}},
+				expectedProvider: "openai",
+				expectedModel:    "gpt-4o",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				var capturedProvider, capturedModel string
+
+				mockExt := &mockModelEnumeratingExtractor{
+					completer: func(ctx context.Context, sys, user, prov, model string) (string, error) {
+						capturedProvider = prov
+						capturedModel = model
+						return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+					},
+					models: tc.availableModels,
+				}
+
+				env := setupTestServerWithExtractor(t, mockExt)
+				client := env.server.Client()
+				baseURL := env.server.URL
+
+				prof, err := env.profileRepo.GetProfile(context.Background(), "default")
+				if err != nil {
+					t.Fatalf("failed to get profile: %v", err)
+				}
+				prof.DefaultProvider = tc.profileProvider
+				prof.DefaultModel = tc.profileModel
+				if err := env.profileRepo.UpsertProfile(context.Background(), prof); err != nil {
+					t.Fatalf("failed to update profile: %v", err)
+				}
+
+				var buf bytes.Buffer
+				mw := multipart.NewWriter(&buf)
+				part, err := mw.CreateFormFile("file", "resume.pdf")
+				if err != nil {
+					t.Fatalf("create form file failed: %v", err)
+				}
+				_, _ = part.Write(pdfBytes)
+				if tc.reqProvider != "" {
+					_ = mw.WriteField("provider", tc.reqProvider)
+				}
+				if tc.reqModel != "" {
+					_ = mw.WriteField("model", tc.reqModel)
+				}
+				_ = mw.Close()
+
+				req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+				req.Header.Set("Content-Type", mw.FormDataContentType())
+
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatalf("request failed: %v", err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("expected status 200, got %d", resp.StatusCode)
+				}
+
+				if capturedProvider != tc.expectedProvider {
+					t.Errorf("expected provider %q, got %q", tc.expectedProvider, capturedProvider)
+				}
+				if capturedModel != tc.expectedModel {
+					t.Errorf("expected model %q, got %q", tc.expectedModel, capturedModel)
+				}
+			})
+		}
+	})
+
+	t.Run("PDF upload writes prompt and output markdown files to data/llm", func(t *testing.T) {
+		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+		debugDir := t.TempDir()
+
+		// Mock upstream HTTP server returning valid OpenAI chat completion
+		upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			resp := map[string]any{
+				"choices": []map[string]any{
+					{
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": `{"basics":{"name":"Morgan BrandNew","email":"morgan@brandnew.dev"}}`,
+						},
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer upstreamServer.Close()
+
+		// Configure LLM registry with prompt debugging enabled targeting debugDir
+		cfg := &config.Config{
+			OpenAICompatBaseURL: upstreamServer.URL + "/v1",
+			OpenAICompatAPIKey:  "test-key",
+			LLMDebugPrompts:     true,
+			LLMDebugDir:         debugDir,
+		}
+		registry := llm.NewRegistry(cfg)
+		extractor := llm.NewDefaultResumeExtractor(registry)
+
+		env := setupTestServerWithExtractor(t, extractor)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+
+		// Verify files written to debugDir
+		entries, err := os.ReadDir(debugDir)
+		if err != nil {
+			t.Fatalf("failed to read debugDir: %v", err)
+		}
+
+		var promptFiles, outputFiles []string
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), "_output.md") {
+				outputFiles = append(outputFiles, e.Name())
+			} else if strings.HasSuffix(e.Name(), ".md") {
+				promptFiles = append(promptFiles, e.Name())
+			}
+		}
+
+		if len(promptFiles) != 1 {
+			t.Fatalf("expected exactly 1 prompt file, got %d (%v)", len(promptFiles), promptFiles)
+		}
+		if len(outputFiles) != 1 {
+			t.Fatalf("expected exactly 1 output file, got %d (%v)", len(outputFiles), outputFiles)
+		}
+
+		promptContent, err := os.ReadFile(filepath.Join(debugDir, promptFiles[0]))
+		if err != nil {
+			t.Fatalf("failed to read prompt file: %v", err)
+		}
+		if !strings.Contains(string(promptContent), "# LLM Prompt: extract") {
+			t.Errorf("expected prompt file to contain '# LLM Prompt: extract', got:\n%s", string(promptContent))
+		}
+		if !strings.Contains(string(promptContent), "Morgan BrandNew Full-Stack Engineer") {
+			t.Errorf("expected prompt file to contain extracted resume text, got:\n%s", string(promptContent))
+		}
+
+		outputContent, err := os.ReadFile(filepath.Join(debugDir, outputFiles[0]))
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+		if !strings.Contains(string(outputContent), "# LLM Response: extract") {
+			t.Errorf("expected output file to contain '# LLM Response: extract', got:\n%s", string(outputContent))
+		}
+		if !strings.Contains(string(outputContent), "Morgan BrandNew") {
+			t.Errorf("expected output file to contain raw response json, got:\n%s", string(outputContent))
 		}
 	})
 }

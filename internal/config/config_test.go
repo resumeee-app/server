@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -361,6 +363,51 @@ func TestLoadFrom_LLMDebugPrompts(t *testing.T) {
 		}
 	})
 
+	t.Run("DEBUG_LLM_PROMPTS env alias enabled", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "DEBUG_LLM_PROMPTS" {
+				return "true"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts true when DEBUG_LLM_PROMPTS is set")
+		}
+	})
+
+	t.Run("LLM_DEBUG_PROMPTS takes precedence over DEBUG_LLM_PROMPTS", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_PROMPTS" {
+				return "false"
+			}
+			if s == "DEBUG_LLM_PROMPTS" {
+				return "true"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugPrompts {
+			t.Errorf("expected LLMDebugPrompts false due to LLM_DEBUG_PROMPTS precedence")
+		}
+	})
+
+	t.Run("invalid DEBUG_LLM_PROMPTS returns error", func(t *testing.T) {
+		_, err := config.LoadFrom(func(s string) string {
+			if s == "DEBUG_LLM_PROMPTS" {
+				return "invalid-bool"
+			}
+			return ""
+		})
+		if err == nil {
+			t.Fatalf("expected error for invalid DEBUG_LLM_PROMPTS, got nil")
+		}
+	})
+
 	t.Run("custom debug directory", func(t *testing.T) {
 		cfg, err := config.LoadFrom(func(s string) string {
 			if s == "LLM_DEBUG_DIR" {
@@ -373,6 +420,39 @@ func TestLoadFrom_LLMDebugPrompts(t *testing.T) {
 		}
 		if cfg.LLMDebugDir != "/custom/debug/llm" {
 			t.Errorf("expected LLMDebugDir %q, got %q", "/custom/debug/llm", cfg.LLMDebugDir)
+		}
+	})
+
+	t.Run("DEBUG_LLM_DIR env alias", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "DEBUG_LLM_DIR" {
+				return "/custom/alias/llm"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugDir != "/custom/alias/llm" {
+			t.Errorf("expected LLMDebugDir %q, got %q", "/custom/alias/llm", cfg.LLMDebugDir)
+		}
+	})
+
+	t.Run("LLM_DEBUG_DIR takes precedence over DEBUG_LLM_DIR", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "LLM_DEBUG_DIR" {
+				return "/primary/llm"
+			}
+			if s == "DEBUG_LLM_DIR" {
+				return "/alias/llm"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMDebugDir != "/primary/llm" {
+			t.Errorf("expected LLMDebugDir '/primary/llm', got %q", cfg.LLMDebugDir)
 		}
 	})
 }
@@ -417,6 +497,19 @@ func TestConfig_ParseFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("debug-llm-dir alias flag", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-debug-llm-dir", "/tmp/alias-llm"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.LLMDebugDir != "/tmp/alias-llm" {
+			t.Errorf("expected LLMDebugDir '/tmp/alias-llm', got %q", cfg.LLMDebugDir)
+		}
+	})
+
 	t.Run("empty args does nothing", func(t *testing.T) {
 		cfg, err := config.LoadFrom(func(s string) string { return "" })
 		if err != nil {
@@ -440,4 +533,171 @@ func TestConfig_ParseFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestLoad_DotEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	envPath := filepath.Join(tempDir, ".env")
+	envContent := `
+# Resumeee test configuration
+DEBUG_LLM_PROMPTS=true
+DEBUG_LLM_DIR=/data/custom_debug
+PORT=9095
+DB_PATH=./data/dotenv.db
+`
+	if err := os.WriteFile(envPath, []byte(envContent), 0600); err != nil {
+		t.Fatalf("failed to write test .env: %v", err)
+	}
+
+	// Verify process environment variable overrides value defined in .env
+	t.Setenv("PORT", "9999")
+
+	cfg, err := config.LoadFromDir(tempDir)
+	if err != nil {
+		t.Fatalf("LoadFromDir failed: %v", err)
+	}
+
+	if !cfg.LLMDebugPrompts {
+		t.Errorf("expected LLMDebugPrompts true from .env DEBUG_LLM_PROMPTS, got false")
+	}
+	if cfg.LLMDebugDir != "/data/custom_debug" {
+		t.Errorf("expected LLMDebugDir '/data/custom_debug', got %q", cfg.LLMDebugDir)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("expected process env PORT 9999 to override .env 9095, got %d", cfg.Port)
+	}
+	if cfg.DBPath != "./data/dotenv.db" {
+		t.Errorf("expected DBPath './data/dotenv.db' from .env, got %q", cfg.DBPath)
+	}
+}
+
+func TestLoadDotEnv_TableDriven(t *testing.T) {
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		fileContent string
+		nonExistent bool
+		expected    map[string]string
+		expectError bool
+	}{
+		{
+			name:        "non-existent file returns empty map without error",
+			nonExistent: true,
+			expected:    map[string]string{},
+			expectError: false,
+		},
+		{
+			name: "skips empty lines and comments",
+			fileContent: `
+# This is a comment
+   # Indented comment
+
+KEY1=value1
+
+# Another comment
+KEY2=value2
+`,
+			expected: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+			},
+			expectError: false,
+		},
+		{
+			name: "strips export prefix",
+			fileContent: `
+export EXPORTED_VAR=exported_val
+export   ANOTHER_VAR=another_val
+NORMAL_VAR=normal_val
+`,
+			expected: map[string]string{
+				"EXPORTED_VAR": "exported_val",
+				"ANOTHER_VAR":  "another_val",
+				"NORMAL_VAR":   "normal_val",
+			},
+			expectError: false,
+		},
+		{
+			name: "unwraps single and double quotes",
+			fileContent: `
+DOUBLE_QUOTES="hello world"
+SINGLE_QUOTES='single quote test'
+UNQUOTED=no_quotes
+EMPTY_QUOTES=""
+SINGLE_CHAR_QUOTE="
+MISMATCHED_QUOTE="mismatched'
+`,
+			expected: map[string]string{
+				"DOUBLE_QUOTES":     "hello world",
+				"SINGLE_QUOTES":     "single quote test",
+				"UNQUOTED":          "no_quotes",
+				"EMPTY_QUOTES":      "",
+				"SINGLE_CHAR_QUOTE": "\"",
+				"MISMATCHED_QUOTE":  "\"mismatched'",
+			},
+			expectError: false,
+		},
+		{
+			name: "handles lines without equals sign gracefully",
+			fileContent: `
+VALID_KEY=valid_val
+JUST_A_STRING_NO_EQUALS
+ANOTHER_VALID=123
+`,
+			expected: map[string]string{
+				"VALID_KEY":     "valid_val",
+				"ANOTHER_VALID": "123",
+			},
+			expectError: false,
+		},
+		{
+			name: "handles values with equals sign",
+			fileContent: `
+CONNECTION_STRING=postgres://user:pass@localhost:5432/db?sslmode=disable
+EQUALS_VAL=foo=bar=baz
+`,
+			expected: map[string]string{
+				"CONNECTION_STRING": "postgres://user:pass@localhost:5432/db?sslmode=disable",
+				"EQUALS_VAL":        "foo=bar=baz",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(tempDir, tc.name+".env")
+			if !tc.nonExistent {
+				if err := os.WriteFile(path, []byte(tc.fileContent), 0600); err != nil {
+					t.Fatalf("failed to write test file: %v", err)
+				}
+			}
+
+			result, err := config.LoadDotEnv(path)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(result) != len(tc.expected) {
+				t.Fatalf("expected %d entries, got %d: %+v", len(tc.expected), len(result), result)
+			}
+
+			for k, expectedVal := range tc.expected {
+				gotVal, ok := result[k]
+				if !ok {
+					t.Errorf("missing key %q in result", k)
+				} else if gotVal != expectedVal {
+					t.Errorf("key %q: expected %q, got %q", k, expectedVal, gotVal)
+				}
+			}
+		})
+	}
+}
+
 

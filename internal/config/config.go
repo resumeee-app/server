@@ -40,9 +40,9 @@ const (
 	DefaultLLMDebugDir       = "data/llm"
 )
 
-// Load reads configuration from process environment variables using os.Getenv.
+// Load reads configuration from process environment variables and a local .env file if present.
 func Load() (*Config, error) {
-	return LoadFrom(os.Getenv)
+	return LoadFromDir(".")
 }
 
 // LoadFrom parses configuration values using an injectable lookup function.
@@ -139,18 +139,26 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		}
 	}
 
-	// LLM Debug Prompts
-	if val := strings.TrimSpace(lookup("LLM_DEBUG_PROMPTS")); val != "" {
-		p, err := strconv.ParseBool(val)
+	// LLM Debug Prompts: checks LLM_DEBUG_PROMPTS, falling back to DEBUG_LLM_PROMPTS
+	debugPromptsVal := strings.TrimSpace(lookup("LLM_DEBUG_PROMPTS"))
+	if debugPromptsVal == "" {
+		debugPromptsVal = strings.TrimSpace(lookup("DEBUG_LLM_PROMPTS"))
+	}
+	if debugPromptsVal != "" {
+		p, err := strconv.ParseBool(debugPromptsVal)
 		if err != nil {
-			return nil, fmt.Errorf("invalid LLM_DEBUG_PROMPTS value %q: must be a boolean", val)
+			return nil, fmt.Errorf("invalid LLM_DEBUG_PROMPTS value %q: must be a boolean", debugPromptsVal)
 		}
 		cfg.LLMDebugPrompts = p
 	}
 
-	// LLM Debug Directory
-	if val := strings.TrimSpace(lookup("LLM_DEBUG_DIR")); val != "" {
-		cfg.LLMDebugDir = val
+	// LLM Debug Directory: checks LLM_DEBUG_DIR, falling back to DEBUG_LLM_DIR
+	debugDirVal := strings.TrimSpace(lookup("LLM_DEBUG_DIR"))
+	if debugDirVal == "" {
+		debugDirVal = strings.TrimSpace(lookup("DEBUG_LLM_DIR"))
+	}
+	if debugDirVal != "" {
+		cfg.LLMDebugDir = debugDirVal
 	}
 
 	return cfg, nil
@@ -168,6 +176,7 @@ func (c *Config) ParseFlags(args []string) error {
 	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
 	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
 	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")
+	fs.StringVar(debugDir, "debug-llm-dir", c.LLMDebugDir, "Alias for -llm-debug-dir")
 
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parsing flags: %w", err)
