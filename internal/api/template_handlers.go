@@ -273,7 +273,7 @@ func (h *templateHandler) renderAllFormats(tmpl *domain.TemplateSet, renderCtx *
 		if err != nil {
 			return domain.RenderOutput{}, fmt.Errorf("html template rendering failed: %w", err)
 		}
-		out.HTML = htmlOut
+		out.HTML = renderer.StripScriptTags(htmlOut)
 	}
 
 	if tmpl.MarkdownTemplate != "" {
