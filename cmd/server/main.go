@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,6 +47,50 @@ func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req doma
 	}
 	req.Model = model
 	return provider.GenerateTailoredResume(ctx, req)
+}
+
+// GenerateGapAnalysis performs a lightweight, decoupled gap analysis without full resume compilation.
+func (a *llmServiceAdapter) GenerateGapAnalysis(ctx context.Context, req domain.GenerationRequest) (*domain.GapReport, error) {
+	var profile *domain.Profile
+	if req.MasterProfile != nil {
+		profile = &req.MasterProfile.Profile
+	}
+	provider, model, err := a.registry.Resolve(req, req.Preset, profile)
+	if err != nil {
+		return nil, err
+	}
+	req.Model = model
+
+	// If provider implements RawCompleter, run the lightweight gap analysis prompt
+	if rawCompleter, ok := provider.(llm.RawCompleter); ok {
+		prompts, pErr := llm.BuildGapAnalysisPrompt(req)
+		if pErr == nil {
+			text, cErr := rawCompleter.CompleteText(ctx, prompts.SystemPrompt, prompts.UserPrompt, model)
+			if cErr == nil {
+				cleaned := llm.ExtractJSON(text)
+				var wrapper struct {
+					GapReport *domain.GapReport `json:"gap_report"`
+				}
+				if err := json.Unmarshal([]byte(cleaned), &wrapper); err == nil && wrapper.GapReport != nil {
+					wrapper.GapReport.Normalize()
+					return wrapper.GapReport, nil
+				}
+				var direct domain.GapReport
+				if err := json.Unmarshal([]byte(cleaned), &direct); err == nil && (direct.OverallMatchSummary != "" || len(direct.MissingRequirements) > 0 || len(direct.IdentifiedGaps) > 0) {
+					direct.Normalize()
+					return &direct, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to full generation if lightweight analysis is unavailable or fails
+	resp, err := provider.GenerateTailoredResume(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	resp.GapReport.Normalize()
+	return &resp.GapReport, nil
 }
 
 // main initializes runtime context and executes the primary resumeee server process.
@@ -165,6 +210,7 @@ func run(parent context.Context, args ...string) error {
 		JobEnqueuer:  workerPool,
 		Validator:    provValidator,
 		Renderer:     templateRenderer,
+		LLMService:   llmAdapter,
 		Logger:       logger,
 	})
 

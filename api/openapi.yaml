@@ -1287,6 +1287,29 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /branches/{id}/gap-analysis:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+    post:
+      tags:
+        - Branches & Versions
+      summary: Perform fast decoupled gap analysis
+      description: >-
+        Evaluates candidate fit against branch target requirements returning an explainable
+        gap report and deterministic match score without running full resume tailoring.
+      operationId: analyzeBranchGaps
+      responses:
+        '200':
+          description: Gap analysis completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GapReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /branches/sync:
     post:
       tags:
@@ -1644,6 +1667,8 @@ components:
       type: string
       enum:
         - critical
+        - preferred
+        - nice_to_have
         - suggested
 
     Location:
@@ -2491,6 +2516,8 @@ components:
         active_version_id:
           type: string
           nullable: true
+        gap_report:
+          $ref: '#/components/schemas/GapReport'
         last_synced_master_revision:
           type: integer
           format: int64
@@ -2760,7 +2787,6 @@ components:
       type: object
       required:
         - requirement
-        - missing_area
         - importance
       properties:
         requirement:
@@ -2769,20 +2795,26 @@ components:
           type: string
         importance:
           $ref: '#/components/schemas/GapImportance'
+        clarifying_prompt:
+          type: string
         recommended_action:
           type: string
 
     GapReport:
       type: object
-      required:
-        - match_score
-        - identified_gaps
       properties:
+        overall_match_summary:
+          type: string
         match_score:
           type: number
+          nullable: true
           minimum: 0
           maximum: 100
           example: 87.5
+        missing_requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/GapItem'
         identified_gaps:
           type: array
           items:
@@ -2791,6 +2823,9 @@ components:
           type: array
           items:
             type: string
+        skill_coverage_ratio:
+          type: number
+          nullable: true
 
     BranchVersion:
       type: object

@@ -2279,6 +2279,46 @@ func TestDefaultBranchAPI(t *testing.T) {
 	})
 }
 
+func TestBranch_GapAnalysisEndpoint(t *testing.T) {
+	env := setupTestServer(t, 100)
+	client := env.server.Client()
+	baseURL := env.server.URL
+
+	// 1. Unknown branch returns 404
+	resp, _ := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/non-existent-id/gap-analysis", nil, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 NotFound for unknown branch, got %d", resp.StatusCode)
+	}
+
+	// 2. Create a targeted branch
+	createReq := map[string]any{
+		"name":                "Staff SRE - Stripe",
+		"target_role":         "Staff Site Reliability Engineer",
+		"target_company":      "Stripe",
+		"target_requirements": "Distributed Systems, Raft, Kubernetes Operators",
+		"template_set_id":     renderer.TemplateStandardCleanID,
+	}
+	createResp, createBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", createReq, nil)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", createResp.StatusCode, string(createBody))
+	}
+	branch := decodeJSON[domain.Branch](t, createBody)
+
+	// 3. Request decoupled fast gap analysis
+	gapResp, gapBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch.ID+"/gap-analysis", nil, nil)
+	if gapResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from gap analysis endpoint, got %d: %s", gapResp.StatusCode, string(gapBody))
+	}
+
+	report := decodeJSON[domain.GapReport](t, gapBody)
+	if report.MatchScore == nil {
+		t.Errorf("expected non-nil MatchScore from gap analysis endpoint")
+	}
+	if report.OverallMatchSummary == "" {
+		t.Errorf("expected non-empty OverallMatchSummary")
+	}
+}
+
 // TestEntityCreation_ShortID verifies that REST API endpoints for experiences, skills, and facts
 // auto-populate short_id with compact alphanumeric strings, respect custom user-supplied short_id values,
 // and correctly resolve parent entity short IDs for child facts.

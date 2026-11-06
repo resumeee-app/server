@@ -29,6 +29,7 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("PUT /api/v1/branches/{id}", h.updateBranch)
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", h.deleteBranch)
 	mux.HandleFunc("POST /api/v1/branches/{id}/generate", h.generateBranchVersion)
+	mux.HandleFunc("POST /api/v1/branches/{id}/gap-analysis", h.analyzeBranchGaps)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions", h.listBranchVersions)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}", h.getBranchVersion)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/preview", h.previewBranchVersion)
@@ -477,3 +478,23 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusCreated, newVer)
 }
+
+// analyzeBranchGaps executes decoupled fast gap analysis against the branch's target requirements.
+func (h *branchHandler) analyzeBranchGaps(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	if strings.TrimSpace(branchID) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "branch ID is required", "")
+		return
+	}
+
+	report, err := h.svc.AnalyzeGaps(ctx, userID, branchID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
