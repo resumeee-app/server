@@ -30,6 +30,8 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", h.deleteBranch)
 	mux.HandleFunc("POST /api/v1/branches/{id}/generate", h.generateBranchVersion)
 	mux.HandleFunc("POST /api/v1/branches/{id}/gap-analysis", h.analyzeBranchGaps)
+	mux.HandleFunc("GET /api/v1/branches/{id}/prompt-preview", h.getPromptPreview)
+	mux.HandleFunc("POST /api/v1/branches/{id}/prompt-preview", h.previewPrompt)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions", h.listBranchVersions)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}", h.getBranchVersion)
 	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/preview", h.previewBranchVersion)
@@ -84,6 +86,16 @@ type SyncBranchesResponse struct {
 
 type EditVersionRequest struct {
 	TailoredContent *domain.TailoredContent `json:"tailored_content"`
+}
+
+type PromptPreviewRequest struct {
+	TargetRole         *string  `json:"target_role,omitempty"`
+	TargetCompany      *string  `json:"target_company,omitempty"`
+	TargetRequirements *string  `json:"target_requirements,omitempty"`
+	BranchInstructions *string  `json:"branch_instructions,omitempty"`
+	PresetID           *string  `json:"preset_id,omitempty"`
+	PinnedEntityIDs    []string `json:"pinned_entity_ids,omitempty"`
+	ExcludedEntityIDs  []string `json:"excluded_entity_ids,omitempty"`
 }
 
 // listBranches retrieves all branches for the authenticated user, optionally filtering for stale branches.
@@ -496,5 +508,60 @@ func (h *branchHandler) analyzeBranchGaps(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, report)
+}
+
+// getPromptPreview renders the system and user prompt strings using the branch's saved state.
+func (h *branchHandler) getPromptPreview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	id := r.PathValue("id")
+	if strings.TrimSpace(id) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "branch ID is required", "")
+		return
+	}
+
+	preview, err := h.svc.GetPromptPreview(ctx, userID, id, nil)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, preview)
+}
+
+// previewPrompt renders the system and user prompt strings, optionally incorporating live draft overrides from the request body.
+func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	id := r.PathValue("id")
+	if strings.TrimSpace(id) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "branch ID is required", "")
+		return
+	}
+
+	var opts *domain.PromptPreviewOptions
+	if r.Body != nil && r.Body != http.NoBody {
+		var req PromptPreviewRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		opts = &domain.PromptPreviewOptions{
+			TargetRole:         req.TargetRole,
+			TargetCompany:      req.TargetCompany,
+			TargetRequirements: req.TargetRequirements,
+			BranchInstructions: req.BranchInstructions,
+			PresetID:           req.PresetID,
+			PinnedEntityIDs:    req.PinnedEntityIDs,
+			ExcludedEntityIDs:  req.ExcludedEntityIDs,
+		}
+	}
+
+	preview, err := h.svc.GetPromptPreview(ctx, userID, id, opts)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, preview)
 }
 

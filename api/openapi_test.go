@@ -58,6 +58,7 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"/branches:",
 		"/branches/{id}:",
 		"/branches/{id}/generate:",
+		"/branches/{id}/prompt-preview:",
 		"/branches/sync:",
 		"/branches/{id}/versions:",
 		"/branches/{id}/versions/{v}:",
@@ -90,6 +91,7 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"AsyncJobEnqueued:",
 		"SyncBranchesResponse:",
 		"EditVersionRequest:",
+		"PromptPreviewResponse:",
 	}
 
 	for _, schema := range expectedSchemas {

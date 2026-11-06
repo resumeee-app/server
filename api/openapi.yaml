@@ -1310,6 +1310,57 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /branches/{id}/prompt-preview:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+    get:
+      tags:
+        - Branches & Versions
+      summary: Preview prompt draft for a branch
+      description: >-
+        Renders the assembled system and user prompt templates against the candidate's
+        current master profile and branch target requirements without calling the LLM.
+      operationId: getPromptPreview
+      responses:
+        '200':
+          description: Rendered prompt draft preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptPreviewResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Branches & Versions
+      summary: Preview prompt draft with transient modifications
+      description: >-
+        Renders the assembled system and user prompt templates incorporating optional
+        transient draft overrides (target role, company, requirements, branch instructions)
+        without calling the LLM or persisting changes to the branch.
+      operationId: previewPrompt
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptPreviewRequest'
+      responses:
+        '200':
+          description: Rendered prompt draft preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptPreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /branches/sync:
     post:
       tags:
@@ -2595,6 +2646,49 @@ components:
             type: string
         active_version_id:
           type: string
+
+    PromptPreviewResponse:
+      type: object
+      required:
+        - system_prompt
+        - user_prompt
+      properties:
+        system_prompt:
+          type: string
+          description: Rendered system prompt containing grounding rules and provenance constraints.
+        user_prompt:
+          type: string
+          description: Rendered user prompt containing writing rules, target requirements, and serialized profile data.
+
+    PromptPreviewRequest:
+      type: object
+      properties:
+        target_role:
+          type: string
+          description: Optional override for the target role.
+        target_company:
+          type: string
+          description: Optional override for the target company.
+        target_requirements:
+          type: string
+          description: Optional override for target requirements / job description.
+        branch_instructions:
+          type: string
+          description: Optional override for custom branch instructions.
+        preset_id:
+          type: string
+          nullable: true
+          description: Optional override for formatting preset ID.
+        pinned_entity_ids:
+          type: array
+          items:
+            type: string
+          description: Optional override for pinned entity IDs.
+        excluded_entity_ids:
+          type: array
+          items:
+            type: string
+          description: Optional override for excluded entity IDs.
 
     TailoredBullet:
       type: object
