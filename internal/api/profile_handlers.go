@@ -16,6 +16,7 @@ import (
 
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
+	"resumeee/internal/worker"
 )
 
 type profileHandler struct {
@@ -33,6 +34,9 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("POST /api/v1/profile/jsonresume/import", h.importJSONResume)
 	mux.HandleFunc("GET /api/v1/profile/jsonresume/export", h.exportJSONResume)
 	mux.HandleFunc("POST /api/v1/profile/pdf/parse", h.parsePDFResume)
+	mux.HandleFunc("GET /api/v1/profile/pdf/jobs/{id}", h.getPDFParseJob)
+	mux.HandleFunc("GET /profile/pdf/jobs/{id}", h.getPDFParseJob)
+	mux.HandleFunc("GET /api/v1/profile/pdf/parse/{id}", h.getPDFParseJob)
 	mux.HandleFunc("POST /api/v1/profile/pdf/commit", h.commitPDFResume)
 
 	// Skills
@@ -496,10 +500,18 @@ func (h *profileHandler) resolveExtractionProviderAndModel(ctx context.Context, 
 	return provider, model
 }
 
-// parsePDFResume parses an uploaded candidate resume PDF and extracts structured data via an LLM.
+// AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
+type AsyncPDFJobResponse struct {
+	JobID   string                   `json:"job_id"`
+	Status  domain.PDFParseJobStatus `json:"status"`
+	Message string                   `json:"message"`
+}
+
+// parsePDFResume parses an uploaded candidate resume PDF. By default, it operates asynchronously,
+// enqueuing the extraction task and returning 202 Accepted with a job ID for status polling.
+// If the request explicitly supplies ?sync=true, it executes synchronously for backward compatibility.
 func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), DefaultPDFParseTimeout)
-	defer cancel()
+	ctx := r.Context()
 
 	// 10 MB maximum upload size
 	const maxUploadSize = 10 << 20
@@ -520,6 +532,11 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "file exceeds maximum allowed size (10MB) or invalid form data", err.Error())
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 
 	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
@@ -585,78 +602,180 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	extracted, err := h.cfg.ResumeExtractor.ExtractResume(ctx, text, provider, model)
-	if err != nil {
-		logLevel := slog.LevelError
-		var (
-			logMsg     string
-			statusCode int
-			errorCode  string
-			respMsg    string
-		)
+	// Determine execution mode: asynchronous by default when an enqueuer is configured
+	// (or when ?async=true), synchronous when ?sync=true or when no worker queue is configured.
+	runAsync := strings.EqualFold(r.URL.Query().Get("async"), "true") || (h.cfg.PDFJobEnqueuer != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
 
-		switch {
-		case errors.Is(err, llm.ErrNoProviders):
-			logMsg = "no LLM provider configured on server"
-			statusCode = http.StatusServiceUnavailable
-			errorCode = CodeServiceUnavailable
-		case errors.Is(err, llm.ErrUnauthorized):
-			logMsg = "upstream LLM provider authentication failed"
-			statusCode = http.StatusBadGateway
-			errorCode = CodeUpstreamError
-		case errors.Is(err, llm.ErrRateLimited):
-			logMsg = "upstream LLM provider rate limit exceeded"
-			statusCode = http.StatusTooManyRequests
-			errorCode = CodeUpstreamError
-			respMsg = "upstream LLM provider rate limit exceeded; retry shortly"
-		case errors.Is(err, llm.ErrUpstream):
-			logMsg = "upstream LLM provider returned server error"
-			statusCode = http.StatusBadGateway
-			errorCode = CodeUpstreamError
-		case errors.Is(err, llm.ErrInvalidResponse):
-			logMsg = "upstream LLM provider returned invalid response"
-			statusCode = http.StatusBadGateway
-			errorCode = CodeUpstreamError
-		case errors.Is(err, llm.ErrProviderNotFound):
-			logLevel = slog.LevelWarn
-			logMsg = "requested LLM provider not configured"
-			statusCode = http.StatusBadRequest
-			errorCode = CodeInvalidRequest
-		case errors.Is(err, context.DeadlineExceeded):
-			logMsg = "upstream LLM request timed out"
-			statusCode = http.StatusGatewayTimeout
-			errorCode = CodeUpstreamError
-			respMsg = "upstream LLM parsing timed out after 10 minutes"
-		case errors.Is(err, domain.ErrValidation):
-			logLevel = slog.LevelWarn
-			logMsg = "failed to extract structured resume validation error"
-			statusCode = http.StatusBadRequest
-			errorCode = CodeInvalidRequest
-			respMsg = "failed to extract structured resume: " + err.Error()
-		default:
-			logMsg = "unexpected error during resume extraction"
+	// Synchronous execution path
+	if !runAsync {
+		llmTimeout := h.cfg.LLMTimeout
+		if llmTimeout <= 0 {
+			llmTimeout = DefaultPDFParseTimeout
 		}
+		syncCtx, cancel := context.WithTimeout(r.Context(), llmTimeout)
+		defer cancel()
 
-		if respMsg == "" {
-			respMsg = logMsg
+		extracted, err := h.cfg.ResumeExtractor.ExtractResume(syncCtx, text, provider, model)
+		if err != nil {
+			logLevel := slog.LevelError
+			var (
+				logMsg     string
+				statusCode int
+				errorCode  string
+				respMsg    string
+			)
+
+			switch {
+			case errors.Is(err, llm.ErrNoProviders):
+				logMsg = "no LLM provider configured on server"
+				statusCode = http.StatusServiceUnavailable
+				errorCode = CodeServiceUnavailable
+			case errors.Is(err, llm.ErrUnauthorized):
+				logMsg = "upstream LLM provider authentication failed"
+				statusCode = http.StatusBadGateway
+				errorCode = CodeUpstreamError
+			case errors.Is(err, llm.ErrRateLimited):
+				logMsg = "upstream LLM provider rate limit exceeded"
+				statusCode = http.StatusTooManyRequests
+				errorCode = CodeUpstreamError
+				respMsg = "upstream LLM provider rate limit exceeded; retry shortly"
+			case errors.Is(err, llm.ErrUpstream):
+				logMsg = "upstream LLM provider returned server error"
+				statusCode = http.StatusBadGateway
+				errorCode = CodeUpstreamError
+			case errors.Is(err, llm.ErrInvalidResponse):
+				logMsg = "upstream LLM provider returned invalid response"
+				statusCode = http.StatusBadGateway
+				errorCode = CodeUpstreamError
+			case errors.Is(err, llm.ErrProviderNotFound):
+				logLevel = slog.LevelWarn
+				logMsg = "requested LLM provider not configured"
+				statusCode = http.StatusBadRequest
+				errorCode = CodeInvalidRequest
+			case errors.Is(err, context.DeadlineExceeded):
+				logMsg = "upstream LLM request timed out"
+				statusCode = http.StatusGatewayTimeout
+				errorCode = CodeUpstreamError
+				respMsg = "upstream LLM parsing timed out after 10 minutes"
+			case errors.Is(err, domain.ErrValidation):
+				logLevel = slog.LevelWarn
+				logMsg = "failed to extract structured resume validation error"
+				statusCode = http.StatusBadRequest
+				errorCode = CodeInvalidRequest
+				respMsg = "failed to extract structured resume: " + err.Error()
+			default:
+				logMsg = "unexpected error during resume extraction"
+			}
+
+			if respMsg == "" {
+				respMsg = logMsg
+			}
+
+			if h.cfg.Logger != nil {
+				h.cfg.Logger.Log(ctx, logLevel, logMsg, "error", err, "provider", provider)
+			}
+
+			if statusCode > 0 {
+				writeError(w, statusCode, errorCode, respMsg, "")
+			} else {
+				writeDomainError(w, err)
+			}
+			return
 		}
 
 		if h.cfg.Logger != nil {
-			h.cfg.Logger.Log(ctx, logLevel, logMsg, "error", err, "provider", provider)
+			h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume synchronously", "filename", fileHeader.Filename, "provider", provider, "model", model)
 		}
+		writeJSON(w, http.StatusOK, extracted)
+		return
+	}
 
-		if statusCode > 0 {
-			writeError(w, statusCode, errorCode, respMsg, "")
-		} else {
-			writeDomainError(w, err)
+	// Asynchronous mode (default): enqueue and return 202 Accepted
+	jobID := "pdf-job-" + uuid.New().String()
+	now := time.Now().UTC()
+	job := &domain.PDFParseJob{
+		ID:        jobID,
+		UserID:    userID,
+		Status:    domain.PDFParseJobStatusPending,
+		Filename:  fileHeader.Filename,
+		Provider:  provider,
+		Model:     model,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if h.cfg.PDFJobRepo == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
+		return
+	}
+
+	if err := h.cfg.PDFJobRepo.CreateJob(ctx, job); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	task := worker.PDFParseJobTask{
+		JobID:    jobID,
+		UserID:   userID,
+		RawText:  text,
+		Provider: provider,
+		Model:    model,
+	}
+
+	if h.cfg.PDFJobEnqueuer == nil {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server", "job_id", jobID)
 		}
+		writeError(w, http.StatusServiceUnavailable, CodeServiceUnavailable, "PDF worker queue not configured on server", "")
+		return
+	}
+
+	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
+		if errors.Is(err, domain.ErrQueueFull) {
+			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
+			return
+		}
+		writeDomainError(w, err)
 		return
 	}
 
 	if h.cfg.Logger != nil {
-		h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume", "filename", fileHeader.Filename, "provider", provider, "model", model)
+		h.cfg.Logger.InfoContext(ctx, "enqueued pdf resume parse job", "job_id", jobID, "filename", fileHeader.Filename)
 	}
-	writeJSON(w, http.StatusOK, extracted)
+
+	writeJSON(w, http.StatusAccepted, AsyncPDFJobResponse{
+		JobID:   jobID,
+		Status:  domain.PDFParseJobStatusPending,
+		Message: "PDF parsing job queued",
+	})
+}
+
+// getPDFParseJob returns the status and candidate result of an asynchronous PDF resume parsing job.
+func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "job id is required", "")
+		return
+	}
+
+	if h.cfg.PDFJobRepo == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
+		return
+	}
+
+	job, err := h.cfg.PDFJobRepo.GetJob(ctx, userID, jobID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, job)
 }
 
 // commitPDFResume commits approved JSON Resume data into the user's master career graph.

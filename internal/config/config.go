@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config encapsulates all runtime configuration for Resumeee.
@@ -27,6 +28,8 @@ type Config struct {
 	LogLevel            slog.Level
 	LLMDebugPrompts     bool
 	LLMDebugDir         string
+	RESTTimeout         time.Duration
+	LLMTimeout          time.Duration
 }
 
 // Default configuration constants.
@@ -38,6 +41,8 @@ const (
 	DefaultWorkerQueueSize   = 100
 	DefaultEnvironment       = "development"
 	DefaultLLMDebugDir       = "data/llm"
+	DefaultRESTTimeout       = 20 * time.Second
+	DefaultLLMTimeout        = 10 * time.Minute
 )
 
 // Load reads configuration from process environment variables and a local .env file if present.
@@ -61,6 +66,8 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		LogLevel:          slog.LevelInfo,
 		LLMDebugPrompts:   false,
 		LLMDebugDir:       DefaultLLMDebugDir,
+		RESTTimeout:       DefaultRESTTimeout,
+		LLMTimeout:        DefaultLLMTimeout,
 	}
 
 	// Port
@@ -159,6 +166,41 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 	}
 	if debugDirVal != "" {
 		cfg.LLMDebugDir = debugDirVal
+	}
+
+	// REST Timeout: checks REST_TIMEOUT, falling back to HTTP_TIMEOUT and RESUMEEE_CLIENT_TIMEOUT
+	restTimeoutVal := strings.TrimSpace(lookup("REST_TIMEOUT"))
+	if restTimeoutVal == "" {
+		restTimeoutVal = strings.TrimSpace(lookup("HTTP_TIMEOUT"))
+	}
+	if restTimeoutVal == "" {
+		restTimeoutVal = strings.TrimSpace(lookup("RESUMEEE_CLIENT_TIMEOUT"))
+	}
+	if restTimeoutVal != "" {
+		d, err := time.ParseDuration(restTimeoutVal)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REST_TIMEOUT value %q: %w", restTimeoutVal, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid REST_TIMEOUT value %v: must be greater than 0", d)
+		}
+		cfg.RESTTimeout = d
+	}
+
+	// LLM Timeout: checks LLM_TIMEOUT, falling back to LLM_CALL_TIMEOUT
+	llmTimeoutVal := strings.TrimSpace(lookup("LLM_TIMEOUT"))
+	if llmTimeoutVal == "" {
+		llmTimeoutVal = strings.TrimSpace(lookup("LLM_CALL_TIMEOUT"))
+	}
+	if llmTimeoutVal != "" {
+		d, err := time.ParseDuration(llmTimeoutVal)
+		if err != nil {
+			return nil, fmt.Errorf("invalid LLM_TIMEOUT value %q: %w", llmTimeoutVal, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid LLM_TIMEOUT value %v: must be greater than 0", d)
+		}
+		cfg.LLMTimeout = d
 	}
 
 	return cfg, nil

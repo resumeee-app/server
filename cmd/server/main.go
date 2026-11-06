@@ -124,6 +124,7 @@ func run(parent context.Context, args ...string) error {
 	profileRepo := sqlite.NewProfileRepository(db)
 	presetRepo := sqlite.NewPresetRepository(db)
 	templateRepo := sqlite.NewTemplateRepository(db)
+	pdfJobRepo := sqlite.NewPDFParseJobRepository(db)
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
@@ -131,19 +132,23 @@ func run(parent context.Context, args ...string) error {
 	// 4. Initialize LLM registry and service adapter
 	llmRegistry := llm.NewRegistry(cfg, llm.WithLogger(logger))
 	llmAdapter := &llmServiceAdapter{registry: llmRegistry}
+	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
 
 	// 5. Initialize and start asynchronous generation worker pool
 	workerPool := worker.NewPool(worker.PoolConfig{
-		Concurrency:  cfg.WorkerConcurrency,
-		QueueSize:    cfg.WorkerQueueSize,
-		BranchRepo:   branchRepo,
-		ProfileRepo:  profileRepo,
-		PresetRepo:   presetRepo,
-		TemplateRepo: templateRepo,
-		LLMService:   llmAdapter,
-		Validator:    provValidator,
-		Renderer:     templateRenderer,
-		Logger:       logger,
+		Concurrency:     cfg.WorkerConcurrency,
+		QueueSize:       cfg.WorkerQueueSize,
+		BranchRepo:      branchRepo,
+		ProfileRepo:     profileRepo,
+		PresetRepo:      presetRepo,
+		TemplateRepo:    templateRepo,
+		PDFJobRepo:      pdfJobRepo,
+		ResumeExtractor: resumeExtractor,
+		LLMTimeout:      cfg.LLMTimeout,
+		LLMService:      llmAdapter,
+		Validator:       provValidator,
+		Renderer:        templateRenderer,
+		Logger:          logger,
 	})
 	if err := workerPool.RecoverStaleJobs(ctx, "server restarted during job processing"); err != nil {
 		logger.Warn("failed to recover stale jobs", "err", err)
@@ -169,15 +174,19 @@ func run(parent context.Context, args ...string) error {
 		PresetRepo:      presetRepo,
 		TemplateRepo:    templateRepo,
 		BranchRepo:      branchRepo,
+		PDFJobRepo:      pdfJobRepo,
 		BranchService:   branchSvc,
 		ProfileService:  profileSvc,
 		PDFExtractor:    pdf.NewExtractor(),
-		ResumeExtractor: llm.NewDefaultResumeExtractor(llmRegistry),
+		ResumeExtractor: resumeExtractor,
 		Renderer:        templateRenderer,
 		Validator:       provValidator,
 		JobEnqueuer:     workerPool,
+		PDFJobEnqueuer:  workerPool,
 		ModelEnumerator: llmRegistry,
 		DefaultUserID:   cfg.DefaultUserID,
+		RESTTimeout:     cfg.RESTTimeout,
+		LLMTimeout:      cfg.LLMTimeout,
 		Logger:          logger,
 	})
 
@@ -194,10 +203,9 @@ func run(parent context.Context, args ...string) error {
 	// 9. Unify API and UI routes under single root router
 	rootHandler := buildRootHandler(apiRouter, uiHandler)
 
-	const defaultServerWriteTimeout = 10*time.Minute + 30*time.Second
-	writeTimeout := uiCfg.ClientTimeout
-	if writeTimeout < defaultServerWriteTimeout {
-		writeTimeout = defaultServerWriteTimeout
+	writeTimeout := cfg.RESTTimeout + 10*time.Second
+	if writeTimeout < 30*time.Second {
+		writeTimeout = 30 * time.Second
 	}
 	server := buildServer(fmt.Sprintf(":%d", cfg.Port), rootHandler, writeTimeout)
 

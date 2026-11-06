@@ -204,14 +204,48 @@ paths:
                   description: Optional LLM model override
       responses:
         '200':
-          description: Successfully parsed PDF into candidate JSON Resume
+          description: Successfully parsed PDF into candidate JSON Resume (synchronous mode)
           content:
             application/json:
               schema:
                 type: object
                 description: Candidate JSON Resume draft
+        '202':
+          description: PDF parsing job queued for asynchronous background processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncPDFJobResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /profile/pdf/jobs/{id}:
+    get:
+      tags:
+        - Master Profile
+      summary: Get asynchronous PDF parse job status and candidate result
+      description: Returns the lifecycle state and candidate JSON Resume result of an asynchronous PDF parsing job.
+      operationId: getPDFParseJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique PDF parse job identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PDF parse job state and result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PDFParseJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2826,6 +2860,75 @@ components:
         message:
           type: string
           example: "Resume generation job queued"
+
+    AsyncPDFJobResponse:
+      type: object
+      required:
+        - job_id
+        - status
+        - message
+      properties:
+        job_id:
+          type: string
+          example: "pdf-job-7a3b8c4d-1234-5678-90ab-cdef12345678"
+        status:
+          $ref: '#/components/schemas/PDFParseJobStatus'
+        message:
+          type: string
+          example: "PDF parsing job queued"
+
+    PDFParseJobStatus:
+      type: string
+      enum:
+        - pending
+        - processing
+        - completed
+        - failed
+      example: "pending"
+
+    PDFParseJob:
+      type: object
+      required:
+        - id
+        - user_id
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          example: "pdf-job-7a3b8c4d-1234-5678-90ab-cdef12345678"
+        user_id:
+          type: string
+          example: "default"
+        status:
+          $ref: '#/components/schemas/PDFParseJobStatus'
+        filename:
+          type: string
+          example: "resume.pdf"
+        provider:
+          type: string
+          example: "google"
+        model:
+          type: string
+          example: "gemini-4-argon"
+        result:
+          type: object
+          description: Structured JSON Resume extracted by LLM
+          nullable: true
+        error_message:
+          type: string
+          description: Technical error message if parsing failed
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
 
     SyncBranchesRequest:
       type: object

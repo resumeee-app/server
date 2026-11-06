@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 )
@@ -119,4 +121,25 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// TimeoutMiddleware sets a request context cancellation deadline bounded by the given duration.
+// If timeout <= 0, it falls back to a 20-second default boundary.
+// For /profile/pdf/parse (normalized), handler-level timeout budgeting is used to accommodate LLM extraction.
+func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cleanPath := path.Clean(r.URL.Path)
+			if cleanPath == "/api/v1/profile/pdf/parse" || strings.HasSuffix(cleanPath, "/profile/pdf/parse") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

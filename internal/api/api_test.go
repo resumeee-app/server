@@ -26,6 +26,7 @@ import (
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
 	"resumeee/internal/validator"
+	"resumeee/internal/worker"
 )
 
 type testEnv struct {
@@ -37,6 +38,8 @@ type testEnv struct {
 	branchRepo   domain.BranchRepository
 	profileSvc   profile.Service
 	enqueuer     *api.ChannelJobEnqueuer
+	pdfJobRepo   domain.PDFParseJobRepository
+	pdfEnqueuer  *api.ChannelPDFJobEnqueuer
 }
 
 func setupTestServer(t *testing.T, queueCap int) *testEnv {
@@ -1073,6 +1076,14 @@ func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtrac
 }
 
 func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger) *testEnv {
+	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, logger, nil)
+}
+
+func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, nil, pdfEnqueuer)
+}
+
+func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	t.Helper()
 
 	db, err := sqlite.New(":memory:")
@@ -1090,10 +1101,16 @@ func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.Res
 	presetRepo := sqlite.NewPresetRepository(db)
 	templateRepo := sqlite.NewTemplateRepository(db)
 	branchRepo := sqlite.NewBranchRepository(db)
+	pdfJobRepo := sqlite.NewPDFParseJobRepository(db)
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
 	enqueuer := api.NewChannelJobEnqueuer(100)
+
+	var enq api.PDFJobEnqueuer
+	if pdfEnqueuer != nil {
+		enq = pdfEnqueuer
+	}
 
 	router := api.NewRouter(api.RouterConfig{
 		ProfileRepo:     profileRepo,
@@ -1101,6 +1118,8 @@ func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.Res
 		TemplateRepo:    templateRepo,
 		BranchRepo:      branchRepo,
 		ProfileService:  profileSvc,
+		PDFJobRepo:      pdfJobRepo,
+		PDFJobEnqueuer:  enq,
 		PDFExtractor:    pdf.NewExtractor(),
 		ResumeExtractor: resumeExtractor,
 		Renderer:        templateRenderer,
@@ -1124,6 +1143,8 @@ func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.Res
 		branchRepo:   branchRepo,
 		profileSvc:   profileSvc,
 		enqueuer:     enqueuer,
+		pdfJobRepo:   pdfJobRepo,
+		pdfEnqueuer:  pdfEnqueuer,
 	}
 }
 
@@ -1306,6 +1327,185 @@ func TestProfilePDF_Parse(t *testing.T) {
 		remaining := time.Until(capturedDeadline)
 		if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute {
 			t.Fatalf("expected deadline around 10 minutes, got %v", remaining)
+		}
+	})
+}
+
+func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
+	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+
+	t.Run("Enqueue job, verify 202 Accepted, and poll status through completion", func(t *testing.T) {
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+		}))
+
+		enqueuer := api.NewChannelPDFJobEnqueuer(10)
+		env := setupTestServerWithPDFEnqueuer(t, mockExtractor, enqueuer)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("create form file failed: %v", err)
+		}
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusAccepted {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 202 Accepted, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+
+		var accepted api.AsyncPDFJobResponse
+		if err := json.NewDecoder(resp.Body).Decode(&accepted); err != nil {
+			t.Fatalf("failed to decode accepted response: %v", err)
+		}
+		if accepted.JobID == "" {
+			t.Fatalf("expected non-empty job ID")
+		}
+		if accepted.Status != domain.PDFParseJobStatusPending {
+			t.Errorf("expected pending status, got %s", accepted.Status)
+		}
+
+		// Verify task was queued into enqueuer
+		select {
+		case task := <-enqueuer.Channel():
+			if task.JobID != accepted.JobID {
+				t.Errorf("expected queued job ID %s, got %s", accepted.JobID, task.JobID)
+			}
+		default:
+			t.Fatalf("expected task in enqueuer channel")
+		}
+
+		// Query job status via GET /api/v1/profile/pdf/jobs/{id}
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("get job failed: %v", err)
+		}
+		defer func() { _ = getResp.Body.Close() }()
+
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
+		}
+		var job domain.PDFParseJob
+		if err := json.NewDecoder(getResp.Body).Decode(&job); err != nil {
+			t.Fatalf("failed to decode job: %v", err)
+		}
+		if job.ID != accepted.JobID || job.Status != domain.PDFParseJobStatusPending {
+			t.Errorf("expected pending job %s, got %+v", accepted.JobID, job)
+		}
+
+		// Cross-user isolation: user B should receive 404
+		isoReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		isoReq.Header.Set("X-User-ID", "other-user")
+		isoResp, err := client.Do(isoReq)
+		if err != nil {
+			t.Fatalf("isolated request failed: %v", err)
+		}
+		_ = isoResp.Body.Close()
+		if isoResp.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 for cross-user job access, got %d", isoResp.StatusCode)
+		}
+
+		// Simulate worker completing the job
+		extractedResume := &profile.JSONResume{
+			Basics: profile.JSONResumeBasics{Name: "Morgan BrandNew"},
+		}
+		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, domain.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
+			t.Fatalf("failed to update job status: %v", err)
+		}
+
+		// Poll again and verify completion with structured result
+		pollReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		pollResp, err := client.Do(pollReq)
+		if err != nil {
+			t.Fatalf("poll job failed: %v", err)
+		}
+		defer func() { _ = pollResp.Body.Close() }()
+
+		var completedJob domain.PDFParseJob
+		if err := json.NewDecoder(pollResp.Body).Decode(&completedJob); err != nil {
+			t.Fatalf("failed to decode completed job: %v", err)
+		}
+		if completedJob.Status != domain.PDFParseJobStatusCompleted {
+			t.Errorf("expected completed status, got %s", completedJob.Status)
+		}
+		if completedJob.Result == nil {
+			t.Fatalf("expected non-nil completed job result")
+		}
+		resMap, ok := completedJob.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("expected map[string]any result, got %T", completedJob.Result)
+		}
+		basics, ok := resMap["basics"].(map[string]any)
+		if !ok || basics["name"] != "Morgan BrandNew" {
+			t.Errorf("expected result with name Morgan BrandNew, got %+v", resMap)
+		}
+	})
+
+	t.Run("Queue full returns 503 SERVICE_UNAVAILABLE", func(t *testing.T) {
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return `{}`, nil
+		}))
+
+		// Zero capacity enqueuer to instantly trigger ErrQueueFull
+		enqueuer := api.NewChannelPDFJobEnqueuer(1)
+		// Pre-fill buffer
+		_ = enqueuer.EnqueuePDFJob(worker.PDFParseJobTask{JobID: "fill"})
+
+		env := setupTestServerWithPDFEnqueuer(t, mockExtractor, enqueuer)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, _ := mw.CreateFormFile("file", "resume.pdf")
+		_, _ = part.Write(pdfBytes)
+		_ = mw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 Service Unavailable, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Non-existent job returns 404 NOT_FOUND", func(t *testing.T) {
+		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			return `{}`, nil
+		}))
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		client := env.server.Client()
+		baseURL := env.server.URL
+
+		req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/non-existent-id", nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404 Not Found, got %d", resp.StatusCode)
 		}
 	})
 }
@@ -2580,4 +2780,3 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 		t.Errorf("expected non-empty text in branch preview")
 	}
 }
-

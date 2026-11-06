@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"resumeee/internal/config"
 )
@@ -45,6 +46,12 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.GeminiAPIKey != "" || cfg.OpenAIAPIKey != "" || cfg.AnthropicAPIKey != "" {
 		t.Errorf("expected empty API keys by default")
+	}
+	if cfg.RESTTimeout != 20*time.Second {
+		t.Errorf("expected default RESTTimeout 20s, got %v", cfg.RESTTimeout)
+	}
+	if cfg.LLMTimeout != 10*time.Minute {
+		t.Errorf("expected default LLMTimeout 10m, got %v", cfg.LLMTimeout)
 	}
 }
 
@@ -700,4 +707,88 @@ EQUALS_VAL=foo=bar=baz
 	}
 }
 
+func TestLoadTimeouts(t *testing.T) {
+	t.Run("Custom REST_TIMEOUT and LLM_TIMEOUT", func(t *testing.T) {
+		env := map[string]string{
+			"REST_TIMEOUT": "45s",
+			"LLM_TIMEOUT":  "15m",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.RESTTimeout != 45*time.Second {
+			t.Errorf("expected RESTTimeout 45s, got %v", cfg.RESTTimeout)
+		}
+		if cfg.LLMTimeout != 15*time.Minute {
+			t.Errorf("expected LLMTimeout 15m, got %v", cfg.LLMTimeout)
+		}
+	})
 
+	t.Run("Fallback to HTTP_TIMEOUT or RESUMEEE_CLIENT_TIMEOUT", func(t *testing.T) {
+		env := map[string]string{
+			"RESUMEEE_CLIENT_TIMEOUT": "30s",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.RESTTimeout != 30*time.Second {
+			t.Errorf("expected RESTTimeout 30s from fallback, got %v", cfg.RESTTimeout)
+		}
+	})
+
+	t.Run("Fallback to LLM_CALL_TIMEOUT", func(t *testing.T) {
+		env := map[string]string{
+			"LLM_CALL_TIMEOUT": "12m",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.LLMTimeout != 12*time.Minute {
+			t.Errorf("expected LLMTimeout 12m from fallback, got %v", cfg.LLMTimeout)
+		}
+	})
+}
+
+func TestLoadInvalidTimeouts(t *testing.T) {
+	invalidCases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{
+			name: "Invalid REST_TIMEOUT string",
+			env:  map[string]string{"REST_TIMEOUT": "not-a-duration"},
+		},
+		{
+			name: "Negative REST_TIMEOUT",
+			env:  map[string]string{"REST_TIMEOUT": "-5s"},
+		},
+		{
+			name: "Zero REST_TIMEOUT",
+			env:  map[string]string{"REST_TIMEOUT": "0s"},
+		},
+		{
+			name: "Invalid LLM_TIMEOUT string",
+			env:  map[string]string{"LLM_TIMEOUT": "invalid"},
+		},
+		{
+			name: "Negative LLM_TIMEOUT",
+			env:  map[string]string{"LLM_TIMEOUT": "-1m"},
+		},
+		{
+			name: "Zero LLM_TIMEOUT",
+			env:  map[string]string{"LLM_TIMEOUT": "0s"},
+		},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := config.LoadFrom(func(k string) string { return tc.env[k] })
+			if err == nil {
+				t.Fatalf("expected error for invalid timeout config, got nil")
+			}
+		})
+	}
+}
