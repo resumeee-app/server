@@ -12,9 +12,14 @@ services:
     environment:
       - PORT=8080
       - DB_PATH=/data/resumeee.db
+      - ADMIN_MODE=${ADMIN_MODE:-false}
       - DEFAULT_USER_ID=${DEFAULT_USER_ID:-default}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-}
+      - LLM_DAILY_REQUEST_LIMIT=${LLM_DAILY_REQUEST_LIMIT:-50}
+      - LLM_MONTHLY_TOKEN_LIMIT=${LLM_MONTHLY_TOKEN_LIMIT:-1000000}
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
       - WORKER_QUEUE_SIZE=${WORKER_QUEUE_SIZE:-100}
+      - MAX_CONCURRENT_JOBS_PER_TENANT=${MAX_CONCURRENT_JOBS_PER_TENANT:-2}
       - ENV=${ENV:-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # Hosted LLM API Keys (injected from host environment)
@@ -50,6 +55,7 @@ services:
       - "${WEB_PORT:-3000}:8080"
     environment:
       - VITE_API_BASE_URL=/api/v1
+      - ADMIN_MODE=${ADMIN_MODE:-false}
     networks:
       - resumeee-net
     depends_on:
