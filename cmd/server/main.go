@@ -23,9 +23,6 @@ import (
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository/sqlite"
-	"resumeee/internal/ui"
-	uiClient "resumeee/internal/ui/client"
-	uiConfig "resumeee/internal/ui/config"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -39,6 +36,13 @@ func main() {
 }
 
 // run orchestrates database initialization, migrations, seeding, background worker startup, and HTTP serving.
+//
+// Parameters:
+//   - parent: The parent context governing server lifecycle and cancellation signals.
+//   - args: Command line arguments passed to flag parsing.
+//
+// Returns:
+//   - error: Non-nil if configuration loading, initialization, or serving fails.
 func run(parent context.Context, args ...string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -173,17 +177,7 @@ func run(parent context.Context, args ...string) error {
 		Logger:          logger,
 	})
 
-	// 8. Build Web UI handler with in-process API client
-	uiCfg, err := uiConfig.Load()
-	if err != nil {
-		return fmt.Errorf("loading ui configuration: %w", err)
-	}
-	uiCfg.Environment = cfg.Environment
-
-	apiClient := uiClient.NewInProcess(apiRouter, uiClient.WithTimeout(uiCfg.ClientTimeout))
-	uiHandler := ui.NewServer(uiCfg, apiClient, logger)
-
-	// 9. Build MCP server and HTTP handler
+	// 8. Build MCP server and HTTP handler
 	mcpCfg := resumeeeMCP.ServerConfig{
 		ProfileService:        profileSvc,
 		BranchService:         branchSvc,
@@ -204,8 +198,8 @@ func run(parent context.Context, args ...string) error {
 	mcpServer := resumeeeMCP.NewServer(mcpCfg)
 	mcpHandler := resumeeeMCP.NewHTTPHandler(mcpServer, mcpCfg)
 
-	// 10. Unify API, UI, and MCP routes under single root router
-	rootHandler := buildRootHandler(apiRouter, uiHandler, mcpHandler)
+	// 9. Unify API and MCP routes under single root router
+	rootHandler := buildRootHandler(apiRouter, mcpHandler)
 
 	writeTimeout := cfg.RESTTimeout + 10*time.Second
 	if writeTimeout < 30*time.Second {
@@ -240,12 +234,17 @@ func run(parent context.Context, args ...string) error {
 	return nil
 }
 
-// buildRootHandler unifies the API router, Web UI server, and MCP handler into a single http.Handler.
+// buildRootHandler unifies the API router and MCP handler into a single http.Handler.
 // - /api/v1/... and health endpoints are dispatched to the API router.
-// - /web/... and static assets are dispatched to the Web UI handler.
 // - /mcp/... and /mcp are dispatched to the MCP handler.
-// - Root path (/) issues a 302 Found redirect to /web.
-func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler, mcpHandler ...http.Handler) http.Handler {
+//
+// Parameters:
+//   - apiRouter: HTTP handler serving REST API endpoints and health checks (/api/v1, /health, /healthz).
+//   - mcpHandler: Optional HTTP handler serving Model Context Protocol (MCP) endpoints (/mcp, /mcp/).
+//
+// Returns:
+//   - http.Handler: The multiplexed root HTTP handler.
+func buildRootHandler(apiRouter http.Handler, mcpHandler ...http.Handler) http.Handler {
 	rootMux := http.NewServeMux()
 
 	// API and health routes
@@ -259,22 +258,18 @@ func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler, mcpHandler
 		rootMux.Handle("/mcp", mcpHandler[0])
 	}
 
-	// Root path redirect to /web
-	rootMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/web", http.StatusFound)
-	})
-
-	// Web UI routes
-	rootMux.Handle("/web/", uiHandler)
-	rootMux.Handle("/web", uiHandler)
-
-	// Static asset backward-compatibility alias
-	rootMux.Handle("/static/", uiHandler)
-
 	return rootMux
 }
 
 // buildServer configures an http.Server instance with defense-in-depth timeouts and header size boundaries.
+//
+// Parameters:
+//   - addr: Network address and port string to listen on (e.g. ":8080").
+//   - handler: Multiplexed root HTTP handler.
+//   - writeTimeout: Maximum duration before timing out writes of the response.
+//
+// Returns:
+//   - *http.Server: Configured HTTP server instance.
 func buildServer(addr string, handler http.Handler, writeTimeout time.Duration) *http.Server {
 	return &http.Server{
 		Addr:              addr,

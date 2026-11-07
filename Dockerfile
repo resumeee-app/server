@@ -25,12 +25,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /bin/resumeee-server \
     ./cmd/server
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -ldflags="-s -w -extldflags '-static'" \
-    -o /bin/resumeee-web \
-    ./cmd/web
-
 # Provide symlink /bin/resumeee -> /bin/resumeee-server for backward compatibility
 RUN ln -s /bin/resumeee-server /bin/resumeee
 
@@ -50,7 +44,6 @@ WORKDIR /home/appuser
 
 # Copy static binaries from builder
 COPY --from=builder /bin/resumeee-server /usr/local/bin/resumeee-server
-COPY --from=builder /bin/resumeee-web /usr/local/bin/resumeee-web
 COPY --from=builder /bin/resumeee /usr/local/bin/resumeee
 
 # Copy entrypoint router script

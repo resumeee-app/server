@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -155,68 +156,44 @@ func TestBuildRootHandler(t *testing.T) {
 		_, _ = w.Write([]byte(`{"full_name":"Test User"}`))
 	})
 
-	uiMux := http.NewServeMux()
-	uiMux.HandleFunc("GET /web", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`Workspace Dashboard`))
-	})
-	uiMux.HandleFunc("GET /web/{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`Workspace Dashboard`))
-	})
-	uiMux.HandleFunc("GET /web/static/css/styles.css", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`/* styles */`))
-	})
-	uiMux.HandleFunc("GET /static/css/styles.css", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`/* styles */`))
-	})
-
-	handler := buildRootHandler(apiMux, uiMux)
+	handler := buildRootHandler(apiMux)
 
 	tests := []struct {
 		name         string
 		method       string
 		path         string
 		expectedCode int
-		expectedLoc  string
 		expectedBody string
 	}{
 		{
-			name:         "Root redirects to /web",
+			name:         "Root path returns 404 (legacy redirect removed)",
 			method:       http.MethodGet,
 			path:         "/",
-			expectedCode: http.StatusFound,
-			expectedLoc:  "/web",
+			expectedCode: http.StatusNotFound,
 		},
 		{
-			name:         "GET /web serves dashboard",
+			name:         "GET /web returns 404 (legacy UI removed)",
 			method:       http.MethodGet,
 			path:         "/web",
-			expectedCode: http.StatusOK,
-			expectedBody: "Workspace Dashboard",
+			expectedCode: http.StatusNotFound,
 		},
 		{
-			name:         "GET /web/ serves dashboard",
+			name:         "GET /web/ returns 404 (legacy UI removed)",
 			method:       http.MethodGet,
 			path:         "/web/",
-			expectedCode: http.StatusOK,
-			expectedBody: "Workspace Dashboard",
+			expectedCode: http.StatusNotFound,
 		},
 		{
-			name:         "GET /web/static/css/styles.css serves static asset",
+			name:         "GET /web/static/css/styles.css returns 404",
 			method:       http.MethodGet,
 			path:         "/web/static/css/styles.css",
-			expectedCode: http.StatusOK,
-			expectedBody: "/* styles */",
+			expectedCode: http.StatusNotFound,
 		},
 		{
-			name:         "GET /static/css/styles.css serves fallback static asset",
+			name:         "GET /static/css/styles.css returns 404",
 			method:       http.MethodGet,
 			path:         "/static/css/styles.css",
-			expectedCode: http.StatusOK,
-			expectedBody: "/* styles */",
+			expectedCode: http.StatusNotFound,
 		},
 		{
 			name:         "GET /api/v1/health serves api health",
@@ -262,12 +239,6 @@ func TestBuildRootHandler(t *testing.T) {
 
 			if rec.Code != tc.expectedCode {
 				t.Fatalf("expected status %d for %s %s, got %d", tc.expectedCode, tc.method, tc.path, rec.Code)
-			}
-			if tc.expectedLoc != "" {
-				loc := rec.Header().Get("Location")
-				if loc != tc.expectedLoc {
-					t.Errorf("expected Location %q, got %q", tc.expectedLoc, loc)
-				}
 			}
 			if tc.expectedBody != "" {
 				body := rec.Body.String()
@@ -322,107 +293,24 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 		t.Fatal("timed out waiting for unified server to boot")
 	}
 
-	t.Run("GET / redirects to /web", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
+	t.Run("Deprecated routes return 404", func(t *testing.T) {
+		deprecatedPaths := []string{
+			"/",
+			"/web",
+			"/web/profile",
+			"/web/static/css/styles.css",
 		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusFound {
-			t.Errorf("expected 302 Found, got %d", resp.StatusCode)
-		}
-		if loc := resp.Header.Get("Location"); loc != "/web" {
-			t.Errorf("expected Location /web, got %q", loc)
-		}
-	})
-
-	t.Run("GET /web serves dashboard with online status", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		bodyStr := string(body)
-		if !strings.Contains(bodyStr, "Workspace Dashboard") {
-			t.Errorf("expected body to contain 'Workspace Dashboard'")
-		}
-		if !strings.Contains(bodyStr, "badge-success") {
-			t.Errorf("expected in-process API connection to be healthy (badge-success)")
-		}
-	})
-
-	t.Run("GET /web/static/css/styles.css serves static css", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web/static/css/styles.css")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-	})
-
-	t.Run("GET /web/profile renders master profile view via in-process API", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web/profile")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "Master Profile") {
-			t.Errorf("expected body to contain 'Master Profile'")
-		}
-	})
-
-	t.Run("GET /web/branches renders branches view via in-process API", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web/branches")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "Tailored Branches") {
-			t.Errorf("expected body to contain 'Tailored Branches'")
-		}
-	})
-
-	t.Run("GET /web/templates renders templates view via in-process API", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web/templates")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "Templates") {
-			t.Errorf("expected body to contain 'Templates'")
-		}
-	})
-
-	t.Run("GET /web/presets renders presets view via in-process API", func(t *testing.T) {
-		resp, err := clientNoRedirect.Get(baseURL + "/web/presets")
-		if err != nil {
-			t.Fatalf("failed request: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "Presets") {
-			t.Errorf("expected body to contain 'Presets'")
+		for _, path := range deprecatedPaths {
+			t.Run("GET "+path, func(t *testing.T) {
+				resp, err := clientNoRedirect.Get(baseURL + path)
+				if err != nil {
+					t.Fatalf("failed request for %s: %v", path, err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+				if resp.StatusCode != http.StatusNotFound {
+					t.Fatalf("expected 404 Not Found for %s, got %d", path, resp.StatusCode)
+				}
+			})
 		}
 	})
 
@@ -434,6 +322,23 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Errorf("expected Content-Type application/json, got %q", ct)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("failed reading response body: %v", err)
+		}
+		var prof domain.Profile
+		if err := json.Unmarshal(body, &prof); err != nil {
+			t.Fatalf("failed to decode seeded profile json: %v; raw body: %s", err, string(body))
+		}
+		if prof.UserID != "default" {
+			t.Errorf("expected seeded profile user_id 'default', got %q", prof.UserID)
+		}
+		if prof.FullName == "" {
+			t.Errorf("expected non-empty full_name in seeded profile")
 		}
 	})
 
@@ -494,16 +399,12 @@ func TestBuildRootHandler_MCPRouting(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("api"))
 	})
-	uiMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ui"))
-	})
 	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("mcp"))
 	})
 
-	root := buildRootHandler(apiMux, uiMux, mcpMux)
+	root := buildRootHandler(apiMux, mcpMux)
 
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/mcp/sse", nil)
