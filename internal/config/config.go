@@ -21,8 +21,9 @@ type Config struct {
 	FirebaseProjectID   string
 	LLMDailyRequestLimit int
 	LLMMonthlyTokenLimit int
-	WorkerConcurrency   int
-	WorkerQueueSize     int
+	WorkerConcurrency          int
+	WorkerQueueSize            int
+	MaxConcurrentJobsPerTenant int
 	GeminiAPIKey        string
 	OpenAIAPIKey        string
 	AnthropicAPIKey     string
@@ -44,8 +45,9 @@ const (
 	DefaultAdmin                = false
 	DefaultLLMDailyRequestLimit = 50
 	DefaultLLMMonthlyTokenLimit = 1000000
-	DefaultWorkerConcurrency    = 2
-	DefaultWorkerQueueSize   = 100
+	DefaultWorkerConcurrency          = 2
+	DefaultWorkerQueueSize            = 100
+	DefaultMaxConcurrentJobsPerTenant = 2
 	DefaultEnvironment       = "development"
 	DefaultLLMDebugDir       = "data/llm"
 	DefaultRESTTimeout       = 20 * time.Second
@@ -70,8 +72,9 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		Admin:                DefaultAdmin,
 		LLMDailyRequestLimit: DefaultLLMDailyRequestLimit,
 		LLMMonthlyTokenLimit: DefaultLLMMonthlyTokenLimit,
-		WorkerConcurrency:    DefaultWorkerConcurrency,
-		WorkerQueueSize:      DefaultWorkerQueueSize,
+		WorkerConcurrency:          DefaultWorkerConcurrency,
+		WorkerQueueSize:            DefaultWorkerQueueSize,
+		MaxConcurrentJobsPerTenant: DefaultMaxConcurrentJobsPerTenant,
 		Environment:          DefaultEnvironment,
 		LogLevel:             slog.LevelInfo,
 		LLMDebugPrompts:      false,
@@ -160,6 +163,18 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 			return nil, fmt.Errorf("invalid WORKER_QUEUE_SIZE value %d: must be greater than 0", q)
 		}
 		cfg.WorkerQueueSize = q
+	}
+
+	// MaxConcurrentJobsPerTenant
+	if val := strings.TrimSpace(lookup("MAX_CONCURRENT_JOBS_PER_TENANT")); val != "" {
+		m, err := strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MAX_CONCURRENT_JOBS_PER_TENANT value %q: must be an integer", val)
+		}
+		if m <= 0 {
+			return nil, fmt.Errorf("invalid MAX_CONCURRENT_JOBS_PER_TENANT value %d: must be greater than 0", m)
+		}
+		cfg.MaxConcurrentJobsPerTenant = m
 	}
 
 	// API Keys and URLs

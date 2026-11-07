@@ -38,6 +38,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerQueueSize != 100 {
 		t.Errorf("expected default WorkerQueueSize 100, got %d", cfg.WorkerQueueSize)
 	}
+	if cfg.MaxConcurrentJobsPerTenant != 2 {
+		t.Errorf("expected default MaxConcurrentJobsPerTenant 2, got %d", cfg.MaxConcurrentJobsPerTenant)
+	}
 	if cfg.Environment != "development" {
 		t.Errorf("expected default Environment 'development', got %q", cfg.Environment)
 	}
@@ -72,8 +75,9 @@ func TestLoadOverrides(t *testing.T) {
 		"PORT":                   "9090",
 		"DB_PATH":                "/var/lib/resumeee/custom.db",
 		"DEFAULT_USER_ID":        "user-123",
-		"WORKER_CONCURRENCY":     "8",
-		"WORKER_QUEUE_SIZE":      "500",
+		"WORKER_CONCURRENCY":            "8",
+		"WORKER_QUEUE_SIZE":             "500",
+		"MAX_CONCURRENT_JOBS_PER_TENANT": "4",
 		"GEMINI_API_KEY":         "gem-secret",
 		"OPENAI_API_KEY":         "sk-openai-secret",
 		"ANTHROPIC_API_KEY":      "ant-secret",
@@ -106,6 +110,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.WorkerQueueSize != 500 {
 		t.Errorf("expected WorkerQueueSize 500, got %d", cfg.WorkerQueueSize)
+	}
+	if cfg.MaxConcurrentJobsPerTenant != 4 {
+		t.Errorf("expected MaxConcurrentJobsPerTenant 4, got %d", cfg.MaxConcurrentJobsPerTenant)
 	}
 	if cfg.GeminiAPIKey != "gem-secret" {
 		t.Errorf("expected GeminiAPIKey 'gem-secret', got %q", cfg.GeminiAPIKey)
@@ -176,6 +183,27 @@ func TestLoadValidationAndFallbacks(t *testing.T) {
 			name: "non-positive WORKER_QUEUE_SIZE returns error",
 			env: map[string]string{
 				"WORKER_QUEUE_SIZE": "-10",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid non-numeric MAX_CONCURRENT_JOBS_PER_TENANT returns error",
+			env: map[string]string{
+				"MAX_CONCURRENT_JOBS_PER_TENANT": "notanumber",
+			},
+			expectError: true,
+		},
+		{
+			name: "non-positive MAX_CONCURRENT_JOBS_PER_TENANT zero returns error",
+			env: map[string]string{
+				"MAX_CONCURRENT_JOBS_PER_TENANT": "0",
+			},
+			expectError: true,
+		},
+		{
+			name: "non-positive MAX_CONCURRENT_JOBS_PER_TENANT negative returns error",
+			env: map[string]string{
+				"MAX_CONCURRENT_JOBS_PER_TENANT": "-3",
 			},
 			expectError: true,
 		},

@@ -106,6 +106,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		"default_user_id", cfg.DefaultUserID,
 		"worker_concurrency", cfg.WorkerConcurrency,
 		"worker_queue_size", cfg.WorkerQueueSize,
+		"worker_max_concurrent_per_tenant", cfg.MaxConcurrentJobsPerTenant,
 		"llm_debug_prompts", cfg.LLMDebugPrompts,
 		"llm_debug_dir", cfg.LLMDebugDir,
 	)
@@ -164,9 +165,10 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 
 	// 5. Initialize and start asynchronous generation worker pool
 	workerPool := worker.NewPool(worker.PoolConfig{
-		Concurrency:     cfg.WorkerConcurrency,
-		QueueSize:       cfg.WorkerQueueSize,
-		BranchRepo:      branchRepo,
+		Concurrency:            cfg.WorkerConcurrency,
+		QueueSize:              cfg.WorkerQueueSize,
+		MaxConcurrentPerTenant: cfg.MaxConcurrentJobsPerTenant,
+		BranchRepo:             branchRepo,
 		ProfileRepo:     profileRepo,
 		PresetRepo:      presetRepo,
 		TemplateRepo:    templateRepo,
