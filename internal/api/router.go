@@ -117,12 +117,14 @@ type RouterConfig struct {
 	Validator       validator.ProvenanceValidator
 	JobEnqueuer     JobEnqueuer
 	ModelEnumerator ModelEnumerator
-	DefaultUserID   string
-	Admin           bool
-	TokenVerifier   domain.TokenVerifier
-	Logger          *slog.Logger
-	RESTTimeout     time.Duration
-	LLMTimeout      time.Duration
+	DefaultUserID     string
+	Admin             bool
+	TokenVerifier     domain.TokenVerifier
+	Logger            *slog.Logger
+	RESTTimeout       time.Duration
+	LLMTimeout        time.Duration
+	DailyRequestLimit int
+	MonthlyTokenLimit int
 }
 
 // getUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
@@ -147,6 +149,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.LLMTimeout <= 0 {
 		cfg.LLMTimeout = 10 * time.Minute
 	}
+	if cfg.DailyRequestLimit <= 0 {
+		cfg.DailyRequestLimit = 50
+	}
+	if cfg.MonthlyTokenLimit <= 0 {
+		cfg.MonthlyTokenLimit = 1000000
+	}
 	if cfg.PDFJobRepo == nil {
 		cfg.PDFJobRepo = NewInMemoryPDFJobRepository()
 	}
@@ -164,14 +172,17 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	if cfg.BranchService == nil && cfg.BranchRepo != nil {
 		cfg.BranchService = branch.NewService(branch.Config{
-			BranchRepo:   cfg.BranchRepo,
-			ProfileRepo:  cfg.ProfileRepo,
-			PresetRepo:   cfg.PresetRepo,
-			TemplateRepo: cfg.TemplateRepo,
-			JobEnqueuer:  cfg.JobEnqueuer,
-			Validator:    cfg.Validator,
-			Renderer:     cfg.Renderer,
-			Logger:       cfg.Logger,
+			BranchRepo:        cfg.BranchRepo,
+			ProfileRepo:       cfg.ProfileRepo,
+			PresetRepo:        cfg.PresetRepo,
+			TemplateRepo:      cfg.TemplateRepo,
+			QuotaRepo:         cfg.QuotaRepo,
+			JobEnqueuer:       cfg.JobEnqueuer,
+			Validator:         cfg.Validator,
+			Renderer:          cfg.Renderer,
+			DailyRequestLimit: cfg.DailyRequestLimit,
+			MonthlyTokenLimit: cfg.MonthlyTokenLimit,
+			Logger:            cfg.Logger,
 		})
 	}
 
@@ -183,6 +194,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerPresetRoutes(mux, cfg)
 	registerTemplateRoutes(mux, cfg)
 	registerBranchRoutes(mux, cfg)
+	registerQuotaRoutes(mux, cfg)
 
 	// Wrap in middleware chain: Recovery -> Logging -> CORS -> Auth -> Timeout -> ContentType
 	var handler http.Handler = mux

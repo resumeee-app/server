@@ -102,7 +102,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, domain.ErrQuotaExceeded) {
-		writeQuotaError(w, 0, "llm operation quota exceeded", err.Error())
+		writeQuotaError(w, 3600, "llm operation quota exceeded", err.Error())
 		return
 	}
 	if errors.Is(err, domain.ErrGlobalSkillImmutable) {
@@ -167,11 +167,12 @@ func writeRenderOutput(w http.ResponseWriter, r *http.Request, out domain.Render
 	}
 }
 
-// writeQuotaError writes a structured 429 Too Many Requests response with optional Retry-After header.
+// writeQuotaError writes a structured 429 Too Many Requests response with guaranteed Retry-After header.
 func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, details string) {
-	if retryAfterSeconds > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	if retryAfterSeconds <= 0 {
+		retryAfterSeconds = 3600
 	}
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 	writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, message, details)
 }
 

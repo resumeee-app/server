@@ -507,6 +507,23 @@ type AsyncPDFJobResponse struct {
 	Message string                   `json:"message"`
 }
 
+// reserveQuota reserves quota for an LLM operation, writing error responses directly and returning (reservationID, ok).
+func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter, userID string, op domain.LLMOperationType, estimatedTokens, dailyLimit, monthlyLimit int) (string, bool) {
+	if h.cfg.QuotaRepo == nil {
+		return "", true
+	}
+	rec, qErr := h.cfg.QuotaRepo.ReserveQuota(ctx, userID, op, estimatedTokens, dailyLimit, monthlyLimit)
+	if qErr != nil {
+		if errors.Is(qErr, domain.ErrQuotaExceeded) {
+			writeQuotaError(w, 3600, "llm operation quota exceeded", qErr.Error())
+			return "", false
+		}
+		writeDomainError(w, qErr)
+		return "", false
+	}
+	return rec.ID, true
+}
+
 // parsePDFResume parses an uploaded candidate resume PDF. By default, it operates asynchronously,
 // enqueuing the extraction task and returning 202 Accepted with a job ID for status polling.
 // If the request explicitly supplies ?sync=true, it executes synchronously for backward compatibility.
@@ -606,8 +623,22 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	// (or when ?async=true), synchronous when ?sync=true or when no worker queue is configured.
 	runAsync := strings.EqualFold(r.URL.Query().Get("async"), "true") || (h.cfg.PDFJobEnqueuer != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
 
+	dailyLimit := h.cfg.DailyRequestLimit
+	if dailyLimit <= 0 {
+		dailyLimit = 50
+	}
+	monthlyLimit := h.cfg.MonthlyTokenLimit
+	if monthlyLimit <= 0 {
+		monthlyLimit = 1000000
+	}
+
 	// Synchronous execution path
 	if !runAsync {
+		reservationID, ok := h.reserveQuota(ctx, w, userID, domain.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
+		if !ok {
+			return
+		}
+
 		llmTimeout := h.cfg.LLMTimeout
 		if llmTimeout <= 0 {
 			llmTimeout = DefaultPDFParseTimeout
@@ -615,8 +646,12 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		syncCtx, cancel := context.WithTimeout(r.Context(), llmTimeout)
 		defer cancel()
 
-		extracted, err := h.cfg.ResumeExtractor.ExtractResume(syncCtx, text, provider, model)
+		extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, provider, model, 1000)
 		if err != nil {
+			if h.cfg.QuotaRepo != nil && reservationID != "" {
+				_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, err.Error())
+			}
+
 			logLevel := slog.LevelError
 			var (
 				logMsg     string
@@ -683,6 +718,10 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		if h.cfg.QuotaRepo != nil && reservationID != "" {
+			_ = h.cfg.QuotaRepo.CommitUsage(ctx, reservationID, usage)
+		}
+
 		if h.cfg.Logger != nil {
 			h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume synchronously", "filename", fileHeader.Filename, "provider", provider, "model", model)
 		}
@@ -704,18 +743,9 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var reservationID string
-	if h.cfg.QuotaRepo != nil {
-		rec, qErr := h.cfg.QuotaRepo.ReserveQuota(ctx, userID, domain.OperationPDFParse, 1000, 50, 1000000)
-		if qErr != nil {
-			if errors.Is(qErr, domain.ErrQuotaExceeded) {
-				writeQuotaError(w, 0, "llm operation quota exceeded", qErr.Error())
-				return
-			}
-			writeDomainError(w, qErr)
-			return
-		}
-		reservationID = rec.ID
+	reservationID, ok := h.reserveQuota(ctx, w, userID, domain.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
+	if !ok {
+		return
 	}
 
 	jobID := "pdf-job-" + uuid.New().String()

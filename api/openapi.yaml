@@ -64,6 +64,26 @@ paths:
                   status:
                     type: string
                     example: ok
+  /quota:
+    get:
+      tags:
+        - System
+      summary: Get tenant LLM quota and usage status
+      description: >-
+        Returns the authenticated tenant's current daily request and monthly token quota status,
+        including usage counters, remaining capacity, and window reset timestamps.
+      operationId: getQuota
+      responses:
+        '200':
+          description: Tenant quota retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantQuota'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /profile:
     get:
       tags:
@@ -1783,6 +1803,17 @@ components:
         type: string
 
   responses:
+    Unauthorized:
+      description: Authentication required or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Missing or invalid Authorization header
+
     BadRequest:
       description: Invalid request payload or parameters
       content:
@@ -1885,6 +1916,63 @@ components:
               message: Version does not have tailored content to render
 
   schemas:
+    TenantQuota:
+      type: object
+      required:
+        - user_id
+        - daily_requests_used
+        - daily_request_limit
+        - daily_window_start
+        - monthly_tokens_used
+        - monthly_token_limit
+        - monthly_window_start
+        - daily_requests_remaining
+        - monthly_tokens_remaining
+        - daily_reset_at
+        - monthly_reset_at
+        - updated_at
+      properties:
+        user_id:
+          type: string
+          description: Unique tenant identifier
+        daily_requests_used:
+          type: integer
+          description: Number of LLM generation and parse requests executed in current daily window
+        daily_request_limit:
+          type: integer
+          description: Maximum allowed LLM requests in a 24-hour window
+        daily_window_start:
+          type: string
+          format: date-time
+          description: Timestamp when the current 24-hour daily request quota window began
+        monthly_tokens_used:
+          type: integer
+          description: Cumulative tokens consumed across all LLM operations in current monthly window
+        monthly_token_limit:
+          type: integer
+          description: Maximum allowed LLM tokens in a 30-day billing window
+        monthly_window_start:
+          type: string
+          format: date-time
+          description: Timestamp when the current 30-day monthly token quota window began
+        daily_requests_remaining:
+          type: integer
+          description: Remaining allowed LLM requests before daily rate limit is enforced
+        monthly_tokens_remaining:
+          type: integer
+          description: Remaining allowed LLM tokens before monthly ceiling is enforced
+        daily_reset_at:
+          type: string
+          format: date-time
+          description: Expected timestamp when the daily request window resets
+        monthly_reset_at:
+          type: string
+          format: date-time
+          description: Expected timestamp when the monthly token window resets
+        updated_at:
+          type: string
+          format: date-time
+          description: Timestamp when quota counters were last modified
     ModelOption:
       type: object
       required:
