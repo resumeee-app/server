@@ -1555,6 +1555,12 @@ paths:
         schema:
           type: string
           enum: [html, markdown, text]
+      - name: template_set_id
+        in: query
+        required: false
+        description: Optional visual template set ID override for dynamic preview.
+        schema:
+          type: string
     get:
       tags:
         - Branches & Versions

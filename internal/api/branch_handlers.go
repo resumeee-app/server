@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -494,27 +495,70 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 	mdOut := ver.MarkdownOutput
 	txtOut := ver.PlainTextOutput
 
-	if (htmlOut == "" || mdOut == "" || txtOut == "") && h.cfg.Renderer != nil && h.cfg.TemplateRepo != nil {
-		tmpl, tErr := h.cfg.TemplateRepo.GetTemplate(ctx, userID, b.TemplateSetID)
-		if tErr == nil && tmpl != nil {
+	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
+	if targetTemplateID == "" {
+		targetTemplateID = b.TemplateSetID
+	}
+	if targetTemplateID == "" {
+		targetTemplateID = ver.TemplateSetIDUsed
+	}
+
+	isDifferentTemplate := targetTemplateID != "" && targetTemplateID != ver.TemplateSetIDUsed
+	missingOutputs := htmlOut == "" || mdOut == "" || txtOut == ""
+	shouldRender := isDifferentTemplate || missingOutputs
+
+	if shouldRender && h.cfg.Renderer != nil && h.cfg.TemplateRepo != nil && targetTemplateID != "" {
+		tmpl, tErr := h.cfg.TemplateRepo.GetTemplate(ctx, userID, targetTemplateID)
+		if tErr != nil {
+			slog.WarnContext(ctx, "failed to load template for branch version preview",
+				"error", tErr,
+				"user_id", userID,
+				"branch_id", branchID,
+				"version", v,
+				"template_id", targetTemplateID,
+			)
+		} else if tmpl != nil {
 			var prof *domain.Profile
 			if h.cfg.ProfileRepo != nil {
 				prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
 			}
-			renderCtx := renderer.NewRenderContext(tmpl, prof, ver.TailoredContent)
-			if htmlOut == "" && tmpl.HTMLTemplate != "" {
-				if hOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx); rErr == nil {
-					htmlOut = hOut
+			if ver.TailoredContent != nil {
+				rendered, rErr := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)
+				if rErr != nil {
+					slog.ErrorContext(ctx, "failed to dynamically render branch version preview",
+						"error", rErr,
+						"user_id", userID,
+						"branch_id", branchID,
+						"version", v,
+						"template_id", targetTemplateID,
+					)
+				} else if rendered != nil {
+					htmlOut = rendered.HTML
+					mdOut = rendered.Markdown
+					txtOut = rendered.PlainText
 				}
-			}
-			if mdOut == "" && tmpl.MarkdownTemplate != "" {
-				if mOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx); rErr == nil {
-					mdOut = mOut
+			} else {
+				renderCtx := renderer.NewRenderContext(tmpl, prof, nil)
+				if htmlOut == "" && tmpl.HTMLTemplate != "" {
+					if hOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx); rErr != nil {
+						slog.WarnContext(ctx, "failed to render html format", "error", rErr)
+					} else {
+						htmlOut = hOut
+					}
 				}
-			}
-			if txtOut == "" && tmpl.TextTemplate != "" {
-				if tOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx); rErr == nil {
-					txtOut = tOut
+				if mdOut == "" && tmpl.MarkdownTemplate != "" {
+					if mOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx); rErr != nil {
+						slog.WarnContext(ctx, "failed to render markdown format", "error", rErr)
+					} else {
+						mdOut = mOut
+					}
+				}
+				if txtOut == "" && tmpl.TextTemplate != "" {
+					if tOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx); rErr != nil {
+						slog.WarnContext(ctx, "failed to render plain text format", "error", rErr)
+					} else {
+						txtOut = tOut
+					}
 				}
 			}
 		}
@@ -732,6 +776,9 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 		"html_output":       rendered.HTML,
 		"markdown_output":   rendered.Markdown,
 		"plain_text_output": rendered.PlainText,
+		"html":              rendered.HTML,
+		"markdown":          rendered.Markdown,
+		"plain_text":        rendered.PlainText,
 	})
 }
 
