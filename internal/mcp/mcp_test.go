@@ -333,7 +333,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 		UserID:    "user-1",
 		Company:   "Stripe",
 		RoleTitle: "Backend Engineer",
-		StartDate: "2021-01-01",
+		StartDate: domain.NewDate(2021, 1, 1),
 	}
 	if err := env.profileRepo.CreateExperience(ctx, exp); err != nil {
 		t.Fatalf("failed to create seed experience: %v", err)
@@ -364,7 +364,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 			UserID:    "user-2",
 			Company:   "Other",
 			RoleTitle: "Dev",
-			StartDate: "2020-01-01",
+			StartDate: domain.NewDate(2020, 1, 1),
 		}
 		if err := env.profileRepo.CreateExperience(context.Background(), foreignExp); err != nil {
 			t.Fatalf("failed to create foreign experience: %v", err)

@@ -221,7 +221,7 @@ func TestFullUserJourney(t *testing.T) {
 		Company:        "Acme Corp",
 		RoleTitle:      "Senior Backend Engineer",
 		EmploymentType: domain.EmploymentTypeFullTime,
-		StartDate:      "2021-01-01",
+		StartDate:      domain.NewDate(2021, 1, 1),
 		Location:       domain.Location{City: "San Francisco", Region: "CA", CountryCode: "US"},
 		SkillIDs:       []string{skillGo.ID},
 	}
@@ -300,7 +300,7 @@ func TestFullUserJourney(t *testing.T) {
 	projReq := api.CreateProjectRequest{
 		Name:      "Distributed Store",
 		Role:      "Author",
-		StartDate: "2022-01-01",
+		StartDate: domain.DatePtr(domain.NewDate(2022, 1, 1)),
 		Summary:   "Raft-based key-value store in Go.",
 		SkillIDs:  []string{skillGo.ID},
 	}
@@ -330,7 +330,7 @@ func TestFullUserJourney(t *testing.T) {
 		Institution: "MIT",
 		Degree:      "B.S.",
 		Field:       "Computer Science",
-		StartDate:   "2016-09-01",
+		StartDate:   domain.DatePtr(domain.NewDate(2016, 9, 1)),
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/education", eduReq, nil)
 	if resp.StatusCode != http.StatusCreated {
@@ -357,7 +357,7 @@ func TestFullUserJourney(t *testing.T) {
 	certReq := api.CreateCertificationRequest{
 		Name:   "CKA",
 		Issuer: "CNCF",
-		Date:   "2023-01-01",
+		Date:   domain.DatePtr(domain.NewDate(2023, 1, 1)),
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/certifications", certReq, nil)
 	if resp.StatusCode != http.StatusCreated {
@@ -847,7 +847,7 @@ func TestErrorEnvelopes(t *testing.T) {
 						SourceEntityID: "exp-fabricated",
 						Company:        "Fake Corp",
 						RoleTitle:      "Hacker",
-						StartDate:      "2020-01-01",
+						StartDate:      domain.NewDate(2020, 1, 1),
 						Bullets: []domain.TailoredBullet{
 							{
 								Text:          "Fabricated bullet.",
@@ -2449,7 +2449,7 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 		Company:        "Initial Corp",
 		RoleTitle:      "Architect",
 		EmploymentType: empType,
-		StartDate:      "2022-01-01",
+		StartDate:      domain.NewDate(2022, 1, 1),
 		HoursPerWeek:   &hours,
 		CompanyContact: &domain.ContactDetail{
 			Type:  domain.ContactTypeEmail,
@@ -2529,7 +2529,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	expReq := api.CreateExperienceRequest{
 		Company:   "Stripe",
 		RoleTitle: "Software Engineer",
-		StartDate: "2023-01-01",
+		StartDate: domain.NewDate(2023, 1, 1),
 		SkillIDs:  []string{"Golang", "Kubernetes"},
 	}
 	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", expReq, nil)

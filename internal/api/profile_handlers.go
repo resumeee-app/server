@@ -123,8 +123,8 @@ type CreateExperienceRequest struct {
 	Company           string                `json:"company"`
 	RoleTitle         string                `json:"role_title"`
 	EmploymentType    domain.EmploymentType `json:"employment_type"`
-	StartDate         string                `json:"start_date"`
-	EndDate           *string               `json:"end_date"`
+	StartDate         domain.Date           `json:"start_date"`
+	EndDate           *domain.Date          `json:"end_date"`
 	IsCurrent         bool                  `json:"is_current"`
 	Location          domain.Location       `json:"location"`
 	CompanyLocation   *domain.Location      `json:"company_location"`
@@ -142,8 +142,8 @@ type UpdateExperienceRequest struct {
 	Company           *string                `json:"company"`
 	RoleTitle         *string                `json:"role_title"`
 	EmploymentType    *domain.EmploymentType `json:"employment_type"`
-	StartDate         *string                `json:"start_date"`
-	EndDate           *string                `json:"end_date"`
+	StartDate         *domain.Date           `json:"start_date"`
+	EndDate           *domain.Date           `json:"end_date"`
 	IsCurrent         *bool                  `json:"is_current"`
 	Location          *domain.Location       `json:"location"`
 	CompanyLocation   *domain.Location       `json:"company_location"`
@@ -161,8 +161,8 @@ type CreateProjectRequest struct {
 	Name      string         `json:"name"`
 	Role      string         `json:"role"`
 	URL       string         `json:"url"`
-	StartDate string         `json:"start_date"`
-	EndDate   *string        `json:"end_date"`
+	StartDate *domain.Date   `json:"start_date"`
+	EndDate   *domain.Date   `json:"end_date"`
 	Summary   string         `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
@@ -173,8 +173,8 @@ type UpdateProjectRequest struct {
 	Name      *string        `json:"name"`
 	Role      *string        `json:"role"`
 	URL       *string        `json:"url"`
-	StartDate *string        `json:"start_date"`
-	EndDate   *string        `json:"end_date"`
+	StartDate *domain.Date   `json:"start_date"`
+	EndDate   *domain.Date   `json:"end_date"`
 	Summary   *string        `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
@@ -185,8 +185,8 @@ type CreateEducationRequest struct {
 	Institution string          `json:"institution"`
 	Degree      string          `json:"degree"`
 	Field       string          `json:"field"`
-	StartDate   string          `json:"start_date"`
-	EndDate     *string         `json:"end_date"`
+	StartDate   *domain.Date    `json:"start_date"`
+	EndDate     *domain.Date    `json:"end_date"`
 	Score       string          `json:"score"`
 	Location    domain.Location `json:"location"`
 	Metadata    map[string]any  `json:"metadata"`
@@ -197,8 +197,8 @@ type UpdateEducationRequest struct {
 	Institution *string          `json:"institution"`
 	Degree      *string          `json:"degree"`
 	Field       *string          `json:"field"`
-	StartDate   *string          `json:"start_date"`
-	EndDate     *string          `json:"end_date"`
+	StartDate   *domain.Date     `json:"start_date"`
+	EndDate     *domain.Date     `json:"end_date"`
 	Score       *string          `json:"score"`
 	Location    *domain.Location `json:"location"`
 	Metadata    map[string]any   `json:"metadata"`
@@ -208,7 +208,7 @@ type CreateCertificationRequest struct {
 	ShortID  string         `json:"short_id,omitempty"`
 	Name     string         `json:"name"`
 	Issuer   string         `json:"issuer"`
-	Date     string         `json:"date"`
+	Date     *domain.Date   `json:"date"`
 	URL      string         `json:"url"`
 	Summary  string         `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
@@ -218,7 +218,7 @@ type UpdateCertificationRequest struct {
 	ShortID  *string        `json:"short_id,omitempty"`
 	Name     *string        `json:"name"`
 	Issuer   *string        `json:"issuer"`
-	Date     *string        `json:"date"`
+	Date     *domain.Date   `json:"date"`
 	URL      *string        `json:"url"`
 	Summary  *string        `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
@@ -979,7 +979,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if req.Company == "" || req.RoleTitle == "" || req.StartDate == "" {
+	if req.Company == "" || req.RoleTitle == "" || req.StartDate.IsZero() {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "company, role_title, and start_date are required", "")
 		return
 	}
@@ -994,6 +994,11 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		shortID = domain.GenerateShortID("exp")
 	}
 
+	var endDate *domain.Date
+	if req.EndDate != nil && !req.EndDate.IsZero() {
+		endDate = req.EndDate
+	}
+
 	exp := domain.WorkExperience{
 		ID:                domain.GenerateID("exp"),
 		ShortID:           shortID,
@@ -1002,7 +1007,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		RoleTitle:         req.RoleTitle,
 		EmploymentType:    req.EmploymentType,
 		StartDate:         req.StartDate,
-		EndDate:           req.EndDate,
+		EndDate:           endDate,
 		IsCurrent:         req.IsCurrent,
 		Location:          req.Location,
 		HoursPerWeek:      req.HoursPerWeek,
@@ -1076,7 +1081,11 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 		exp.StartDate = *req.StartDate
 	}
 	if req.EndDate != nil {
-		exp.EndDate = req.EndDate
+		if req.EndDate.IsZero() {
+			exp.EndDate = nil
+		} else {
+			exp.EndDate = req.EndDate
+		}
 	}
 	if req.IsCurrent != nil {
 		exp.IsCurrent = *req.IsCurrent
@@ -1183,6 +1192,15 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 		shortID = domain.GenerateShortID("proj")
 	}
 
+	var startDate *domain.Date
+	if req.StartDate != nil && !req.StartDate.IsZero() {
+		startDate = req.StartDate
+	}
+	var endDate *domain.Date
+	if req.EndDate != nil && !req.EndDate.IsZero() {
+		endDate = req.EndDate
+	}
+
 	proj := domain.Project{
 		ID:        domain.GenerateID("proj"),
 		ShortID:   shortID,
@@ -1190,8 +1208,8 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 		Name:      req.Name,
 		Role:      req.Role,
 		URL:       req.URL,
-		StartDate: req.StartDate,
-		EndDate:   req.EndDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 		Summary:   req.Summary,
 		Skills:    skills,
 		Metadata:  req.Metadata,
@@ -1251,10 +1269,18 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 		proj.URL = *req.URL
 	}
 	if req.StartDate != nil {
-		proj.StartDate = *req.StartDate
+		if req.StartDate.IsZero() {
+			proj.StartDate = nil
+		} else {
+			proj.StartDate = req.StartDate
+		}
 	}
 	if req.EndDate != nil {
-		proj.EndDate = req.EndDate
+		if req.EndDate.IsZero() {
+			proj.EndDate = nil
+		} else {
+			proj.EndDate = req.EndDate
+		}
 	}
 	if req.Summary != nil {
 		proj.Summary = *req.Summary
@@ -1327,6 +1353,15 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 		shortID = domain.GenerateShortID("edu")
 	}
 
+	var startDate *domain.Date
+	if req.StartDate != nil && !req.StartDate.IsZero() {
+		startDate = req.StartDate
+	}
+	var endDate *domain.Date
+	if req.EndDate != nil && !req.EndDate.IsZero() {
+		endDate = req.EndDate
+	}
+
 	edu := domain.Education{
 		ID:          domain.GenerateID("edu"),
 		ShortID:     shortID,
@@ -1334,8 +1369,8 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 		Institution: req.Institution,
 		Degree:      req.Degree,
 		Field:       req.Field,
-		StartDate:   req.StartDate,
-		EndDate:     req.EndDate,
+		StartDate:   startDate,
+		EndDate:     endDate,
 		Score:       req.Score,
 		Location:    req.Location,
 		Metadata:    req.Metadata,
@@ -1395,10 +1430,18 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 		edu.Field = *req.Field
 	}
 	if req.StartDate != nil {
-		edu.StartDate = *req.StartDate
+		if req.StartDate.IsZero() {
+			edu.StartDate = nil
+		} else {
+			edu.StartDate = req.StartDate
+		}
 	}
 	if req.EndDate != nil {
-		edu.EndDate = req.EndDate
+		if req.EndDate.IsZero() {
+			edu.EndDate = nil
+		} else {
+			edu.EndDate = req.EndDate
+		}
 	}
 	if req.Score != nil {
 		edu.Score = *req.Score
@@ -1471,13 +1514,18 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 		shortID = domain.GenerateShortID("cert")
 	}
 
+	var certDate *domain.Date
+	if req.Date != nil && !req.Date.IsZero() {
+		certDate = req.Date
+	}
+
 	cert := domain.Certification{
 		ID:       domain.GenerateID("cert"),
 		ShortID:  shortID,
 		UserID:   userID,
 		Name:     req.Name,
 		Issuer:   req.Issuer,
-		Date:     req.Date,
+		Date:     certDate,
 		URL:      req.URL,
 		Summary:  req.Summary,
 		Metadata: req.Metadata,
@@ -1534,7 +1582,11 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 		cert.Issuer = *req.Issuer
 	}
 	if req.Date != nil {
-		cert.Date = *req.Date
+		if req.Date.IsZero() {
+			cert.Date = nil
+		} else {
+			cert.Date = req.Date
+		}
 	}
 	if req.URL != nil {
 		cert.URL = *req.URL

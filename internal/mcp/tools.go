@@ -325,20 +325,26 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		company, _ := args["company"].(string)
 		roleTitle, _ := args["role_title"].(string)
-		startDate, _ := args["start_date"].(string)
+		startDateStr, _ := args["start_date"].(string)
 
 		company = strings.TrimSpace(company)
 		roleTitle = strings.TrimSpace(roleTitle)
-		startDate = strings.TrimSpace(startDate)
+		startDateStr = strings.TrimSpace(startDateStr)
 
-		if company == "" || roleTitle == "" || startDate == "" {
+		if company == "" || roleTitle == "" || startDateStr == "" {
 			return mcpSDK.NewToolResultError("company, role_title, and start_date are required fields"), nil
 		}
 
-		var endDate *string
+		startDate, err := domain.ParseDate(startDateStr)
+		if err != nil || startDate.IsZero() {
+			return mcpSDK.NewToolResultError("valid start_date is required (format: YYYY-MM-DD)"), nil
+		}
+
+		var endDate *domain.Date
 		if ed, ok := args["end_date"].(string); ok && strings.TrimSpace(ed) != "" {
-			trimmed := strings.TrimSpace(ed)
-			endDate = &trimmed
+			if parsed, err := domain.ParseDate(ed); err == nil && !parsed.IsZero() {
+				endDate = &parsed
+			}
 		}
 
 		var isCurrent bool
