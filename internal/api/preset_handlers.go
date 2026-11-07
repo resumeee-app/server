@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -14,24 +15,28 @@ type presetHandler struct {
 	cfg RouterConfig
 }
 
-// registerPresetRoutes registers REST handlers for listing, creating, and modifying resume tailoring presets.
+// registerPresetRoutes registers REST handlers for listing, creating, and modifying resume tailoring presets and strategies.
 func registerPresetRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &presetHandler{cfg: cfg}
 
-	mux.HandleFunc("GET /api/v1/presets", h.listPresets)
-	mux.HandleFunc("POST /api/v1/presets", h.createPreset)
-	mux.HandleFunc("GET /api/v1/presets/{id}", h.getPreset)
-	mux.HandleFunc("PUT /api/v1/presets/{id}", h.updatePreset)
-	mux.HandleFunc("DELETE /api/v1/presets/{id}", h.deletePreset)
+	routes := []string{"/api/v1/presets", "/api/v1/tailoring-strategies", "/api/v1/strategies"}
+	for _, base := range routes {
+		mux.HandleFunc("GET "+base, h.listPresets)
+		mux.HandleFunc("POST "+base, h.createPreset)
+		mux.HandleFunc("GET "+base+"/{id}", h.getPreset)
+		mux.HandleFunc("PUT "+base+"/{id}", h.updatePreset)
+		mux.HandleFunc("DELETE "+base+"/{id}", h.deletePreset)
+	}
 }
 
 type CreatePresetRequest struct {
-	Name               string `json:"name"`
-	Description        string `json:"description"`
-	SystemInstructions string `json:"system_instructions"`
-	TemplateSetID      string `json:"template_set_id"`
-	ProviderOverride   string `json:"provider_override"`
-	ModelOverride      string `json:"model_override"`
+	Name               string  `json:"name"`
+	Description        string  `json:"description"`
+	SystemInstructions string  `json:"system_instructions"`
+	TemplateSetID      string  `json:"template_set_id"`
+	SuggestedThemeID   *string `json:"suggested_theme_id"`
+	ProviderOverride   string  `json:"provider_override"`
+	ModelOverride      string  `json:"model_override"`
 	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "none", "low", "medium", "high").
 	ReasoningLevel     string `json:"reasoning_level,omitempty"`
 	IncludeAdminFields bool   `json:"include_admin_fields"`
@@ -42,6 +47,7 @@ type UpdatePresetRequest struct {
 	Description        *string `json:"description"`
 	SystemInstructions *string `json:"system_instructions"`
 	TemplateSetID      *string `json:"template_set_id"`
+	SuggestedThemeID   *string `json:"suggested_theme_id"`
 	ProviderOverride   *string `json:"provider_override"`
 	ModelOverride      *string `json:"model_override"`
 	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "", "none", "low", "medium", "high").
@@ -89,6 +95,18 @@ func validateModelOverride(enumerator ModelEnumerator, providerOverride, modelOv
 	return nil
 }
 
+// validateTemplateAccess verifies that the target template exists and is accessible by the user.
+func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID string, userID string) error {
+	if templateID == "" || h.cfg.TemplateRepo == nil {
+		return nil
+	}
+	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
+	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+		return domain.ErrForbidden
+	}
+	return nil
+}
+
 // listPresets retrieves all user and built-in tailoring presets.
 func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -115,9 +133,27 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" || req.SystemInstructions == "" || req.TemplateSetID == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name, system_instructions, and template_set_id are required", "")
+	if req.Name == "" || req.SystemInstructions == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name and system_instructions are required", "")
 		return
+	}
+
+	themeID := req.SuggestedThemeID
+	if themeID == nil && req.TemplateSetID != "" {
+		themeID = &req.TemplateSetID
+	}
+
+	if themeID != nil && *themeID != "" {
+		if err := h.validateTemplateAccess(ctx, *themeID, userID); err != nil {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			return
+		}
+	}
+	if req.TemplateSetID != "" && (themeID == nil || *themeID != req.TemplateSetID) {
+		if err := h.validateTemplateAccess(ctx, req.TemplateSetID, userID); err != nil {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			return
+		}
 	}
 
 	if err := validateReasoningLevel(req.ReasoningLevel); err != nil {
@@ -136,11 +172,18 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		Name:               req.Name,
 		Description:        req.Description,
 		SystemInstructions: req.SystemInstructions,
+		SuggestedThemeID:   themeID,
 		TemplateSetID:      req.TemplateSetID,
 		ProviderOverride:   req.ProviderOverride,
 		ModelOverride:      req.ModelOverride,
 		ReasoningLevel:     req.ReasoningLevel,
 		IncludeAdminFields: req.IncludeAdminFields,
+	}
+	if preset.TemplateSetID == "" && themeID != nil {
+		preset.TemplateSetID = *themeID
+	}
+	if preset.SuggestedThemeID == nil && preset.TemplateSetID != "" {
+		preset.SuggestedThemeID = &preset.TemplateSetID
 	}
 
 	if err := h.cfg.PresetRepo.CreatePreset(ctx, &preset); err != nil {
@@ -219,8 +262,29 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	if req.SystemInstructions != nil {
 		preset.SystemInstructions = *req.SystemInstructions
 	}
+	if req.SuggestedThemeID != nil {
+		if *req.SuggestedThemeID != "" {
+			if err := h.validateTemplateAccess(ctx, *req.SuggestedThemeID, userID); err != nil {
+				writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+				return
+			}
+		}
+		preset.SuggestedThemeID = req.SuggestedThemeID
+		if *req.SuggestedThemeID != "" {
+			preset.TemplateSetID = *req.SuggestedThemeID
+		}
+	}
 	if req.TemplateSetID != nil {
+		if *req.TemplateSetID != "" {
+			if err := h.validateTemplateAccess(ctx, *req.TemplateSetID, userID); err != nil {
+				writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+				return
+			}
+		}
 		preset.TemplateSetID = *req.TemplateSetID
+		if preset.SuggestedThemeID == nil && *req.TemplateSetID != "" {
+			preset.SuggestedThemeID = req.TemplateSetID
+		}
 	}
 	if req.ProviderOverride != nil {
 		preset.ProviderOverride = *req.ProviderOverride
@@ -248,11 +312,6 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
-
-	if strings.HasPrefix(id, "builtin-") {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be deleted", "")
-		return
-	}
 
 	preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, id)
 	if err != nil {

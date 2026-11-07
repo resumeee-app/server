@@ -977,6 +977,109 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /tailoring-strategies:
+    get:
+      tags:
+        - Presets & Templates
+      summary: List tailoring strategies
+      description: Lists Tier-2 reusable AI prompt and tailoring strategies.
+      operationId: listTailoringStrategies
+      responses:
+        '200':
+          description: List of tailoring strategies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TailoringStrategy'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Presets & Templates
+      summary: Create tailoring strategy
+      operationId: createTailoringStrategy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStrategyRequest'
+      responses:
+        '201':
+          description: Tailoring strategy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TailoringStrategy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tailoring-strategies/{id}:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+    get:
+      tags:
+        - Presets & Templates
+      summary: Get tailoring strategy by ID
+      operationId: getTailoringStrategy
+      responses:
+        '200':
+          description: Tailoring strategy details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TailoringStrategy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Presets & Templates
+      summary: Update tailoring strategy
+      operationId: updateTailoringStrategy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStrategyRequest'
+      responses:
+        '200':
+          description: Tailoring strategy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TailoringStrategy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Presets & Templates
+      summary: Delete tailoring strategy
+      operationId: deleteTailoringStrategy
+      responses:
+        '204':
+          description: Tailoring strategy deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /templates:
     get:
       tags:
@@ -1563,6 +1666,92 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /branches/{id}/versions/{v}/render-preview:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+      - name: v
+        in: path
+        required: true
+        description: Sequential version number or version UUID
+        schema:
+          type: string
+    post:
+      tags:
+        - Branches & Versions
+      summary: Ephemeral fast layout render preview
+      description: >-
+        Synchronously renders snapshot TailoredContent JSON under a requested template_set_id
+        with zero LLM provider calls and zero persistent side effects.
+      operationId: renderBranchVersionPreviewEphemeral
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderPreviewRequest'
+      responses:
+        '200':
+          description: Ephemerally rendered resume outputs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderOutput'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /resumes/{id}/versions/{v}/render-preview:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+      - name: v
+        in: path
+        required: true
+        description: Sequential version number or version UUID
+        schema:
+          type: string
+    post:
+      tags:
+        - Branches & Versions
+      summary: Ephemeral fast layout render preview for target resume
+      description: >-
+        Synchronously renders snapshot TailoredContent JSON under a requested template_set_id
+        with zero LLM provider calls and zero persistent side effects.
+      operationId: renderResumeVersionPreviewEphemeral
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderPreviewRequest'
+      responses:
+        '200':
+          description: Ephemerally rendered resume outputs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderOutput'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   parameters:
     EntityId:
@@ -1652,6 +1841,28 @@ components:
             error:
               code: INTERNAL_ERROR
               message: An internal error occurred while processing the request
+
+    Conflict:
+      description: Resource state conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: CONFLICT
+              message: Version generation is still in progress
+
+    UnprocessableEntity:
+      description: Unprocessable entity state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: UNPROCESSABLE_ENTITY
+              message: Version does not have tailored content to render
 
   schemas:
     ModelOption:
@@ -2366,6 +2577,9 @@ components:
           type: string
         system_instructions:
           type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
         template_set_id:
           type: string
         provider_override:
@@ -2407,6 +2621,9 @@ components:
           type: string
         system_instructions:
           type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
         template_set_id:
           type: string
         provider_override:
@@ -2434,6 +2651,121 @@ components:
           type: string
         system_instructions:
           type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
+        template_set_id:
+          type: string
+        provider_override:
+          type: string
+        model_override:
+          type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        include_admin_fields:
+          type: boolean
+
+    TailoringStrategy:
+      type: object
+      required:
+        - id
+        - user_id
+        - name
+        - system_instructions
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        system_instructions:
+          type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
+        template_set_id:
+          type: string
+        provider_override:
+          type: string
+        model_override:
+          type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        include_admin_fields:
+          type: boolean
+        is_built_in:
+          type: boolean
+          description: Whether this is a system-provided built-in tailoring strategy
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateStrategyRequest:
+      type: object
+      required:
+        - name
+        - system_instructions
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        system_instructions:
+          type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
+        template_set_id:
+          type: string
+        provider_override:
+          type: string
+        model_override:
+          type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        include_admin_fields:
+          type: boolean
+
+    UpdateStrategyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        system_instructions:
+          type: string
+        suggested_theme_id:
+          type: string
+          nullable: true
         template_set_id:
           type: string
         provider_override:
@@ -2547,7 +2879,12 @@ components:
           type: string
         branch_instructions:
           type: string
+        custom_directives:
+          type: string
         preset_id:
+          type: string
+          nullable: true
+        tailoring_strategy_id:
           type: string
           nullable: true
         template_set_id:
@@ -2598,8 +2935,14 @@ components:
           type: string
         branch_instructions:
           type: string
+        custom_directives:
+          type: string
         preset_id:
           type: string
+          nullable: true
+        tailoring_strategy_id:
+          type: string
+          nullable: true
         template_set_id:
           type: string
         provider_override:
@@ -2628,8 +2971,14 @@ components:
           type: string
         branch_instructions:
           type: string
+        custom_directives:
+          type: string
         preset_id:
           type: string
+          nullable: true
+        tailoring_strategy_id:
+          type: string
+          nullable: true
         template_set_id:
           type: string
         provider_override:
@@ -2675,10 +3024,17 @@ components:
         branch_instructions:
           type: string
           description: Optional override for custom branch instructions.
+        custom_directives:
+          type: string
+          description: Optional override for custom branch instructions.
         preset_id:
           type: string
           nullable: true
           description: Optional override for formatting preset ID.
+        tailoring_strategy_id:
+          type: string
+          nullable: true
+          description: Optional override for tailoring strategy ID.
         pinned_entity_ids:
           type: array
           items:
@@ -3169,6 +3525,15 @@ components:
         plain_text:
           type: string
           description: Rendered plain text ATS output
+
+    RenderPreviewRequest:
+      type: object
+      required:
+        - template_set_id
+      properties:
+        template_set_id:
+          type: string
+          description: Template set ID to ephemerally render with
 
     RenderTemplatePreviewRequest:
       type: object

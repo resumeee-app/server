@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
@@ -15,58 +17,71 @@ type branchHandler struct {
 	svc branch.Service
 }
 
-// registerBranchRoutes binds REST endpoints for branch creation, modification, version generation, and exports.
+// registerBranchRoutes binds REST endpoints for branch/resume creation, modification, version generation, preview rendering, and exports.
 func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &branchHandler{
 		cfg: cfg,
 		svc: cfg.BranchService,
 	}
 
-	mux.HandleFunc("GET /api/v1/branches", h.listBranches)
-	mux.HandleFunc("POST /api/v1/branches", h.createBranch)
-	mux.HandleFunc("POST /api/v1/branches/sync", h.syncBranches)
-	mux.HandleFunc("GET /api/v1/branches/{id}", h.getBranch)
-	mux.HandleFunc("PUT /api/v1/branches/{id}", h.updateBranch)
-	mux.HandleFunc("DELETE /api/v1/branches/{id}", h.deleteBranch)
-	mux.HandleFunc("POST /api/v1/branches/{id}/generate", h.generateBranchVersion)
-	mux.HandleFunc("POST /api/v1/branches/{id}/gap-analysis", h.analyzeBranchGaps)
-	mux.HandleFunc("GET /api/v1/branches/{id}/prompt-preview", h.getPromptPreview)
-	mux.HandleFunc("POST /api/v1/branches/{id}/prompt-preview", h.previewPrompt)
-	mux.HandleFunc("GET /api/v1/branches/{id}/versions", h.listBranchVersions)
-	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}", h.getBranchVersion)
-	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/preview", h.previewBranchVersion)
-	mux.HandleFunc("GET /api/v1/branches/{id}/versions/{v}/export", h.exportBranchVersion)
-	mux.HandleFunc("POST /api/v1/branches/{id}/versions/{v}/edit", h.editBranchVersion)
+	bases := []string{"/api/v1/branches", "/api/v1/resumes"}
+	for _, base := range bases {
+		mux.HandleFunc("GET "+base, h.listBranches)
+		mux.HandleFunc("POST "+base, h.createBranch)
+		mux.HandleFunc("POST "+base+"/sync", h.syncBranches)
+		mux.HandleFunc("GET "+base+"/{id}", h.getBranch)
+		mux.HandleFunc("PUT "+base+"/{id}", h.updateBranch)
+		mux.HandleFunc("DELETE "+base+"/{id}", h.deleteBranch)
+		mux.HandleFunc("POST "+base+"/{id}/generate", h.generateBranchVersion)
+		mux.HandleFunc("POST "+base+"/{id}/tailor", h.generateBranchVersion)
+		mux.HandleFunc("POST "+base+"/{id}/gap-analysis", h.analyzeBranchGaps)
+		mux.HandleFunc("GET "+base+"/{id}/prompt-preview", h.getPromptPreview)
+		mux.HandleFunc("POST "+base+"/{id}/prompt-preview", h.previewPrompt)
+		mux.HandleFunc("GET "+base+"/{id}/versions", h.listBranchVersions)
+		mux.HandleFunc("GET "+base+"/{id}/versions/{v}", h.getBranchVersion)
+		mux.HandleFunc("GET "+base+"/{id}/versions/{v}/preview", h.previewBranchVersion)
+		mux.HandleFunc("GET "+base+"/{id}/versions/{v}/export", h.exportBranchVersion)
+		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/edit", h.editBranchVersion)
+		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/render-preview", h.renderPreview)
+	}
 }
 
 type CreateBranchRequest struct {
-	Name               string   `json:"name"`
-	IsDefault          *bool    `json:"is_default,omitempty"`
-	TargetRole         string   `json:"target_role"`
-	TargetCompany      string   `json:"target_company"`
-	TargetRequirements string   `json:"target_requirements"`
-	BranchInstructions string   `json:"branch_instructions"`
-	PresetID           *string  `json:"preset_id"`
-	TemplateSetID      string   `json:"template_set_id"`
-	ProviderOverride   string   `json:"provider_override"`
-	ModelOverride      string   `json:"model_override"`
-	PinnedEntityIDs    []string `json:"pinned_entity_ids"`
-	ExcludedEntityIDs  []string `json:"excluded_entity_ids"`
+	Name                string   `json:"name"`
+	IsDefault           *bool    `json:"is_default,omitempty"`
+	TargetRole          string   `json:"target_role"`
+	TargetCompany       string   `json:"target_company"`
+	TargetRequirements  string   `json:"target_requirements"`
+	BranchInstructions  string   `json:"branch_instructions"`
+	CustomDirectives    string   `json:"custom_directives"`
+	PresetID            *string  `json:"preset_id"`
+	TailoringStrategyID *string  `json:"tailoring_strategy_id"`
+	TemplateSetID       string   `json:"template_set_id"`
+	ProviderOverride    string   `json:"provider_override"`
+	ModelOverride       string   `json:"model_override"`
+	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
+	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
 }
 
 type UpdateBranchRequest struct {
-	Name               *string  `json:"name"`
-	TargetRole         *string  `json:"target_role"`
-	TargetCompany      *string  `json:"target_company"`
-	TargetRequirements *string  `json:"target_requirements"`
-	BranchInstructions *string  `json:"branch_instructions"`
-	PresetID           *string  `json:"preset_id"`
-	TemplateSetID      *string  `json:"template_set_id"`
-	ProviderOverride   *string  `json:"provider_override"`
-	ModelOverride      *string  `json:"model_override"`
-	PinnedEntityIDs    []string `json:"pinned_entity_ids"`
-	ExcludedEntityIDs  []string `json:"excluded_entity_ids"`
-	ActiveVersionID    *string  `json:"active_version_id"`
+	Name                *string  `json:"name"`
+	TargetRole          *string  `json:"target_role"`
+	TargetCompany       *string  `json:"target_company"`
+	TargetRequirements  *string  `json:"target_requirements"`
+	BranchInstructions  *string  `json:"branch_instructions"`
+	CustomDirectives    *string  `json:"custom_directives"`
+	PresetID            *string  `json:"preset_id"`
+	TailoringStrategyID *string  `json:"tailoring_strategy_id"`
+	TemplateSetID       *string  `json:"template_set_id"`
+	ProviderOverride    *string  `json:"provider_override"`
+	ModelOverride       *string  `json:"model_override"`
+	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
+	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
+	ActiveVersionID     *string  `json:"active_version_id"`
+}
+
+type RenderPreviewRequest struct {
+	TemplateSetID string `json:"template_set_id"`
 }
 
 type AsyncJobEnqueued struct {
@@ -133,19 +148,46 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.cfg.TemplateRepo != nil {
+		tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateSetID)
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			return
+		}
+	}
+
+	stratID := req.TailoringStrategyID
+	if stratID == nil && req.PresetID != nil {
+		stratID = req.PresetID
+	}
+	if stratID != nil && *stratID != "" && h.cfg.PresetRepo != nil {
+		preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, *stratID)
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn()) {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent tailoring strategy", "")
+			return
+		}
+	}
+
+	directives := req.CustomDirectives
+	if directives == "" && req.BranchInstructions != "" {
+		directives = req.BranchInstructions
+	}
+
 	b := &domain.Branch{
-		UserID:             userID,
-		Name:               req.Name,
-		TargetRole:         req.TargetRole,
-		TargetCompany:      req.TargetCompany,
-		TargetRequirements: req.TargetRequirements,
-		BranchInstructions: req.BranchInstructions,
-		PresetID:           req.PresetID,
-		TemplateSetID:      req.TemplateSetID,
-		ProviderOverride:   req.ProviderOverride,
-		ModelOverride:      req.ModelOverride,
-		PinnedEntityIDs:    req.PinnedEntityIDs,
-		ExcludedEntityIDs:  req.ExcludedEntityIDs,
+		UserID:                   userID,
+		Name:                     req.Name,
+		TargetRole:               req.TargetRole,
+		TargetCompany:            req.TargetCompany,
+		TargetRequirements:       req.TargetRequirements,
+		CustomDirectives:         directives,
+		BranchInstructions:       directives,
+		TailoringStrategyID:      stratID,
+		PresetID:                 stratID,
+		TemplateSetID:            req.TemplateSetID,
+		ProviderOverride:         req.ProviderOverride,
+		ModelOverride:            req.ModelOverride,
+		PinnedEntityIDs:          req.PinnedEntityIDs,
+		ExcludedEntityIDs:        req.ExcludedEntityIDs,
 	}
 
 	created, err := h.svc.CreateBranch(ctx, b)
@@ -201,11 +243,39 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	if req.TargetRequirements != nil {
 		branch.TargetRequirements = *req.TargetRequirements
 	}
-	if req.BranchInstructions != nil {
+	if req.CustomDirectives != nil {
+		branch.CustomDirectives = *req.CustomDirectives
+		branch.BranchInstructions = *req.CustomDirectives
+	} else if req.BranchInstructions != nil {
 		branch.BranchInstructions = *req.BranchInstructions
+		branch.CustomDirectives = *req.BranchInstructions
 	}
-	if req.PresetID != nil {
+	stratIDToValidate := req.TailoringStrategyID
+	if stratIDToValidate == nil {
+		stratIDToValidate = req.PresetID
+	}
+	if stratIDToValidate != nil && *stratIDToValidate != "" && h.cfg.PresetRepo != nil {
+		preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, *stratIDToValidate)
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn()) {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent tailoring strategy", "")
+			return
+		}
+	}
+
+	if req.TemplateSetID != nil && *req.TemplateSetID != "" && h.cfg.TemplateRepo != nil {
+		tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, *req.TemplateSetID)
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			return
+		}
+	}
+
+	if req.TailoringStrategyID != nil {
+		branch.TailoringStrategyID = req.TailoringStrategyID
+		branch.PresetID = req.TailoringStrategyID
+	} else if req.PresetID != nil {
 		branch.PresetID = req.PresetID
+		branch.TailoringStrategyID = req.PresetID
 	}
 	if req.TemplateSetID != nil {
 		branch.TemplateSetID = *req.TemplateSetID
@@ -564,4 +634,105 @@ func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, preview)
 }
+
+// renderPreview provides fast, ephemeral rendering of a resume version under a requested template set.
+// It executes strictly zero LLM invocations and guarantees snapshot immutability with zero database writes.
+func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	v := r.PathValue("v")
+
+	// 1. Validate Resume / Branch Ownership
+	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if b == nil || b.UserID != userID {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resume not found", "")
+		return
+	}
+
+	// 2. Validate Version Association
+	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if ver == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "version not found", "")
+		return
+	}
+	parentID := ver.ResumeID
+	if parentID == "" {
+		parentID = ver.BranchID
+	}
+	if parentID != b.ID {
+		writeError(w, http.StatusNotFound, CodeNotFound, "version does not belong to resume", "")
+		return
+	}
+
+	// 3. State Preconditions
+	if ver.Status == domain.VersionStatusPending || ver.Status == domain.VersionStatusProcessing {
+		writeError(w, http.StatusConflict, CodeConflict, "resume version generation is currently in progress", "")
+		return
+	}
+	if ver.TailoredContent == nil {
+		writeError(w, http.StatusUnprocessableEntity, CodeInvalidRequest, "version contains no tailored content to render", "")
+		return
+	}
+
+	// Parse Request Body (1MB bound enforced by decodeJSON)
+	var req RenderPreviewRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.TemplateSetID) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "template_set_id is required", "")
+		return
+	}
+
+	// 4. Template Access Authorization
+	if h.cfg.TemplateRepo == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "template repository unavailable", "")
+		return
+	}
+	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateSetID)
+	if err != nil || tmpl == nil {
+		writeError(w, http.StatusForbidden, CodeForbidden, "cannot access target template", "")
+		return
+	}
+	if tmpl.UserID != userID && !tmpl.IsBuiltIn {
+		writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+		return
+	}
+
+	// 5. Execution Pipeline: Pure rendering without LLM calls or DB mutations
+	if h.cfg.Renderer == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "renderer unavailable", "")
+		return
+	}
+
+	var prof *domain.Profile
+	if h.cfg.ProfileRepo != nil {
+		prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	}
+
+	rendered, err := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"template_set_id":   tmpl.ID,
+		"html_output":       rendered.HTML,
+		"markdown_output":   rendered.Markdown,
+		"plain_text_output": rendered.PlainText,
+	})
+}
+
 

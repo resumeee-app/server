@@ -15,6 +15,7 @@ const (
 	CodeInvalidRequest          = "INVALID_REQUEST"
 	CodeForbidden               = "FORBIDDEN"
 	CodeNotFound                = "NOT_FOUND"
+	CodeConflict                = "CONFLICT"
 	CodeTemplateValidationError = "TEMPLATE_VALIDATION_ERROR"
 	CodeProvenanceError         = "PROVENANCE_ERROR"
 	CodeQueueFull               = "QUEUE_FULL"
@@ -111,6 +112,18 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, domain.ErrDefaultBranchImmutable) {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "default branch is immutable", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrStrategyImmutable) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in strategy cannot be modified", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrForbidden) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "access forbidden", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, CodeConflict, "resource conflict", err.Error())
 		return
 	}
 

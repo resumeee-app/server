@@ -53,6 +53,8 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"/facts/{id}:",
 		"/presets:",
 		"/presets/{id}:",
+		"/tailoring-strategies:",
+		"/tailoring-strategies/{id}:",
 		"/templates:",
 		"/templates/{id}:",
 		"/branches:",
@@ -64,6 +66,8 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"/branches/{id}/versions/{v}:",
 		"/branches/{id}/versions/{v}/export:",
 		"/branches/{id}/versions/{v}/edit:",
+		"/branches/{id}/versions/{v}/render-preview:",
+		"/resumes/{id}/versions/{v}/render-preview:",
 	}
 
 	for _, endpoint := range expectedEndpoints {
@@ -85,6 +89,9 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"Certification:",
 		"Fact:",
 		"Preset:",
+		"TailoringStrategy:",
+		"CreateStrategyRequest:",
+		"UpdateStrategyRequest:",
 		"TemplateSet:",
 		"Branch:",
 		"BranchVersion:",
@@ -92,6 +99,7 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"SyncBranchesResponse:",
 		"EditVersionRequest:",
 		"PromptPreviewResponse:",
+		"RenderPreviewRequest:",
 	}
 
 	for _, schema := range expectedSchemas {
