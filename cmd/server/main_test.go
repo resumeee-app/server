@@ -42,7 +42,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 		return memStore, nil
 	}
 	t.Setenv("PORT", freePort(t))
-	t.Setenv("ADMIN", "true")
+	t.Setenv("ADMIN_MODE", "true")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -82,7 +82,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
 	t.Setenv("PORT", freePort(t))
-	t.Setenv("ADMIN", "true")
+	t.Setenv("ADMIN_MODE", "true")
 
 	branch := &domain.Branch{
 		ID:            "br-recover",
@@ -257,7 +257,7 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 	t.Setenv("DB_PATH", dbPath)
 	port := freePort(t)
 	t.Setenv("PORT", port)
-	t.Setenv("ADMIN", "true")
+	t.Setenv("ADMIN_MODE", "true")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -422,7 +422,7 @@ func TestRun_WithLLMDebugFlags(t *testing.T) {
 	debugDir := filepath.Join(tmpDir, "llm_dumps")
 	t.Setenv("DB_PATH", dbPath)
 	t.Setenv("PORT", freePort(t))
-	t.Setenv("ADMIN", "true")
+	t.Setenv("ADMIN_MODE", "true")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -462,14 +462,14 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 	}
 
 	t.Setenv("PORT", freePort(t))
-	t.Setenv("ADMIN", "false")
+	t.Setenv("ADMIN_MODE", "false")
 	t.Setenv("FIREBASE_PROJECT_ID", "")
 
 	err = runWithStore(context.Background(), storeInit)
 	if err == nil {
-		t.Fatal("expected error when booting multi-tenant server without FIREBASE_PROJECT_ID or ADMIN=true")
+		t.Fatal("expected error when booting multi-tenant server without FIREBASE_PROJECT_ID or ADMIN_MODE=true")
 	}
-	expectedMsg := "multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN=true / -admin for local admin mode"
+	expectedMsg := "multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode"
 	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Fatalf("expected error containing %q, got: %v", expectedMsg, err)
 	}

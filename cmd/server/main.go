@@ -154,8 +154,8 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		tokenVerifier = auth.NewFirebaseTokenVerifier(cfg.FirebaseProjectID)
 		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
 	} else {
-		logger.Error("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN=true / -admin for local admin mode")
-		return errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN=true / -admin for local admin mode")
+		logger.Error("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
+		return errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
 	}
 
 	// 4. Initialize LLM registry and service adapter

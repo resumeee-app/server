@@ -88,11 +88,14 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		dbPath     string
 		userID     string
 		configFile string
+		adminMode  bool
 	)
 
 	fs.StringVar(&dbPath, "db", "", "Path to SQLite database file (or :memory:)")
 	fs.StringVar(&userID, "user-id", "", "Default authenticated user ID")
 	fs.StringVar(&configFile, "config", "", "Optional path to environment config file")
+	fs.BoolVar(&adminMode, "admin-mode", false, "Run in local single-user admin mode")
+	fs.BoolVar(&adminMode, "admin", false, "Alias for -admin-mode")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -106,6 +109,17 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 			RESTTimeout:   30 * time.Second,
 			LLMTimeout:    10 * time.Minute,
 		}
+	}
+
+	var adminExplicit bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "admin-mode" || f.Name == "admin" {
+			adminExplicit = true
+		}
+	})
+
+	if adminExplicit {
+		cfg.Admin = adminMode
 	}
 
 	if dbPath != "" {

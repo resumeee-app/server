@@ -105,11 +105,19 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		cfg.DefaultUserID = val
 	}
 
-	// Admin mode
-	if val := strings.TrimSpace(lookup("ADMIN")); val != "" {
-		a, err := strconv.ParseBool(val)
+	// Admin mode: checks ADMIN_MODE, falling back to legacy ADMIN
+	adminVal := strings.TrimSpace(lookup("ADMIN_MODE"))
+	adminVar := "ADMIN_MODE"
+	if adminVal == "" {
+		if v := strings.TrimSpace(lookup("ADMIN")); v != "" {
+			adminVal = v
+			adminVar = "ADMIN"
+		}
+	}
+	if adminVal != "" {
+		a, err := strconv.ParseBool(adminVal)
 		if err != nil {
-			return nil, fmt.Errorf("invalid ADMIN value %q: must be a boolean", val)
+			return nil, fmt.Errorf("invalid %s value %q: must be a boolean", adminVar, adminVal)
 		}
 		cfg.Admin = a
 	}
@@ -276,7 +284,8 @@ func (c *Config) ParseFlags(args []string) error {
 	fs := flag.NewFlagSet("resumeee", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	admin := fs.Bool("admin", c.Admin, "Run in local single-user admin mode")
+	admin := fs.Bool("admin-mode", c.Admin, "Run in local single-user admin mode")
+	fs.BoolVar(admin, "admin", c.Admin, "Alias for -admin-mode")
 	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
 	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
 	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")

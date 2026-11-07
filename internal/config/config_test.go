@@ -834,9 +834,9 @@ func TestLoadInvalidTimeouts(t *testing.T) {
 }
 
 func TestLoadMultiTenancyConfig(t *testing.T) {
-	t.Run("Valid multi-tenancy env variables", func(t *testing.T) {
+	t.Run("Valid multi-tenancy env variables with ADMIN_MODE", func(t *testing.T) {
 		env := map[string]string{
-			"ADMIN":                   "true",
+			"ADMIN_MODE":              "true",
 			"FIREBASE_PROJECT_ID":     "resumeee-prod-123",
 			"LLM_DAILY_REQUEST_LIMIT": "100",
 			"LLM_MONTHLY_TOKEN_LIMIT": "5000000",
@@ -859,13 +859,94 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("ADMIN boolean parsing error", func(t *testing.T) {
+	t.Run("Valid ADMIN_MODE boolean variants", func(t *testing.T) {
+		for _, val := range []string{"true", "1", "TRUE"} {
+			env := map[string]string{"ADMIN_MODE": val}
+			cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+			if err != nil {
+				t.Fatalf("unexpected error for ADMIN_MODE=%s: %v", val, err)
+			}
+			if !cfg.Admin {
+				t.Errorf("expected Admin true for ADMIN_MODE=%s, got false", val)
+			}
+		}
+
+		for _, val := range []string{"false", "0", "FALSE"} {
+			env := map[string]string{"ADMIN_MODE": val}
+			cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+			if err != nil {
+				t.Fatalf("unexpected error for ADMIN_MODE=%s: %v", val, err)
+			}
+			if cfg.Admin {
+				t.Errorf("expected Admin false for ADMIN_MODE=%s, got true", val)
+			}
+		}
+	})
+
+	t.Run("Fallback to legacy ADMIN when ADMIN_MODE is unset", func(t *testing.T) {
+		env := map[string]string{
+			"ADMIN": "true",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.Admin {
+			t.Errorf("expected Admin true from fallback ADMIN, got false")
+		}
+	})
+
+	t.Run("ADMIN_MODE precedence over ADMIN", func(t *testing.T) {
+		env := map[string]string{
+			"ADMIN_MODE": "true",
+			"ADMIN":      "false",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.Admin {
+			t.Errorf("expected ADMIN_MODE=true to take precedence over ADMIN=false")
+		}
+
+		env = map[string]string{
+			"ADMIN_MODE": "false",
+			"ADMIN":      "true",
+		}
+		cfg, err = config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Admin {
+			t.Errorf("expected ADMIN_MODE=false to take precedence over ADMIN=true")
+		}
+	})
+
+	t.Run("ADMIN_MODE boolean parsing error", func(t *testing.T) {
+		env := map[string]string{
+			"ADMIN_MODE": "not-a-bool",
+		}
+		_, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err == nil {
+			t.Fatalf("expected error for invalid ADMIN_MODE boolean, got nil")
+		}
+		expected := `invalid ADMIN_MODE value "not-a-bool": must be a boolean`
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("expected error containing %q, got: %v", expected, err)
+		}
+	})
+
+	t.Run("ADMIN boolean parsing error fallback", func(t *testing.T) {
 		env := map[string]string{
 			"ADMIN": "not-a-bool",
 		}
 		_, err := config.LoadFrom(func(k string) string { return env[k] })
 		if err == nil {
 			t.Fatalf("expected error for invalid ADMIN boolean, got nil")
+		}
+		expected := `invalid ADMIN value "not-a-bool": must be a boolean`
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("expected error containing %q, got: %v", expected, err)
 		}
 	})
 
@@ -891,15 +972,72 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 }
 
 func TestConfig_ParseFlags_Admin(t *testing.T) {
-	cfg, err := config.LoadFrom(func(s string) string { return "" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := cfg.ParseFlags([]string{"-admin"}); err != nil {
-		t.Fatalf("ParseFlags failed: %v", err)
-	}
-	if !cfg.Admin {
-		t.Errorf("expected Admin true after -admin flag, got false")
-	}
+	t.Run("-admin flag sets Admin true", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-admin"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if !cfg.Admin {
+			t.Errorf("expected Admin true after -admin flag, got false")
+		}
+	})
+
+	t.Run("-admin-mode flag sets Admin true", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-admin-mode"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if !cfg.Admin {
+			t.Errorf("expected Admin true after -admin-mode flag, got false")
+		}
+	})
+
+	t.Run("-admin-mode flag overrides default to false", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "ADMIN_MODE" {
+				return "true"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.Admin {
+			t.Fatalf("expected Admin true initially")
+		}
+		if err := cfg.ParseFlags([]string{"-admin-mode=false"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.Admin {
+			t.Errorf("expected Admin false after -admin-mode=false flag, got true")
+		}
+	})
+
+	t.Run("-admin alias flag overrides default to false", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string {
+			if s == "ADMIN_MODE" {
+				return "true"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.Admin {
+			t.Fatalf("expected Admin true initially")
+		}
+		if err := cfg.ParseFlags([]string{"-admin=false"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.Admin {
+			t.Errorf("expected Admin false after -admin=false flag, got true")
+		}
+	})
 }
 

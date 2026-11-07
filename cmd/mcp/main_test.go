@@ -157,3 +157,73 @@ func TestCLI_RunWithStore_MemoryBackend(t *testing.T) {
 		t.Errorf("expected server name 'Resumeee Career & Resume Engine', got: %q", rpcResp.Result.ServerInfo.Name)
 	}
 }
+
+func TestCLI_Run_AdminFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		envAdminMode string
+		args         []string
+		expected     bool
+	}{
+		{
+			name:         "flag -admin-mode=true enables admin mode",
+			envAdminMode: "false",
+			args:         []string{"-admin-mode=true"},
+			expected:     true,
+		},
+		{
+			name:         "flag -admin-mode shorthand enables admin mode",
+			envAdminMode: "false",
+			args:         []string{"-admin-mode"},
+			expected:     true,
+		},
+		{
+			name:         "flag -admin-mode=false overrides ADMIN_MODE=true",
+			envAdminMode: "true",
+			args:         []string{"-admin-mode=false"},
+			expected:     false,
+		},
+		{
+			name:         "flag -admin=false overrides ADMIN_MODE=true",
+			envAdminMode: "true",
+			args:         []string{"-admin=false"},
+			expected:     false,
+		},
+		{
+			name:         "flag -admin shorthand enables admin mode",
+			envAdminMode: "false",
+			args:         []string{"-admin"},
+			expected:     true,
+		},
+		{
+			name:         "inherits ADMIN_MODE=true when no flag provided",
+			envAdminMode: "true",
+			args:         nil,
+			expected:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ADMIN_MODE", tc.envAdminMode)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			var capturedAdmin bool
+			storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (repository.Store, error) {
+				capturedAdmin = cfg.Admin
+				cancel()
+				return memory.NewSeeded(context.Background())
+			}
+
+			inBuf := bytes.NewBuffer(nil)
+			outBuf := &bytes.Buffer{}
+
+			_ = runWithStore(ctx, storeInit, inBuf, outBuf, tc.args...)
+
+			if capturedAdmin != tc.expected {
+				t.Errorf("expected cfg.Admin=%v, got %v", tc.expected, capturedAdmin)
+			}
+		})
+	}
+}
