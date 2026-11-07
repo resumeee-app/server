@@ -14,7 +14,7 @@ import (
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 	"resumeee/internal/renderer"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository/memory"
 	"resumeee/internal/validator"
 )
 
@@ -41,21 +41,17 @@ type resumeTestEnv struct {
 func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 	t.Helper()
 
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to open in-memory sqlite db: %v", err)
-	}
-
 	ctx := context.Background()
 	defaultUserID := "user-resume-1"
-	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := sqlite.NewProfileRepository(db)
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
-	branchRepo := sqlite.NewBranchRepository(db)
+	profileRepo := store
+	presetRepo := store
+	templateRepo := store
+	branchRepo := store
 	mockProv := &mockLLMProvider{}
 	rend := renderer.NewTemplateRenderer()
 
@@ -85,7 +81,7 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 
 	return &resumeTestEnv{
 		server:       server,
-		db:           db,
+		db:           store,
 		branchRepo:   branchRepo,
 		profileRepo:  profileRepo,
 		presetRepo:   presetRepo,

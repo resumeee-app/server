@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -25,10 +24,33 @@ import (
 	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
+	"resumeee/internal/repository"
 	"resumeee/internal/repository/sqlite"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
+
+// StoreInitializer initializes a storage backend and provides a repository.Store implementation.
+type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error)
+
+// defaultSQLiteInitializer establishes the default SQLite persistence backend, executing migrations and default seeding.
+//
+// Parameters:
+//   - ctx: Server startup context.
+//   - cfg: Server runtime configuration.
+//   - logger: System logger for recording initialization milestones.
+//
+// Returns:
+//   - repository.Store: Initialized SQLite store bundle.
+//   - error: Non-nil if database connection, schema migration, or default seeding fails.
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
+	store, err := sqlite.OpenStore(ctx, cfg.DBPath, cfg.DefaultUserID)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("database seeded with default profile, built-in templates, and presets")
+	return store, nil
+}
 
 // main initializes runtime context and executes the primary resumeee server process.
 func main() {
@@ -38,7 +60,7 @@ func main() {
 	}
 }
 
-// run orchestrates database initialization, migrations, seeding, background worker startup, and HTTP serving.
+// run orchestrates database initialization, migrations, seeding, background worker startup, and HTTP serving using default SQLite persistence.
 //
 // Parameters:
 //   - parent: The parent context governing server lifecycle and cancellation signals.
@@ -47,6 +69,19 @@ func main() {
 // Returns:
 //   - error: Non-nil if configuration loading, initialization, or serving fails.
 func run(parent context.Context, args ...string) error {
+	return runWithStore(parent, defaultSQLiteInitializer, args...)
+}
+
+// runWithStore orchestrates configuration loading, store initialization, background workers, and HTTP serving.
+//
+// Parameters:
+//   - parent: The parent context governing server lifecycle and cancellation signals.
+//   - storeInit: Storage backend initializer injecting repository implementations.
+//   - args: Command line arguments passed to flag parsing.
+//
+// Returns:
+//   - error: Non-nil if configuration loading, initialization, or serving fails.
+func runWithStore(parent context.Context, storeInit StoreInitializer, args ...string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
@@ -73,16 +108,6 @@ func run(parent context.Context, args ...string) error {
 		"llm_debug_dir", cfg.LLMDebugDir,
 	)
 
-	// Ensure DB directory exists if file-backed
-	if cfg.DBPath != ":memory:" && !strings.Contains(cfg.DBPath, "mode=memory") {
-		dir := filepath.Dir(cfg.DBPath)
-		if dir != "." && dir != "" {
-			if err := os.MkdirAll(dir, 0750); err != nil {
-				return fmt.Errorf("creating db directory: %w", err)
-			}
-		}
-	}
-
 	// Ensure LLM debug directory exists if prompt debugging is enabled
 	if cfg.LLMDebugPrompts && strings.TrimSpace(cfg.LLMDebugDir) != "" {
 		if err := os.MkdirAll(cfg.LLMDebugDir, 0750); err != nil {
@@ -90,30 +115,29 @@ func run(parent context.Context, args ...string) error {
 		}
 	}
 
-	db, err := sqlite.New(cfg.DBPath)
+	store, err := storeInit(ctx, cfg, logger)
 	if err != nil {
-		return fmt.Errorf("initializing database: %w", err)
+		return fmt.Errorf("initializing store: %w", err)
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Warn("failed to close store", "err", err)
+		}
+	}()
 
+	branchRepo := store.Branch()
 	// 1. Recover in-flight versions left interrupted by process stop
-	branchRepo := sqlite.NewBranchRepository(db)
 	if err := branchRepo.FailInterruptedVersions(ctx, "server restarted while generation job was in flight"); err != nil {
 		logger.Warn("failed to clean up interrupted versions on boot", "err", err)
 	} else {
 		logger.Info("cleaned up interrupted generation versions")
 	}
 
-	// 2. Idempotently seed default user profile, built-in templates, and presets
-	if err := sqlite.SeedDefaultData(ctx, db, cfg.DefaultUserID); err != nil {
-		return fmt.Errorf("seeding default data: %w", err)
-	}
-	logger.Info("database seeded with default profile, built-in templates, and presets")
-
-	// 3. Initialize repositories and domain services
-	profileRepo := sqlite.NewProfileRepository(db)
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
-	pdfJobRepo := sqlite.NewPDFParseJobRepository(db)
+	// 2. Initialize repositories and domain services
+	profileRepo := store.Profile()
+	presetRepo := store.Preset()
+	templateRepo := store.Template()
+	pdfJobRepo := store.PDFJob()
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()

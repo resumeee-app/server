@@ -11,25 +11,21 @@ import (
 
 	"resumeee/internal/api"
 	"resumeee/internal/domain"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository/memory"
 )
 
-func setupStrategyTestServer(t *testing.T) (*httptest.Server, *sqliteTestRepos) {
+func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos) {
 	t.Helper()
-
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to initialize sqlite: %v", err)
-	}
 
 	ctx := context.Background()
 	defaultUserID := "user-1"
-	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
+	presetRepo := store
+	templateRepo := store
 
 	router := api.NewRouter(api.RouterConfig{
 		PresetRepo:    presetRepo,
@@ -42,14 +38,14 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *sqliteTestRepos) 
 		server.Close()
 	})
 
-	return server, &sqliteTestRepos{
-		db:           db,
+	return server, &strategyTestRepos{
+		db:           store,
 		presetRepo:   presetRepo,
 		templateRepo: templateRepo,
 	}
 }
 
-type sqliteTestRepos struct {
+type strategyTestRepos struct {
 	db           any
 	presetRepo   domain.PresetRepository
 	templateRepo domain.TemplateRepository

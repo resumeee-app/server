@@ -12,7 +12,7 @@ import (
 	"resumeee/internal/api"
 	"resumeee/internal/domain"
 	"resumeee/internal/renderer"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository/memory"
 )
 
 type mockModelEnum struct {
@@ -26,18 +26,14 @@ func (m *mockModelEnum) AvailableModels() []domain.ModelOption {
 func setupPresetTestServer(t *testing.T, enumerator api.ModelEnumerator) (*httptest.Server, domain.PresetRepository) {
 	t.Helper()
 
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to initialize sqlite: %v", err)
-	}
-
 	ctx := context.Background()
 	defaultUserID := "default"
-	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	presetRepo := sqlite.NewPresetRepository(db)
+	presetRepo := store
 
 	router := api.NewRouter(api.RouterConfig{
 		PresetRepo:      presetRepo,

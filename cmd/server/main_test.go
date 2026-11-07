@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"resumeee/internal/config"
 	"resumeee/internal/domain"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository"
+	"resumeee/internal/repository/memory"
 )
 
 func freePort(t *testing.T) string {
@@ -31,16 +34,20 @@ func freePort(t *testing.T) string {
 }
 
 func TestRunGracefulShutdown(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-	t.Setenv("DB_PATH", dbPath)
+	memStore, err := memory.NewSeeded(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+		return memStore, nil
+	}
 	t.Setenv("PORT", freePort(t))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- run(ctx)
+		errCh <- runWithStore(ctx, storeInit)
 	}()
 
 	// Allow run to initialize, auto-migrate, seed, and wait on ctx.Done()
@@ -58,14 +65,8 @@ func TestRunGracefulShutdown(t *testing.T) {
 		t.Fatal("timed out waiting for graceful shutdown")
 	}
 
-	// Verify database was initialized and seeded
-	db, err := sqlite.New(dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database after run: %v", err)
-	}
-
-	profileRepo := sqlite.NewProfileRepository(db)
-	prof, err := profileRepo.GetProfile(context.Background(), "default")
+	// Verify profile is accessible
+	prof, err := memStore.Profile().GetProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("expected default profile to be seeded, got: %v", err)
 	}
@@ -75,25 +76,19 @@ func TestRunGracefulShutdown(t *testing.T) {
 }
 
 func TestRun_RecoversInterruptedVersions(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "recover.db")
-	t.Setenv("DB_PATH", dbPath)
+	memStore, err := memory.NewSeeded(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
 	t.Setenv("PORT", freePort(t))
 
-	// Pre-create database with an in-flight branch version
-	db, err := sqlite.New(dbPath)
-	if err != nil {
-		t.Fatalf("failed to create db: %v", err)
-	}
-
-	branchRepo := sqlite.NewBranchRepository(db)
 	branch := &domain.Branch{
 		ID:            "br-recover",
 		UserID:        "default",
 		Name:          "Pending Branch",
 		TemplateSetID: "tmpl-1",
 	}
-	if err := branchRepo.CreateBranch(context.Background(), branch); err != nil {
+	if err := memStore.Branch().CreateBranch(context.Background(), branch); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -102,17 +97,21 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		BranchID: branch.ID,
 		Status:   domain.VersionStatusProcessing,
 	}
-	if err := branchRepo.CreateVersion(context.Background(), ver); err != nil {
+	if err := memStore.Branch().CreateVersion(context.Background(), ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 	// Force status to processing
-	_ = branchRepo.UpdateVersionStatus(context.Background(), ver.ID, domain.VersionStatusProcessing, "")
+	_ = memStore.Branch().UpdateVersionStatus(context.Background(), ver.ID, domain.VersionStatusProcessing, "")
+
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+		return memStore, nil
+	}
 
 	// Now run the server boot sequence
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- run(ctx)
+		errCh <- runWithStore(ctx, storeInit)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -128,7 +127,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	}
 
 	// Verify interrupted version was marked failed
-	recoveredVer, err := branchRepo.GetVersion(context.Background(), branch.ID, ver.ID)
+	recoveredVer, err := memStore.Branch().GetVersion(context.Background(), branch.ID, ver.ID)
 	if err != nil {
 		t.Fatalf("failed to get version: %v", err)
 	}

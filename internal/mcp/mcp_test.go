@@ -22,7 +22,7 @@ import (
 	resumeeeMCP "resumeee/internal/mcp"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository/memory"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -95,20 +95,17 @@ type testEnv struct {
 
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite in memory: %v", err)
-	}
 
 	ctx := context.Background()
-	if err := sqlite.SeedDefaultData(ctx, db, "user-1"); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store in memory: %v", err)
 	}
 
-	profileRepo := sqlite.NewProfileRepository(db)
-	branchRepo := sqlite.NewBranchRepository(db)
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
+	profileRepo := store
+	branchRepo := store
+	presetRepo := store
+	templateRepo := store
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
 	jobEnq := &dummyJobEnqueuer{}
@@ -153,7 +150,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	httpHandler := resumeeeMCP.NewHTTPHandler(mcpServer, cfg)
 
 	return &testEnv{
-		db:               db,
+		db:               store,
 		profileRepo:      profileRepo,
 		branchRepo:       branchRepo,
 		presetRepo:       presetRepo,

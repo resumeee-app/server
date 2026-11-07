@@ -24,7 +24,7 @@ import (
 	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/repository/memory"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -45,21 +45,17 @@ type testEnv struct {
 func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	t.Helper()
 
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to initialize sqlite: %v", err)
-	}
-
 	ctx := context.Background()
 	defaultUserID := "default"
-	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := sqlite.NewProfileRepository(db)
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
-	branchRepo := sqlite.NewBranchRepository(db)
+	profileRepo := store
+	presetRepo := store
+	templateRepo := store
+	branchRepo := store
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
@@ -88,7 +84,7 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 
 	return &testEnv{
 		server:       server,
-		db:           db,
+		db:           store,
 		profileRepo:  profileRepo,
 		presetRepo:   presetRepo,
 		templateRepo: templateRepo,
@@ -1086,22 +1082,18 @@ func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtr
 func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	t.Helper()
 
-	db, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to initialize sqlite: %v", err)
-	}
-
 	ctx := context.Background()
 	defaultUserID := "default"
-	if err := sqlite.SeedDefaultData(ctx, db, defaultUserID); err != nil {
-		t.Fatalf("failed to seed default data: %v", err)
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := sqlite.NewProfileRepository(db)
-	presetRepo := sqlite.NewPresetRepository(db)
-	templateRepo := sqlite.NewTemplateRepository(db)
-	branchRepo := sqlite.NewBranchRepository(db)
-	pdfJobRepo := sqlite.NewPDFParseJobRepository(db)
+	profileRepo := store
+	presetRepo := store
+	templateRepo := store
+	branchRepo := store
+	pdfJobRepo := store
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
@@ -1136,7 +1128,7 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 
 	return &testEnv{
 		server:       server,
-		db:           db,
+		db:           store,
 		profileRepo:  profileRepo,
 		presetRepo:   presetRepo,
 		templateRepo: templateRepo,
@@ -2243,7 +2235,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 		isDef := true
 		req := api.CreateBranchRequest{
 			Name:          "Duplicate Default",
-			TemplateSetID: sqlite.TemplateStandardCleanID,
+			TemplateSetID: renderer.TemplateStandardCleanID,
 			IsDefault:     &isDef,
 		}
 		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", req, nil)
@@ -2253,7 +2245,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 	})
 
 	t.Run("PUT /api/v1/branches/{id} updates template_set_id and re-renders", func(t *testing.T) {
-		newTmpl := sqlite.TemplateDetailedImmigrationCVID
+		newTmpl := renderer.TemplateDetailedImmigrationCVID
 		req := api.UpdateBranchRequest{
 			TemplateSetID: &newTmpl,
 		}
