@@ -437,6 +437,21 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("GET /mcp/sse connects to MCP SSE stream", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, baseURL+"/mcp/sse", nil)
+		resp, err := clientNoRedirect.Do(req)
+		if err != nil {
+			t.Fatalf("failed request: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+			t.Errorf("expected text/event-stream, got %s", ct)
+		}
+	})
+
 	// Clean shutdown
 	clientNoRedirect.CloseIdleConnections()
 	cancel()
@@ -471,6 +486,30 @@ func TestBuildServer_Configuration(t *testing.T) {
 	}
 	if server.MaxHeaderBytes != 1<<20 {
 		t.Errorf("expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
+	}
+}
+
+func TestBuildRootHandler_MCPRouting(t *testing.T) {
+	apiMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("api"))
+	})
+	uiMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ui"))
+	})
+	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("mcp"))
+	})
+
+	root := buildRootHandler(apiMux, uiMux, mcpMux)
+
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/mcp/sse", nil)
+	root.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "mcp" {
+		t.Errorf("expected mcp handler to be dispatched at /mcp/sse, got code %d body %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,8 +17,8 @@ import (
 	"resumeee/internal/api"
 	"resumeee/internal/branch"
 	"resumeee/internal/config"
-	"resumeee/internal/domain"
 	"resumeee/internal/llm"
+	resumeeeMCP "resumeee/internal/mcp"
 	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
@@ -30,68 +29,6 @@ import (
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
-
-type llmServiceAdapter struct {
-	registry *llm.Registry
-}
-
-// GenerateTailoredResume resolves the target LLM provider and generates a tailored resume response.
-func (a *llmServiceAdapter) GenerateTailoredResume(ctx context.Context, req domain.GenerationRequest) (*domain.GenerationResponse, error) {
-	var profile *domain.Profile
-	if req.MasterProfile != nil {
-		profile = &req.MasterProfile.Profile
-	}
-	provider, model, err := a.registry.Resolve(req, req.Preset, profile)
-	if err != nil {
-		return nil, err
-	}
-	req.Model = model
-	return provider.GenerateTailoredResume(ctx, req)
-}
-
-// GenerateGapAnalysis performs a lightweight, decoupled gap analysis without full resume compilation.
-func (a *llmServiceAdapter) GenerateGapAnalysis(ctx context.Context, req domain.GenerationRequest) (*domain.GapReport, error) {
-	var profile *domain.Profile
-	if req.MasterProfile != nil {
-		profile = &req.MasterProfile.Profile
-	}
-	provider, model, err := a.registry.Resolve(req, req.Preset, profile)
-	if err != nil {
-		return nil, err
-	}
-	req.Model = model
-
-	// If provider implements RawCompleter, run the lightweight gap analysis prompt
-	if rawCompleter, ok := provider.(llm.RawCompleter); ok {
-		prompts, pErr := llm.BuildGapAnalysisPrompt(req)
-		if pErr == nil {
-			text, cErr := rawCompleter.CompleteText(ctx, prompts.SystemPrompt, prompts.UserPrompt, model)
-			if cErr == nil {
-				cleaned := llm.ExtractJSON(text)
-				var wrapper struct {
-					GapReport *domain.GapReport `json:"gap_report"`
-				}
-				if err := json.Unmarshal([]byte(cleaned), &wrapper); err == nil && wrapper.GapReport != nil {
-					wrapper.GapReport.Normalize()
-					return wrapper.GapReport, nil
-				}
-				var direct domain.GapReport
-				if err := json.Unmarshal([]byte(cleaned), &direct); err == nil && (direct.OverallMatchSummary != "" || len(direct.MissingRequirements) > 0 || len(direct.IdentifiedGaps) > 0) {
-					direct.Normalize()
-					return &direct, nil
-				}
-			}
-		}
-	}
-
-	// Fallback to full generation if lightweight analysis is unavailable or fails
-	resp, err := provider.GenerateTailoredResume(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	resp.GapReport.Normalize()
-	return &resp.GapReport, nil
-}
 
 // main initializes runtime context and executes the primary resumeee server process.
 func main() {
@@ -176,7 +113,7 @@ func run(parent context.Context, args ...string) error {
 
 	// 4. Initialize LLM registry and service adapter
 	llmRegistry := llm.NewRegistry(cfg, llm.WithLogger(logger))
-	llmAdapter := &llmServiceAdapter{registry: llmRegistry}
+	llmAdapter := llm.NewServiceAdapter(llmRegistry)
 	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
 
 	// 5. Initialize and start asynchronous generation worker pool
@@ -246,8 +183,29 @@ func run(parent context.Context, args ...string) error {
 	apiClient := uiClient.NewInProcess(apiRouter, uiClient.WithTimeout(uiCfg.ClientTimeout))
 	uiHandler := ui.NewServer(uiCfg, apiClient, logger)
 
-	// 9. Unify API and UI routes under single root router
-	rootHandler := buildRootHandler(apiRouter, uiHandler)
+	// 9. Build MCP server and HTTP handler
+	mcpCfg := resumeeeMCP.ServerConfig{
+		ProfileService:        profileSvc,
+		BranchService:         branchSvc,
+		TemplateRenderer:      templateRenderer,
+		ProfileRepo:           profileRepo,
+		BranchRepo:            branchRepo,
+		TemplateRepo:          templateRepo,
+		PresetRepo:            presetRepo,
+		ResumeExtractor:       resumeExtractor,
+		JobEnqueuer:           workerPool,
+		DefaultUserID:         cfg.DefaultUserID,
+		Logger:                logger,
+		RESTTimeout:           cfg.RESTTimeout,
+		TailoringTimeout:      10 * time.Minute,
+		MaxConnectionsPerUser: 5,
+		MaxTotalConnections:   100,
+	}
+	mcpServer := resumeeeMCP.NewServer(mcpCfg)
+	mcpHandler := resumeeeMCP.NewHTTPHandler(mcpServer, mcpCfg)
+
+	// 10. Unify API, UI, and MCP routes under single root router
+	rootHandler := buildRootHandler(apiRouter, uiHandler, mcpHandler)
 
 	writeTimeout := cfg.RESTTimeout + 10*time.Second
 	if writeTimeout < 30*time.Second {
@@ -282,17 +240,24 @@ func run(parent context.Context, args ...string) error {
 	return nil
 }
 
-// buildRootHandler unifies the API router and Web UI server into a single http.Handler.
+// buildRootHandler unifies the API router, Web UI server, and MCP handler into a single http.Handler.
 // - /api/v1/... and health endpoints are dispatched to the API router.
 // - /web/... and static assets are dispatched to the Web UI handler.
+// - /mcp/... and /mcp are dispatched to the MCP handler.
 // - Root path (/) issues a 302 Found redirect to /web.
-func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler) http.Handler {
+func buildRootHandler(apiRouter http.Handler, uiHandler http.Handler, mcpHandler ...http.Handler) http.Handler {
 	rootMux := http.NewServeMux()
 
 	// API and health routes
 	rootMux.Handle("/api/v1/", apiRouter)
 	rootMux.Handle("GET /healthz", apiRouter)
 	rootMux.Handle("GET /health", apiRouter)
+
+	// MCP routes
+	if len(mcpHandler) > 0 && mcpHandler[0] != nil {
+		rootMux.Handle("/mcp/", mcpHandler[0])
+		rootMux.Handle("/mcp", mcpHandler[0])
+	}
 
 	// Root path redirect to /web
 	rootMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
