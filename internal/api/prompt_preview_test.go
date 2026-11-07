@@ -64,6 +64,12 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if !strings.Contains(preview.UserPrompt, "Focus on reliability and fault injection.") {
 		t.Errorf("expected UserPrompt to contain saved branch instructions")
 	}
+	if strings.Contains(preview.UserPrompt, "Default User") {
+		t.Errorf("expected UserPrompt to NOT leak candidate real FullName 'Default User'")
+	}
+	if !strings.Contains(preview.UserPrompt, "[John Doe]") {
+		t.Errorf("expected UserPrompt to contain obfuscated placeholder '[John Doe]'")
+	}
 
 	// 4. POST prompt preview with draft overrides
 	overrideReq := map[string]any{
