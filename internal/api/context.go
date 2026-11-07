@@ -16,3 +16,13 @@ func WithUserID(ctx context.Context, userID string) context.Context {
 func UserIDFromContext(ctx context.Context) (string, error) {
 	return domain.UserIDFromContext(ctx)
 }
+
+// WithIsAdmin binds an administrative privilege indicator into the request context.
+func WithIsAdmin(ctx context.Context, isAdmin bool) context.Context {
+	return domain.WithIsAdmin(ctx, isAdmin)
+}
+
+// IsAdminFromContext extracts whether the request context has administrative privileges.
+func IsAdminFromContext(ctx context.Context) bool {
+	return domain.IsAdminFromContext(ctx)
+}

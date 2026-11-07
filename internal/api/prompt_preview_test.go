@@ -1,13 +1,17 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"resumeee/internal/api"
 	"resumeee/internal/domain"
 	"resumeee/internal/renderer"
+	"resumeee/internal/repository/memory"
 )
 
 func TestBranch_PromptPreviewEndpoint(t *testing.T) {
@@ -176,4 +180,165 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if badResp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 BadRequest for malformed JSON, got %d: %s", badResp.StatusCode, string(badBody))
 	}
+}
+
+type mockVerifierForPromptPreview struct {
+	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+}
+
+func (m *mockVerifierForPromptPreview) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+	if m.verifyFunc != nil {
+		return m.verifyFunc(ctx, token)
+	}
+	return nil, domain.ErrUnauthorized
+}
+
+func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
+	ctx := context.Background()
+	defaultUserID := "test-user-preview-auth"
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	verifier := &mockVerifierForPromptPreview{
+		verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			switch token {
+			case "token-admin-user":
+				return &domain.TokenInfo{UID: defaultUserID, Email: "admin@example.com", Admin: true}, nil
+			case "token-admin-role":
+				return &domain.TokenInfo{UID: defaultUserID, Email: "admin2@example.com", Role: "admin"}, nil
+			case "token-regular-user":
+				return &domain.TokenInfo{UID: defaultUserID, Email: "user@example.com", Role: "user", Admin: false}, nil
+			default:
+				return nil, domain.ErrUnauthorized
+			}
+		},
+	}
+
+	router := api.NewRouter(api.RouterConfig{
+		ProfileRepo:   store,
+		PresetRepo:    store,
+		TemplateRepo:  store,
+		BranchRepo:    store,
+		QuotaRepo:     store,
+		Renderer:      renderer.NewTemplateRenderer(),
+		DefaultUserID: defaultUserID,
+		Admin:         false,
+		TokenVerifier: verifier,
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	// Create branch in memory store
+	branch := &domain.Branch{
+		ID:                 "branch-preview-auth-1",
+		UserID:             defaultUserID,
+		Name:               "Targeted Branch",
+		TargetRole:         "Lead Architect",
+		TargetCompany:      "Acme Corp",
+		TargetRequirements: "Extensive distributed systems experience.",
+		TemplateSetID:      renderer.TemplateStandardCleanID,
+	}
+	if err := store.CreateBranch(ctx, branch); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	previewURL := server.URL + "/api/v1/branches/" + branch.ID + "/prompt-preview"
+
+	t.Run("unauthenticated call returns 401 Unauthorized", func(t *testing.T) {
+		resp, body := doRequest(t, client, http.MethodGet, previewURL, nil, nil)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized, got %d: %s", resp.StatusCode, string(body))
+		}
+	})
+
+	t.Run("regular non-admin user is rejected with 403 Forbidden for GET and POST", func(t *testing.T) {
+		headers := map[string]string{"Authorization": "Bearer token-regular-user"}
+
+		// GET prompt-preview
+		getResp, getBody := doRequest(t, client, http.MethodGet, previewURL, nil, headers)
+		if getResp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for non-admin GET, got %d: %s", getResp.StatusCode, string(getBody))
+		}
+		var getErrResp api.ErrorResponse
+		if err := json.Unmarshal(getBody, &getErrResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if getErrResp.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code %q, got %q", api.CodeForbidden, getErrResp.Error.Code)
+		}
+		if !strings.Contains(strings.ToLower(getErrResp.Error.Message), "admin") {
+			t.Errorf("expected error message to reference administrators, got %q", getErrResp.Error.Message)
+		}
+
+		// POST prompt-preview
+		postReq := map[string]any{"target_role": "Staff Architect"}
+		postResp, postBody := doRequest(t, client, http.MethodPost, previewURL, postReq, headers)
+		if postResp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for non-admin POST, got %d: %s", postResp.StatusCode, string(postBody))
+		}
+		var postErrResp api.ErrorResponse
+		if err := json.Unmarshal(postBody, &postErrResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if postErrResp.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code %q, got %q", api.CodeForbidden, postErrResp.Error.Code)
+		}
+		if !strings.Contains(strings.ToLower(postErrResp.Error.Message), "admin") {
+			t.Errorf("expected error message to reference administrators, got %q", postErrResp.Error.Message)
+		}
+	})
+
+	t.Run("admin user with Admin flag is allowed (200 OK)", func(t *testing.T) {
+		headers := map[string]string{"Authorization": "Bearer token-admin-user"}
+
+		getResp, getBody := doRequest(t, client, http.MethodGet, previewURL, nil, headers)
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for admin GET, got %d: %s", getResp.StatusCode, string(getBody))
+		}
+
+		postReq := map[string]any{"target_role": "Staff Architect"}
+		postResp, postBody := doRequest(t, client, http.MethodPost, previewURL, postReq, headers)
+		if postResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for admin POST, got %d: %s", postResp.StatusCode, string(postBody))
+		}
+	})
+
+	t.Run("admin user with admin Role claim is allowed (200 OK)", func(t *testing.T) {
+		headers := map[string]string{"Authorization": "Bearer token-admin-role"}
+
+		getResp, getBody := doRequest(t, client, http.MethodGet, previewURL, nil, headers)
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for admin role GET, got %d: %s", getResp.StatusCode, string(getBody))
+		}
+
+		postReq := map[string]any{"target_role": "Staff Architect"}
+		postResp, postBody := doRequest(t, client, http.MethodPost, previewURL, postReq, headers)
+		if postResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for admin role POST, got %d: %s", postResp.StatusCode, string(postBody))
+		}
+	})
+
+	t.Run("ADMIN_MODE=true allows prompt-preview without token", func(t *testing.T) {
+		adminRouter := api.NewRouter(api.RouterConfig{
+			ProfileRepo:   store,
+			PresetRepo:    store,
+			TemplateRepo:  store,
+			BranchRepo:    store,
+			QuotaRepo:     store,
+			Renderer:      renderer.NewTemplateRenderer(),
+			DefaultUserID: defaultUserID,
+			Admin:         true,
+		})
+		adminServer := httptest.NewServer(adminRouter)
+		defer adminServer.Close()
+
+		adminURL := adminServer.URL + "/api/v1/branches/" + branch.ID + "/prompt-preview"
+		getResp, getBody := doRequest(t, adminServer.Client(), http.MethodGet, adminURL, nil, nil)
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK under ADMIN_MODE=true, got %d: %s", getResp.StatusCode, string(getBody))
+		}
+	})
 }

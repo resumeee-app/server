@@ -171,6 +171,7 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerif
 					uid = defaultUserID
 				}
 				ctx := WithUserID(r.Context(), uid)
+				ctx = WithIsAdmin(ctx, true)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -201,6 +202,7 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerif
 			}
 
 			ctx := WithUserID(r.Context(), tokenInfo.UID)
+			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

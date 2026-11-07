@@ -624,8 +624,21 @@ func (h *branchHandler) analyzeBranchGaps(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, report)
 }
 
+// requireAdmin verifies administrative privilege, writing a 403 Forbidden response if unauthorized.
+func (h *branchHandler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if !h.cfg.Admin && !IsAdminFromContext(r.Context()) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "LLM prompt preview is restricted to administrators", "")
+		return false
+	}
+	return true
+}
+
 // getPromptPreview renders the system and user prompt strings using the branch's saved state.
 func (h *branchHandler) getPromptPreview(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
@@ -645,6 +658,10 @@ func (h *branchHandler) getPromptPreview(w http.ResponseWriter, r *http.Request)
 
 // previewPrompt renders the system and user prompt strings, optionally incorporating live draft overrides from the request body.
 func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")

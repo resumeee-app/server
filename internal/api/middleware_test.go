@@ -120,8 +120,10 @@ func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*d
 func TestAuthMiddleware(t *testing.T) {
 	t.Run("admin mode bypasses verification and sets defaultUserID", func(t *testing.T) {
 		var capturedUID string
+		var capturedAdmin bool
 		handler := AuthMiddleware(true, "admin-user-default", nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedUID, _ = UserIDFromContext(r.Context())
+			capturedAdmin = IsAdminFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -134,6 +136,9 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 		if capturedUID != "admin-user-default" {
 			t.Errorf("expected captured UID 'admin-user-default', got %q", capturedUID)
+		}
+		if !capturedAdmin {
+			t.Errorf("expected captured admin privilege to be true in admin mode")
 		}
 	})
 
@@ -183,6 +188,67 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 		if capturedUID != "firebase-uid-42" {
 			t.Errorf("expected captured UID 'firebase-uid-42', got %q", capturedUID)
+		}
+	})
+
+	t.Run("multi-tenant mode injects admin status from token info", func(t *testing.T) {
+		verifier := &mockTokenVerifier{
+			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+				switch token {
+				case "admin-token-flag":
+					return &domain.TokenInfo{UID: "admin-1", Email: "admin@example.com", Admin: true}, nil
+				case "admin-token-role":
+					return &domain.TokenInfo{UID: "admin-2", Email: "admin2@example.com", Role: "admin"}, nil
+				case "normal-user-token":
+					return &domain.TokenInfo{UID: "user-1", Email: "user@example.com", Role: "user", Admin: false}, nil
+				default:
+					return nil, domain.ErrUnauthorized
+				}
+			},
+		}
+
+		tests := []struct {
+			name          string
+			token         string
+			expectedAdmin bool
+		}{
+			{
+				name:          "token with Admin flag true",
+				token:         "admin-token-flag",
+				expectedAdmin: true,
+			},
+			{
+				name:          "token with admin role",
+				token:         "admin-token-role",
+				expectedAdmin: true,
+			},
+			{
+				name:          "standard user token without admin privileges",
+				token:         "normal-user-token",
+				expectedAdmin: false,
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				var capturedAdmin bool
+				handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					capturedAdmin = IsAdminFromContext(r.Context())
+					w.WriteHeader(http.StatusOK)
+				}))
+
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected status 200, got %d", rec.Code)
+				}
+				if capturedAdmin != tc.expectedAdmin {
+					t.Errorf("expected capturedAdmin=%v, got %v", tc.expectedAdmin, capturedAdmin)
+				}
+			})
 		}
 	})
 
