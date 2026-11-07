@@ -1,5 +1,3 @@
-// Package mcp implements the Model Context Protocol (MCP) server integration for Resumeee,
-// exposing career profile tools, resources, and guided prompts over stdio and HTTP SSE transports.
 package mcp
 
 import (

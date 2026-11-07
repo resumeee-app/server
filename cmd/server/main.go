@@ -1,4 +1,7 @@
 // Package main is the entry point for the Resumeee server daemon.
+//
+// It loads configuration, initializes SQLite persistence, sets up LLM providers,
+// spins up the background worker pool and MCP server, and starts the REST HTTP server.
 package main
 
 import (

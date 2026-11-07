@@ -1,4 +1,3 @@
-// Package mcp implements Model Context Protocol (MCP) server endpoints, tools, resources, and prompts.
 package mcp
 
 import (
