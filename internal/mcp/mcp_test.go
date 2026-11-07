@@ -1278,20 +1278,29 @@ func TestHTTP_SessionOwners_CleanupOnDisconnect(t *testing.T) {
 
 	// 2. Disconnect the SSE stream
 	_ = resp.Body.Close()
-	time.Sleep(50 * time.Millisecond) // Allow server goroutine to execute defer sessionOwners.Delete(sessionID)
 
 	// 3. User-2 sends message with the disconnected sessionID
 	// Since the session owner was evicted, user-2 is NOT blocked by sessionOwners ownership mismatch (which would return 403 Forbidden).
 	msgPayload := `{"jsonrpc":"2.0","method":"tools/list","id":1}`
-	postReq, _ := http.NewRequest(http.MethodPost, server.URL+"/mcp/messages?sessionId="+sessionID, strings.NewReader(msgPayload))
-	postReq.Header.Set("Authorization", "Bearer token-user-2")
-	postReq.Header.Set("Content-Type", "application/json")
+	var postResp *http.Response
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		postReq, _ := http.NewRequest(http.MethodPost, server.URL+"/mcp/messages?sessionId="+sessionID, strings.NewReader(msgPayload))
+		postReq.Header.Set("Authorization", "Bearer token-user-2")
+		postReq.Header.Set("Content-Type", "application/json")
 
-	postResp, err := http.DefaultClient.Do(postReq)
-	if err != nil {
-		t.Fatalf("post request failed: %v", err)
+		var err error
+		postResp, err = http.DefaultClient.Do(postReq)
+		if err != nil {
+			t.Fatalf("post request failed: %v", err)
+		}
+		if postResp.StatusCode != http.StatusForbidden || time.Now().After(deadline) {
+			_ = postResp.Body.Close()
+			break
+		}
+		_ = postResp.Body.Close()
+		time.Sleep(10 * time.Millisecond)
 	}
-	_ = postResp.Body.Close()
 
 	if postResp.StatusCode == http.StatusForbidden {
 		t.Errorf("expected session owner to be cleaned up after disconnect, but got 403 Forbidden")

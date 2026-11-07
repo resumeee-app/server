@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1039,5 +1040,30 @@ func TestConfig_ParseFlags_Admin(t *testing.T) {
 			t.Errorf("expected Admin false after -admin=false flag, got true")
 		}
 	})
+}
+
+func TestEnvironmentTemplates_CleanDocHeaders(t *testing.T) {
+	templates := []string{
+		filepath.Join("..", "..", ".env.example"),
+		filepath.Join("..", "..", "web", ".env.example"),
+	}
+
+	issuePattern := regexp.MustCompile(`(?i)(issue\s*#?\s*\d+|ticket\s*#?\s*\d+|spec\s*#?\s*\d+|gap\s*\d+|pr\s*#?\s*\d+|task\s*#?\s*\d+|\(#[0-9]+\))`)
+
+	for _, relPath := range templates {
+		t.Run(relPath, func(t *testing.T) {
+			data, err := os.ReadFile(relPath)
+			if err != nil {
+				t.Fatalf("failed to read template %s: %v", relPath, err)
+			}
+
+			lines := strings.Split(string(data), "\n")
+			for i, line := range lines {
+				if match := issuePattern.FindString(line); match != "" {
+					t.Errorf("line %d of %s contains noisy issue/gap reference %q: %s", i+1, relPath, match, line)
+				}
+			}
+		})
+	}
 }
 
