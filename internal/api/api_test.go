@@ -2963,3 +2963,195 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 		}
 	})
 }
+
+func TestAPI_ListSkills_TypeFilter(t *testing.T) {
+	ctx := context.Background()
+	memStore := memory.New()
+	router := api.NewRouter(api.RouterConfig{
+		ProfileRepo:   memStore,
+		Admin:         true,
+		DefaultUserID: "default",
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client := server.Client()
+	baseURL := server.URL
+
+	// Seed tenant custom skills for "default"
+	customSkill1 := &domain.Skill{
+		ID:       "custom-skill-go",
+		UserID:   "default",
+		Name:     "Go",
+		IsGlobal: false,
+	}
+	customSkill2 := &domain.Skill{
+		ID:       "custom-skill-k8s",
+		UserID:   "default",
+		Name:     "Kubernetes",
+		IsGlobal: false,
+	}
+	if err := memStore.CreateSkill(ctx, customSkill1); err != nil {
+		t.Fatalf("failed to create custom skill 1: %v", err)
+	}
+	if err := memStore.CreateSkill(ctx, customSkill2); err != nil {
+		t.Fatalf("failed to create custom skill 2: %v", err)
+	}
+
+	// Seed global skill (system-owned)
+	globalSkill := &domain.Skill{
+		ID:       "global-skill-rust",
+		UserID:   "system",
+		Name:     "Rust",
+		IsGlobal: true,
+	}
+	if err := memStore.CreateSkill(ctx, globalSkill); err != nil {
+		t.Fatalf("failed to create global skill: %v", err)
+	}
+
+	// Seed custom skill for another tenant to verify isolation
+	otherTenantSkill := &domain.Skill{
+		ID:       "other-tenant-skill-python",
+		UserID:   "tenant-other",
+		Name:     "Python",
+		IsGlobal: false,
+	}
+	if err := memStore.CreateSkill(ctx, otherTenantSkill); err != nil {
+		t.Fatalf("failed to create other tenant skill: %v", err)
+	}
+
+	assertSkillNamesAndIDs := func(t *testing.T, skills []domain.Skill, expectedMap map[string]string) {
+		t.Helper()
+		if len(skills) != len(expectedMap) {
+			t.Fatalf("expected %d skills, got %d: %+v", len(expectedMap), len(skills), skills)
+		}
+		found := make(map[string]string)
+		for _, s := range skills {
+			found[s.ID] = s.Name
+			if s.ID == "other-tenant-skill-python" || s.Name == "Python" {
+				t.Errorf("cross-tenant leakage: other tenant's skill found in response: %+v", s)
+			}
+		}
+		for expID, expName := range expectedMap {
+			actualName, ok := found[expID]
+			if !ok {
+				t.Errorf("missing expected skill ID %q in response: %+v", expID, found)
+			} else if actualName != expName {
+				t.Errorf("expected skill %q to have name %q, got %q", expID, expName, actualName)
+			}
+		}
+	}
+
+	tests := []struct {
+		name           string
+		query          string
+		expectedStatus int
+		verify         func(t *testing.T, resp *http.Response, body []byte)
+	}{
+		{
+			name:           "type omitted defaults to all",
+			query:          "",
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				skills := decodeJSON[[]domain.Skill](t, body)
+				assertSkillNamesAndIDs(t, skills, map[string]string{
+					"custom-skill-go":   "Go",
+					"custom-skill-k8s":  "Kubernetes",
+					"global-skill-rust": "Rust",
+				})
+			},
+		},
+		{
+			name:           "type=all returns union of custom and global skills",
+			query:          "?type=all",
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				skills := decodeJSON[[]domain.Skill](t, body)
+				assertSkillNamesAndIDs(t, skills, map[string]string{
+					"custom-skill-go":   "Go",
+					"custom-skill-k8s":  "Kubernetes",
+					"global-skill-rust": "Rust",
+				})
+			},
+		},
+		{
+			name:           "type=ALL case-insensitive handling",
+			query:          "?type=ALL",
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				skills := decodeJSON[[]domain.Skill](t, body)
+				assertSkillNamesAndIDs(t, skills, map[string]string{
+					"custom-skill-go":   "Go",
+					"custom-skill-k8s":  "Kubernetes",
+					"global-skill-rust": "Rust",
+				})
+			},
+		},
+		{
+			name:           "type=global returns only system-seeded global skills",
+			query:          "?type=global",
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				skills := decodeJSON[[]domain.Skill](t, body)
+				assertSkillNamesAndIDs(t, skills, map[string]string{
+					"global-skill-rust": "Rust",
+				})
+				for _, s := range skills {
+					if !s.IsGlobal {
+						t.Errorf("expected is_global == true, got false for skill: %+v", s)
+					}
+					if s.UserID != "system" {
+						t.Errorf("expected user_id == system, got %s", s.UserID)
+					}
+				}
+			},
+		},
+		{
+			name:           "type=custom returns only tenant-owned custom skills",
+			query:          "?type=custom",
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				skills := decodeJSON[[]domain.Skill](t, body)
+				assertSkillNamesAndIDs(t, skills, map[string]string{
+					"custom-skill-go":  "Go",
+					"custom-skill-k8s": "Kubernetes",
+				})
+				for _, s := range skills {
+					if s.IsGlobal {
+						t.Errorf("expected is_global == false for custom skill, got true for %s", s.Name)
+					}
+					if s.UserID != "default" {
+						t.Errorf("expected user_id == default, got %s", s.UserID)
+					}
+				}
+			},
+		},
+		{
+			name:           "type=invalid returns 400 Bad Request",
+			query:          "?type=invalid",
+			expectedStatus: http.StatusBadRequest,
+			verify: func(t *testing.T, resp *http.Response, body []byte) {
+				var errResp api.ErrorResponse
+				if err := json.Unmarshal(body, &errResp); err != nil {
+					t.Fatalf("failed to decode error response: %v", err)
+				}
+				if errResp.Error.Code != api.CodeInvalidRequest {
+					t.Errorf("expected error code %q, got %q", api.CodeInvalidRequest, errResp.Error.Code)
+				}
+				if !strings.Contains(errResp.Error.Message, "invalid skill type filter") {
+					t.Errorf("expected message containing 'invalid skill type filter', got %q", errResp.Error.Message)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/skills"+tc.query, nil, nil)
+			if resp.StatusCode != tc.expectedStatus {
+				t.Fatalf("expected status %d, got %d: %s", tc.expectedStatus, resp.StatusCode, string(body))
+			}
+			tc.verify(t, resp, body)
+		})
+	}
+}
+

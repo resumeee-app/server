@@ -837,12 +837,38 @@ func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request)
 
 // --- Skills Handlers ---
 
-// listSkills returns all skills registered under the authenticated user.
+// listSkills returns skills registered under the authenticated user, optionally filtered by origin type.
 func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	skills, err := h.cfg.ProfileRepo.ListSkills(ctx, userID)
+	var (
+		skills []domain.Skill
+		err    error
+	)
+
+	skillType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
+	switch skillType {
+	case "", "all":
+		skills, err = h.cfg.ProfileRepo.ListSkills(ctx, userID)
+	case "global":
+		skills, err = h.cfg.ProfileRepo.ListGlobalSkills(ctx)
+	case "custom":
+		var allSkills []domain.Skill
+		allSkills, err = h.cfg.ProfileRepo.ListSkills(ctx, userID)
+		if err == nil {
+			skills = make([]domain.Skill, 0, len(allSkills))
+			for _, s := range allSkills {
+				if !s.IsGlobal && s.UserID == userID {
+					skills = append(skills, s)
+				}
+			}
+		}
+	default:
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid skill type filter: must be one of all, global, custom", "")
+		return
+	}
+
 	if err != nil {
 		writeDomainError(w, err)
 		return

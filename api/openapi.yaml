@@ -281,6 +281,18 @@ paths:
         - Career Entities
       summary: List all skills
       operationId: listSkills
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Filter skills by origin type (all returns union of custom and global, global returns system-seeded skills, custom returns tenant-owned skills)
+          schema:
+            type: string
+            enum:
+              - all
+              - global
+              - custom
+            default: all
       responses:
         '200':
           description: List of master skills
@@ -290,6 +302,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Skill'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
