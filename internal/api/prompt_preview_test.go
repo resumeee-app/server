@@ -67,8 +67,13 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if strings.Contains(preview.UserPrompt, "Default User") {
 		t.Errorf("expected UserPrompt to NOT leak candidate real FullName 'Default User'")
 	}
-	if !strings.Contains(preview.UserPrompt, "[John Doe]") {
-		t.Errorf("expected UserPrompt to contain obfuscated placeholder '[John Doe]'")
+	if strings.Contains(preview.UserPrompt, "[John Doe]") {
+		t.Errorf("expected UserPrompt to NOT contain candidate placeholder '[John Doe]' since name is stripped")
+	}
+	for _, forbidden := range []string{`"user_id"`, `"created_at"`, `"updated_at"`, `"metadata"`, `"master_revision"`, `"exported_at"`} {
+		if strings.Contains(preview.UserPrompt, forbidden) {
+			t.Errorf("expected UserPrompt to NOT leak internal field %s", forbidden)
+		}
 	}
 
 	// 4. POST prompt preview with draft overrides
