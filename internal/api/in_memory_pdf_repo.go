@@ -109,3 +109,24 @@ func (r *inMemoryPDFJobRepository) FailInterruptedJobs(ctx context.Context, reas
 	}
 	return nil
 }
+
+// CleanupCompletedJobs purges completed or failed PDF parse jobs older than the retention threshold.
+func (r *inMemoryPDFJobRepository) CleanupCompletedJobs(ctx context.Context, userID string, olderThan time.Duration) error {
+	if userID == "" {
+		return fmt.Errorf("%w: user id cannot be empty", domain.ErrValidation)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cutoff := time.Now().UTC().Add(-olderThan)
+	for id, job := range r.jobs {
+		if job.UserID == userID && (job.Status == domain.PDFParseJobStatusCompleted || job.Status == domain.PDFParseJobStatusFailed) {
+			if (job.CompletedAt != nil && job.CompletedAt.Before(cutoff)) || (job.CompletedAt == nil && job.UpdatedAt.Before(cutoff)) {
+				delete(r.jobs, id)
+			}
+		}
+	}
+	return nil
+}
+

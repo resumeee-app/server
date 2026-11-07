@@ -70,11 +70,13 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 		PresetRepo:     presetRepo,
 		TemplateRepo:   templateRepo,
 		BranchRepo:     branchRepo,
+		QuotaRepo:      store,
 		ProfileService: profileSvc,
 		Renderer:       templateRenderer,
 		Validator:      provValidator,
 		JobEnqueuer:    enqueuer,
 		DefaultUserID:  defaultUserID,
+		Admin:          true,
 	})
 
 	server := httptest.NewServer(router)
@@ -1118,6 +1120,8 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 		Validator:       provValidator,
 		JobEnqueuer:     enqueuer,
 		DefaultUserID:   defaultUserID,
+		Admin:           true,
+		QuotaRepo:       store,
 		Logger:          logger,
 	})
 
@@ -1968,8 +1972,9 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		// Verify files written to debugDir
-		entries, err := os.ReadDir(debugDir)
+		// Verify files written to debugDir (partitioned by tenant)
+		targetDir := filepath.Join(debugDir, "default")
+		entries, err := os.ReadDir(targetDir)
 		if err != nil {
 			t.Fatalf("failed to read debugDir: %v", err)
 		}
@@ -1990,7 +1995,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 			t.Fatalf("expected exactly 1 output file, got %d (%v)", len(outputFiles), outputFiles)
 		}
 
-		promptContent, err := os.ReadFile(filepath.Join(debugDir, promptFiles[0]))
+		promptContent, err := os.ReadFile(filepath.Join(targetDir, promptFiles[0]))
 		if err != nil {
 			t.Fatalf("failed to read prompt file: %v", err)
 		}
@@ -2001,7 +2006,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 			t.Errorf("expected prompt file to contain extracted resume text, got:\n%s", string(promptContent))
 		}
 
-		outputContent, err := os.ReadFile(filepath.Join(debugDir, outputFiles[0]))
+		outputContent, err := os.ReadFile(filepath.Join(targetDir, outputFiles[0]))
 		if err != nil {
 			t.Fatalf("failed to read output file: %v", err)
 		}
@@ -2548,8 +2553,8 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 		if s.Name != "Golang" && s.Name != "Kubernetes" {
 			t.Errorf("unexpected skill name: %q", s.Name)
 		}
-		if s.UserID != "default" {
-			t.Errorf("expected skill UserID to be default, got %q", s.UserID)
+		if s.UserID != "default" && (!s.IsGlobal || s.UserID != "system") {
+			t.Errorf("expected skill UserID to be default or global system, got %q", s.UserID)
 		}
 	}
 
@@ -2811,4 +2816,150 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 	if len(body) == 0 {
 		t.Errorf("expected non-empty text in branch preview")
 	}
+}
+
+func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
+	ctx := context.Background()
+	env := setupTestServer(t, 10)
+	client := env.server.Client()
+	baseURL := env.server.URL
+	memStore := env.db.(*memory.Store)
+
+	t.Run("built-in template update rejected with 403 Forbidden", func(t *testing.T) {
+		updateBody := map[string]any{
+			"name": "Hacked Builtin Template",
+		}
+		resp, body := doRequest(t, client, http.MethodPut, baseURL+"/api/v1/templates/builtin-standard-clean", updateBody, nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for built-in template update, got %d: %s", resp.StatusCode, string(body))
+		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			t.Fatalf("failed to unmarshal error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code FORBIDDEN, got %q", errResp.Error.Code)
+		}
+	})
+
+	t.Run("built-in template delete rejected with 403 Forbidden", func(t *testing.T) {
+		resp, body := doRequest(t, client, http.MethodDelete, baseURL+"/api/v1/templates/builtin-standard-clean", nil, nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for built-in template delete, got %d: %s", resp.StatusCode, string(body))
+		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			t.Fatalf("failed to unmarshal error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code FORBIDDEN, got %q", errResp.Error.Code)
+		}
+	})
+
+	t.Run("global skill delete rejected with 403 Forbidden", func(t *testing.T) {
+		globalSkill := &domain.Skill{
+			ID:       "global-test-lang",
+			UserID:   "system",
+			Name:     "Rust",
+			Slug:     "rust",
+			IsGlobal: true,
+		}
+		if err := memStore.CreateSkill(ctx, globalSkill); err != nil {
+			t.Fatalf("failed to create global skill: %v", err)
+		}
+
+		resp, body := doRequest(t, client, http.MethodDelete, baseURL+"/api/v1/skills/global-test-lang", nil, nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for global skill deletion, got %d: %s", resp.StatusCode, string(body))
+		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			t.Fatalf("failed to unmarshal error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code FORBIDDEN, got %q", errResp.Error.Code)
+		}
+	})
+
+	t.Run("quota exceeded returns 429 Too Many Requests with QUOTA_EXCEEDED code", func(t *testing.T) {
+		pdfEnq := api.NewChannelPDFJobEnqueuer(10)
+		pdfEnv := setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, nil, nil, pdfEnq)
+		pdfClient := pdfEnv.server.Client()
+		pdfMem := pdfEnv.db.(*memory.Store)
+
+		// Exhaust user daily quota (50 requests limit)
+		for i := 0; i < 50; i++ {
+			_, err := pdfMem.ReserveQuota(ctx, "default", domain.OperationResumeTailoring, 100, 50, 1000000)
+			if err != nil {
+				t.Fatalf("failed to seed reservations: %v", err)
+			}
+		}
+
+		// Attempt to upload PDF parse job
+		pdfBytes := buildTestPDF("Sample Resume Content")
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, err := writer.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("failed to create form file: %v", err)
+		}
+		if _, err := part.Write(pdfBytes); err != nil {
+			t.Fatalf("failed to write pdf bytes: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("failed to close writer: %v", err)
+		}
+
+		req, err := http.NewRequest(http.MethodPost, pdfEnv.server.URL+"/api/v1/profile/pdf/parse", bodyBuf)
+		if err != nil {
+			t.Fatalf("failed to build request: %v", err)
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		resp, err := pdfClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusTooManyRequests {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 429 Too Many Requests, got %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeQuotaExceeded {
+			t.Errorf("expected error code QUOTA_EXCEEDED, got %q", errResp.Error.Code)
+		}
+	})
+
+	t.Run("unauthenticated request returns 401 Unauthorized in production mode", func(t *testing.T) {
+		prodRouter := api.NewRouter(api.RouterConfig{
+			ProfileRepo: memStore,
+			Admin:       false, // production mode with verifier == nil
+		})
+		prodServer := httptest.NewServer(prodRouter)
+		defer prodServer.Close()
+
+		req, _ := http.NewRequest(http.MethodGet, prodServer.URL+"/api/v1/profile", nil)
+		req.Header.Set("X-User-ID", "attacker")
+		resp, err := prodServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized, got %d", resp.StatusCode)
+		}
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeUnauthorized {
+			t.Errorf("expected error code UNAUTHORIZED, got %q", errResp.Error.Code)
+		}
+	})
 }

@@ -50,6 +50,10 @@ func (e *defaultPDFExtractor) ExtractText(ctx context.Context, r io.ReaderAt, si
 		return "", fmt.Errorf("%w: invalid or corrupted PDF document: %v", domain.ErrValidation, err)
 	}
 
+	if reader.NumPage() > 10 {
+		return "", fmt.Errorf("%w: PDF exceeds maximum page limit (10 pages)", domain.ErrValidation)
+	}
+
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -59,7 +63,9 @@ func (e *defaultPDFExtractor) ExtractText(ctx context.Context, r io.ReaderAt, si
 		return "", fmt.Errorf("%w: failed to read plain text from PDF: %v", domain.ErrValidation, err)
 	}
 
-	rawBytes, err := io.ReadAll(plainTextReader)
+	// Bound decompressed text to 1 MB to prevent decompression bombs and memory exhaustion
+	limitedReader := io.LimitReader(plainTextReader, 1<<20)
+	rawBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return "", fmt.Errorf("%w: failed to read plain text stream: %v", domain.ErrValidation, err)
 	}

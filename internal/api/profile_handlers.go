@@ -691,6 +691,33 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Asynchronous mode (default): enqueue and return 202 Accepted
+	if h.cfg.PDFJobRepo == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
+		return
+	}
+
+	if h.cfg.PDFJobEnqueuer == nil {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server", "job_id", "")
+		}
+		writeError(w, http.StatusServiceUnavailable, CodeServiceUnavailable, "PDF worker queue not configured on server", "")
+		return
+	}
+
+	var reservationID string
+	if h.cfg.QuotaRepo != nil {
+		rec, qErr := h.cfg.QuotaRepo.ReserveQuota(ctx, userID, domain.OperationPDFParse, 1000, 50, 1000000)
+		if qErr != nil {
+			if errors.Is(qErr, domain.ErrQuotaExceeded) {
+				writeQuotaError(w, 0, "llm operation quota exceeded", qErr.Error())
+				return
+			}
+			writeDomainError(w, qErr)
+			return
+		}
+		reservationID = rec.ID
+	}
+
 	jobID := "pdf-job-" + uuid.New().String()
 	now := time.Now().UTC()
 	job := &domain.PDFParseJob{
@@ -704,33 +731,27 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		UpdatedAt: now,
 	}
 
-	if h.cfg.PDFJobRepo == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
-		return
-	}
-
 	if err := h.cfg.PDFJobRepo.CreateJob(ctx, job); err != nil {
+		if h.cfg.QuotaRepo != nil && reservationID != "" {
+			_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
+		}
 		writeDomainError(w, err)
 		return
 	}
 
 	task := worker.PDFParseJobTask{
-		JobID:    jobID,
-		UserID:   userID,
-		RawText:  text,
-		Provider: provider,
-		Model:    model,
-	}
-
-	if h.cfg.PDFJobEnqueuer == nil {
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server", "job_id", jobID)
-		}
-		writeError(w, http.StatusServiceUnavailable, CodeServiceUnavailable, "PDF worker queue not configured on server", "")
-		return
+		JobID:         jobID,
+		UserID:        userID,
+		RawText:       text,
+		Provider:      provider,
+		Model:         model,
+		ReservationID: reservationID,
 	}
 
 	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
+		if h.cfg.QuotaRepo != nil && reservationID != "" {
+			_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
+		}
 		if errors.Is(err, domain.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"resumeee/internal/branch"
@@ -109,6 +108,7 @@ type RouterConfig struct {
 	BranchRepo      domain.BranchRepository
 	PDFJobRepo      domain.PDFParseJobRepository
 	PDFJobEnqueuer  PDFJobEnqueuer
+	QuotaRepo       domain.QuotaRepository
 	BranchService   branch.Service
 	ProfileService  profile.Service
 	PDFExtractor    pdf.PDFTextExtractor
@@ -118,14 +118,16 @@ type RouterConfig struct {
 	JobEnqueuer     JobEnqueuer
 	ModelEnumerator ModelEnumerator
 	DefaultUserID   string
+	Admin           bool
+	TokenVerifier   domain.TokenVerifier
 	Logger          *slog.Logger
 	RESTTimeout     time.Duration
 	LLMTimeout      time.Duration
 }
 
-// getUserID extracts the user ID from the X-User-ID request header or falls back to defaultID.
+// getUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
 func getUserID(r *http.Request, defaultID string) string {
-	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
+	if uid, err := UserIDFromContext(r.Context()); err == nil && uid != "" {
 		return uid
 	}
 	if defaultID != "" {
@@ -182,13 +184,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerTemplateRoutes(mux, cfg)
 	registerBranchRoutes(mux, cfg)
 
-	// Wrap in middleware chain: Timeout -> ContentType -> Logging -> Recovery -> CORS
+	// Wrap in middleware chain: Recovery -> Logging -> CORS -> Auth -> Timeout -> ContentType
 	var handler http.Handler = mux
 	handler = ContentTypeMiddleware(handler)
 	handler = TimeoutMiddleware(cfg.RESTTimeout)(handler)
+	handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier)(handler)
+	handler = CORSMiddleware(handler)
 	handler = LoggingMiddleware(cfg.Logger)(handler)
 	handler = RecoveryMiddleware(cfg.Logger)(handler)
-	handler = CORSMiddleware(handler)
 
 	return handler
 }

@@ -39,6 +39,7 @@ func setupPresetTestServer(t *testing.T, enumerator api.ModelEnumerator) (*httpt
 		PresetRepo:      presetRepo,
 		DefaultUserID:   defaultUserID,
 		ModelEnumerator: enumerator,
+		Admin:           true,
 	})
 
 	server := httptest.NewServer(router)

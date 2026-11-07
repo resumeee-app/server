@@ -40,6 +40,10 @@ type ServerConfig struct {
 	JobEnqueuer worker.JobEnqueuer
 	// DefaultUserID specifies the fallback user identifier when no auth header or token is provided.
 	DefaultUserID string
+	// Admin indicates local single-user mode bypassing external token verification.
+	Admin bool
+	// TokenVerifier validates bearer tokens in multi-tenant mode.
+	TokenVerifier domain.TokenVerifier
 	// Logger provides structured diagnostic logging across MCP tool invocations and transports.
 	Logger *slog.Logger
 	// RESTTimeout specifies the maximum execution deadline for synchronous database and rendering operations.

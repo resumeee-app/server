@@ -49,6 +49,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
+		Admin:         true,
 	})
 
 	server := httptest.NewServer(router)

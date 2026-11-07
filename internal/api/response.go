@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"resumeee/internal/domain"
@@ -13,9 +14,11 @@ import (
 // Standard OpenAPI error codes.
 const (
 	CodeInvalidRequest          = "INVALID_REQUEST"
+	CodeUnauthorized            = "UNAUTHORIZED"
 	CodeForbidden               = "FORBIDDEN"
 	CodeNotFound                = "NOT_FOUND"
 	CodeConflict                = "CONFLICT"
+	CodeQuotaExceeded           = "QUOTA_EXCEEDED"
 	CodeTemplateValidationError = "TEMPLATE_VALIDATION_ERROR"
 	CodeProvenanceError         = "PROVENANCE_ERROR"
 	CodeQueueFull               = "QUEUE_FULL"
@@ -94,6 +97,18 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", err.Error())
 		return
 	}
+	if errors.Is(err, domain.ErrUnauthorized) {
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrQuotaExceeded) {
+		writeQuotaError(w, 0, "llm operation quota exceeded", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrGlobalSkillImmutable) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "global skill cannot be modified or deleted", err.Error())
+		return
+	}
 	if errors.Is(err, domain.ErrTemplateSyntax) {
 		writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 		return
@@ -151,3 +166,12 @@ func writeRenderOutput(w http.ResponseWriter, r *http.Request, out domain.Render
 		writeJSON(w, http.StatusOK, out)
 	}
 }
+
+// writeQuotaError writes a structured 429 Too Many Requests response with optional Retry-After header.
+func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, details string) {
+	if retryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	}
+	writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, message, details)
+}
+

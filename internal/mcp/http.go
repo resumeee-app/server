@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	serverSDK "github.com/mark3labs/mcp-go/server"
+
+	"resumeee/internal/domain"
 )
 
 // connectionLimiter manages active SSE stream concurrency limits per user and across the system.
@@ -87,8 +89,8 @@ type sessionIDHolder struct {
 func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 	var bearerToken string
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		bearerToken = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		bearerToken = strings.TrimSpace(authHeader[7:])
 	}
 
 	// 1. If explicit token dictionary configured, require valid Bearer token
@@ -103,11 +105,22 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 		return userID, nil
 	}
 
-	// 2. Local development fallback: Bearer token -> X-User-ID -> DefaultUserID
-	if bearerToken != "" {
-		return bearerToken, nil
+	// 2. Multi-tenant mode (not Admin): strictly require token verification
+	if !cfg.Admin {
+		if cfg.TokenVerifier == nil {
+			return "", domain.ErrUnauthorized
+		}
+		if bearerToken == "" {
+			return "", errors.New("missing or malformed Authorization Bearer header")
+		}
+		tokenInfo, err := cfg.TokenVerifier.VerifyIDToken(r.Context(), bearerToken)
+		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
+			return "", domain.ErrUnauthorized
+		}
+		return tokenInfo.UID, nil
 	}
 
+	// 3. Local Admin Mode (cfg.Admin is true): X-User-ID -> DefaultUserID
 	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
 		return uid, nil
 	}

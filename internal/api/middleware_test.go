@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"resumeee/internal/domain"
 )
 
 func TestTimeoutMiddleware(t *testing.T) {
@@ -105,3 +108,149 @@ func TestTimeoutMiddleware(t *testing.T) {
 		}
 	})
 }
+
+type mockTokenVerifier struct {
+	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+}
+
+func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+	return m.verifyFunc(ctx, token)
+}
+
+func TestAuthMiddleware(t *testing.T) {
+	t.Run("admin mode bypasses verification and sets defaultUserID", func(t *testing.T) {
+		var capturedUID string
+		handler := AuthMiddleware(true, "admin-user-default", nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedUID, _ = UserIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		if capturedUID != "admin-user-default" {
+			t.Errorf("expected captured UID 'admin-user-default', got %q", capturedUID)
+		}
+	})
+
+	t.Run("admin mode honors X-User-ID header override", func(t *testing.T) {
+		var capturedUID string
+		handler := AuthMiddleware(true, "default", nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedUID, _ = UserIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		req.Header.Set("X-User-ID", "custom-tenant-99")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		if capturedUID != "custom-tenant-99" {
+			t.Errorf("expected captured UID 'custom-tenant-99', got %q", capturedUID)
+		}
+	})
+
+	t.Run("multi-tenant mode with valid bearer token injects UID", func(t *testing.T) {
+		verifier := &mockTokenVerifier{
+			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+				if token == "valid-firebase-jwt" {
+					return &domain.TokenInfo{UID: "firebase-uid-42", Email: "alex@example.com"}, nil
+				}
+				return nil, domain.ErrUnauthorized
+			},
+		}
+
+		var capturedUID string
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedUID, _ = UserIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/branches", nil)
+		req.Header.Set("Authorization", "Bearer valid-firebase-jwt")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		if capturedUID != "firebase-uid-42" {
+			t.Errorf("expected captured UID 'firebase-uid-42', got %q", capturedUID)
+		}
+	})
+
+	t.Run("multi-tenant mode rejects missing authorization header with 401", func(t *testing.T) {
+		verifier := &mockTokenVerifier{}
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("multi-tenant mode rejects invalid token with 401", func(t *testing.T) {
+		verifier := &mockTokenVerifier{
+			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+				return nil, domain.ErrUnauthorized
+			},
+		}
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		req.Header.Set("Authorization", "Bearer invalid-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("public routes bypass token verification in multi-tenant mode", func(t *testing.T) {
+		verifier := &mockTokenVerifier{}
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		for _, p := range []string{"/healthz", "/api/v1/health", "/api/v1/models"} {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("expected path %s to bypass auth with 200, got %d", p, rec.Code)
+			}
+		}
+	})
+
+	t.Run("fails closed with 401 when admin is false and verifier is nil even with X-User-ID", func(t *testing.T) {
+		handler := AuthMiddleware(false, "default", nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		req.Header.Set("X-User-ID", "attacker-user-id")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 when verifier is nil and admin is false, got %d", rec.Code)
+		}
+	})
+}
+

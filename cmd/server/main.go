@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"resumeee/internal/api"
+	"resumeee/internal/auth"
 	"resumeee/internal/branch"
 	"resumeee/internal/config"
+	"resumeee/internal/domain"
 	"resumeee/internal/llm"
 	resumeeeMCP "resumeee/internal/mcp"
 	"resumeee/internal/pdf"
@@ -138,9 +140,22 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	presetRepo := store.Preset()
 	templateRepo := store.Template()
 	pdfJobRepo := store.PDFJob()
+	quotaRepo := store.Quota()
 	profileSvc := profile.NewService(profileRepo, branchRepo)
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
+
+	// 3. Initialize Firebase token verifier if configured and not in local admin mode
+	var tokenVerifier domain.TokenVerifier
+	if cfg.Admin {
+		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", cfg.DefaultUserID)
+	} else if cfg.FirebaseProjectID != "" {
+		tokenVerifier = auth.NewFirebaseTokenVerifier(cfg.FirebaseProjectID)
+		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
+	} else {
+		logger.Error("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN=true / -admin for local admin mode")
+		return errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN=true / -admin for local admin mode")
+	}
 
 	// 4. Initialize LLM registry and service adapter
 	llmRegistry := llm.NewRegistry(cfg, llm.WithLogger(logger))
@@ -156,6 +171,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		PresetRepo:      presetRepo,
 		TemplateRepo:    templateRepo,
 		PDFJobRepo:      pdfJobRepo,
+		QuotaRepo:       quotaRepo,
 		ResumeExtractor: resumeExtractor,
 		LLMTimeout:      cfg.LLMTimeout,
 		LLMService:      llmAdapter,
@@ -175,6 +191,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		ProfileRepo:  profileRepo,
 		PresetRepo:   presetRepo,
 		TemplateRepo: templateRepo,
+		QuotaRepo:    quotaRepo,
 		JobEnqueuer:  workerPool,
 		Validator:    provValidator,
 		Renderer:     templateRenderer,
@@ -189,6 +206,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		TemplateRepo:    templateRepo,
 		BranchRepo:      branchRepo,
 		PDFJobRepo:      pdfJobRepo,
+		QuotaRepo:       quotaRepo,
 		BranchService:   branchSvc,
 		ProfileService:  profileSvc,
 		PDFExtractor:    pdf.NewExtractor(),
@@ -199,6 +217,8 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		PDFJobEnqueuer:  workerPool,
 		ModelEnumerator: llmRegistry,
 		DefaultUserID:   cfg.DefaultUserID,
+		Admin:           cfg.Admin,
+		TokenVerifier:   tokenVerifier,
 		RESTTimeout:     cfg.RESTTimeout,
 		LLMTimeout:      cfg.LLMTimeout,
 		Logger:          logger,
@@ -216,6 +236,8 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		ResumeExtractor:       resumeExtractor,
 		JobEnqueuer:           workerPool,
 		DefaultUserID:         cfg.DefaultUserID,
+		Admin:                 cfg.Admin,
+		TokenVerifier:         tokenVerifier,
 		Logger:                logger,
 		RESTTimeout:           cfg.RESTTimeout,
 		TailoringTimeout:      10 * time.Minute,

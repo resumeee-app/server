@@ -2071,6 +2071,10 @@ components:
           type: string
         name:
           type: string
+        slug:
+          type: string
+        is_global:
+          type: boolean
         category:
           type: string
         proficiency:

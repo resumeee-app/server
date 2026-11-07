@@ -31,6 +31,7 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 		PresetRepo:    presetRepo,
 		TemplateRepo:  templateRepo,
 		DefaultUserID: defaultUserID,
+		Admin:         true,
 	})
 
 	server := httptest.NewServer(router)

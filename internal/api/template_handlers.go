@@ -6,6 +6,7 @@ import (
 	"fmt"
 	htmltemplate "html/template"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -143,6 +144,16 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
+		return
+	}
+
+	if tmpl.UserID != userID {
+		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+		return
+	}
+
 	var req UpdateTemplateRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -189,6 +200,22 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
+
+	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
+		return
+	}
+
+	if tmpl.UserID != userID {
+		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+		return
+	}
 
 	if err := h.cfg.TemplateRepo.DeleteTemplate(ctx, userID, id); err != nil {
 		writeDomainError(w, err)

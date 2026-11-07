@@ -72,6 +72,7 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
+		Admin:         true,
 	})
 
 	server := httptest.NewServer(router)

@@ -17,6 +17,10 @@ type Config struct {
 	Port                int
 	DBPath              string
 	DefaultUserID       string
+	Admin               bool
+	FirebaseProjectID   string
+	LLMDailyRequestLimit int
+	LLMMonthlyTokenLimit int
 	WorkerConcurrency   int
 	WorkerQueueSize     int
 	GeminiAPIKey        string
@@ -34,10 +38,13 @@ type Config struct {
 
 // Default configuration constants.
 const (
-	DefaultPort              = 8080
-	DefaultDBPath            = "./data/resumeee.db"
-	DefaultUserIDVal         = "default"
-	DefaultWorkerConcurrency = 2
+	DefaultPort                 = 8080
+	DefaultDBPath               = "./data/resumeee.db"
+	DefaultUserIDVal            = "default"
+	DefaultAdmin                = false
+	DefaultLLMDailyRequestLimit = 50
+	DefaultLLMMonthlyTokenLimit = 1000000
+	DefaultWorkerConcurrency    = 2
 	DefaultWorkerQueueSize   = 100
 	DefaultEnvironment       = "development"
 	DefaultLLMDebugDir       = "data/llm"
@@ -57,17 +64,20 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:              DefaultPort,
-		DBPath:            DefaultDBPath,
-		DefaultUserID:     DefaultUserIDVal,
-		WorkerConcurrency: DefaultWorkerConcurrency,
-		WorkerQueueSize:   DefaultWorkerQueueSize,
-		Environment:       DefaultEnvironment,
-		LogLevel:          slog.LevelInfo,
-		LLMDebugPrompts:   false,
-		LLMDebugDir:       DefaultLLMDebugDir,
-		RESTTimeout:       DefaultRESTTimeout,
-		LLMTimeout:        DefaultLLMTimeout,
+		Port:                 DefaultPort,
+		DBPath:               DefaultDBPath,
+		DefaultUserID:        DefaultUserIDVal,
+		Admin:                DefaultAdmin,
+		LLMDailyRequestLimit: DefaultLLMDailyRequestLimit,
+		LLMMonthlyTokenLimit: DefaultLLMMonthlyTokenLimit,
+		WorkerConcurrency:    DefaultWorkerConcurrency,
+		WorkerQueueSize:      DefaultWorkerQueueSize,
+		Environment:          DefaultEnvironment,
+		LogLevel:             slog.LevelInfo,
+		LLMDebugPrompts:      false,
+		LLMDebugDir:          DefaultLLMDebugDir,
+		RESTTimeout:          DefaultRESTTimeout,
+		LLMTimeout:           DefaultLLMTimeout,
 	}
 
 	// Port
@@ -90,6 +100,42 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 	// DefaultUserID
 	if val := strings.TrimSpace(lookup("DEFAULT_USER_ID")); val != "" {
 		cfg.DefaultUserID = val
+	}
+
+	// Admin mode
+	if val := strings.TrimSpace(lookup("ADMIN")); val != "" {
+		a, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ADMIN value %q: must be a boolean", val)
+		}
+		cfg.Admin = a
+	}
+
+	// FirebaseProjectID
+	cfg.FirebaseProjectID = strings.TrimSpace(lookup("FIREBASE_PROJECT_ID"))
+
+	// LLMDailyRequestLimit
+	if val := strings.TrimSpace(lookup("LLM_DAILY_REQUEST_LIMIT")); val != "" {
+		l, err := strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid LLM_DAILY_REQUEST_LIMIT value %q: must be an integer", val)
+		}
+		if l <= 0 {
+			return nil, fmt.Errorf("invalid LLM_DAILY_REQUEST_LIMIT value %d: must be greater than 0", l)
+		}
+		cfg.LLMDailyRequestLimit = l
+	}
+
+	// LLMMonthlyTokenLimit
+	if val := strings.TrimSpace(lookup("LLM_MONTHLY_TOKEN_LIMIT")); val != "" {
+		l, err := strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid LLM_MONTHLY_TOKEN_LIMIT value %q: must be an integer", val)
+		}
+		if l <= 0 {
+			return nil, fmt.Errorf("invalid LLM_MONTHLY_TOKEN_LIMIT value %d: must be greater than 0", l)
+		}
+		cfg.LLMMonthlyTokenLimit = l
 	}
 
 	// WorkerConcurrency
@@ -215,6 +261,7 @@ func (c *Config) ParseFlags(args []string) error {
 	fs := flag.NewFlagSet("resumeee", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
+	admin := fs.Bool("admin", c.Admin, "Run in local single-user admin mode")
 	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
 	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
 	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")
@@ -224,6 +271,7 @@ func (c *Config) ParseFlags(args []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
+	c.Admin = *admin
 	c.LLMDebugPrompts = *debugPrompts
 	c.LLMDebugDir = *debugDir
 	return nil

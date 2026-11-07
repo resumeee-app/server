@@ -53,6 +53,18 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.LLMTimeout != 10*time.Minute {
 		t.Errorf("expected default LLMTimeout 10m, got %v", cfg.LLMTimeout)
 	}
+	if cfg.Admin != false {
+		t.Errorf("expected default Admin false, got %v", cfg.Admin)
+	}
+	if cfg.FirebaseProjectID != "" {
+		t.Errorf("expected default FirebaseProjectID empty, got %q", cfg.FirebaseProjectID)
+	}
+	if cfg.LLMDailyRequestLimit != 50 {
+		t.Errorf("expected default LLMDailyRequestLimit 50, got %d", cfg.LLMDailyRequestLimit)
+	}
+	if cfg.LLMMonthlyTokenLimit != 1000000 {
+		t.Errorf("expected default LLMMonthlyTokenLimit 1000000, got %d", cfg.LLMMonthlyTokenLimit)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -792,3 +804,74 @@ func TestLoadInvalidTimeouts(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMultiTenancyConfig(t *testing.T) {
+	t.Run("Valid multi-tenancy env variables", func(t *testing.T) {
+		env := map[string]string{
+			"ADMIN":                   "true",
+			"FIREBASE_PROJECT_ID":     "resumeee-prod-123",
+			"LLM_DAILY_REQUEST_LIMIT": "100",
+			"LLM_MONTHLY_TOKEN_LIMIT": "5000000",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.Admin {
+			t.Errorf("expected Admin true, got false")
+		}
+		if cfg.FirebaseProjectID != "resumeee-prod-123" {
+			t.Errorf("expected FirebaseProjectID 'resumeee-prod-123', got %q", cfg.FirebaseProjectID)
+		}
+		if cfg.LLMDailyRequestLimit != 100 {
+			t.Errorf("expected LLMDailyRequestLimit 100, got %d", cfg.LLMDailyRequestLimit)
+		}
+		if cfg.LLMMonthlyTokenLimit != 5000000 {
+			t.Errorf("expected LLMMonthlyTokenLimit 5000000, got %d", cfg.LLMMonthlyTokenLimit)
+		}
+	})
+
+	t.Run("ADMIN boolean parsing error", func(t *testing.T) {
+		env := map[string]string{
+			"ADMIN": "not-a-bool",
+		}
+		_, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err == nil {
+			t.Fatalf("expected error for invalid ADMIN boolean, got nil")
+		}
+	})
+
+	t.Run("LLM_DAILY_REQUEST_LIMIT integer parsing error", func(t *testing.T) {
+		env := map[string]string{
+			"LLM_DAILY_REQUEST_LIMIT": "invalid",
+		}
+		_, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err == nil {
+			t.Fatalf("expected error for invalid LLM_DAILY_REQUEST_LIMIT, got nil")
+		}
+	})
+
+	t.Run("LLM_MONTHLY_TOKEN_LIMIT integer parsing error", func(t *testing.T) {
+		env := map[string]string{
+			"LLM_MONTHLY_TOKEN_LIMIT": "-10",
+		}
+		_, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err == nil {
+			t.Fatalf("expected error for negative LLM_MONTHLY_TOKEN_LIMIT, got nil")
+		}
+	})
+}
+
+func TestConfig_ParseFlags_Admin(t *testing.T) {
+	cfg, err := config.LoadFrom(func(s string) string { return "" })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := cfg.ParseFlags([]string{"-admin"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	if !cfg.Admin {
+		t.Errorf("expected Admin true after -admin flag, got false")
+	}
+}
+

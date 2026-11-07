@@ -7,6 +7,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"resumeee/internal/domain"
 )
 
 type responseWriterRecorder struct {
@@ -143,3 +145,64 @@ func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// isPublicRoute checks if a request path is exempt from authentication.
+func isPublicRoute(p string) bool {
+	clean := path.Clean(p)
+	return clean == "/healthz" || clean == "/api/v1/health" || clean == "/health" || clean == "/api/v1/models" || clean == "/models"
+}
+
+// AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
+func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier) func(http.Handler) http.Handler {
+	if defaultUserID == "" {
+		defaultUserID = "default"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions || isPublicRoute(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Admin Mode bypass (only when admin is explicitly enabled)
+			if admin {
+				uid := strings.TrimSpace(r.Header.Get("X-User-ID"))
+				if uid == "" {
+					uid = defaultUserID
+				}
+				ctx := WithUserID(r.Context(), uid)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// When not admin, verifier is strictly required; fail closed if nil
+			if verifier == nil {
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "authentication verifier not configured", "")
+				return
+			}
+
+			// Multi-tenant mode with TokenVerifier
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "missing or invalid authorization header", "")
+				return
+			}
+
+			token := strings.TrimSpace(authHeader[7:])
+			if token == "" {
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "bearer token is empty", "")
+				return
+			}
+
+			tokenInfo, err := verifier.VerifyIDToken(r.Context(), token)
+			if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid or expired token", "")
+				return
+			}
+
+			ctx := WithUserID(r.Context(), tokenInfo.UID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
