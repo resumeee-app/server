@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path"
 	"strings"
 	"time"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/domain"
 )
 
@@ -157,15 +159,14 @@ type TenantProvisioner interface {
 	EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *domain.User) error
 }
 
-// AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
-func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
-	if defaultUserID == "" {
-		defaultUserID = "default"
-	}
+// AuthMiddlewareWithProvider inspects incoming requests using the provided auth.Provider
+// and injects the authenticated tenant ID and admin privileges into context.
+func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
 	var provisioner TenantProvisioner
 	if len(provisioners) > 0 {
 		provisioner = provisioners[0]
 	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodOptions || isPublicRoute(r.URL.Path) {
@@ -173,46 +174,28 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerif
 				return
 			}
 
-			// Admin Mode bypass (only when admin is explicitly enabled)
-			if admin {
-				uid := strings.TrimSpace(r.Header.Get("X-User-ID"))
-				if uid == "" {
-					uid = defaultUserID
-				}
-				ctx := WithUserID(r.Context(), uid)
-				ctx = WithIsAdmin(ctx, true)
-				next.ServeHTTP(w, r.WithContext(ctx))
+			if provider == nil {
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "authentication provider not configured", "")
 				return
 			}
 
-			// When not admin, verifier is strictly required; fail closed if nil
-			if verifier == nil {
-				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "authentication verifier not configured", "")
-				return
-			}
-
-			// Multi-tenant mode with TokenVerifier
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "missing or invalid authorization header", "")
-				return
-			}
-
-			token := strings.TrimSpace(authHeader[7:])
-			if token == "" {
-				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "bearer token is empty", "")
-				return
-			}
-
-			tokenInfo, err := verifier.VerifyIDToken(r.Context(), token)
+			tokenInfo, err := provider.AuthenticateRequest(r)
 			if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
-				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid or expired token", "")
+				errMsg := "invalid or expired token"
+				if err != nil {
+					if errors.Is(err, auth.ErrMissingBearerHeader) {
+						errMsg = "missing or invalid authorization header"
+					} else if errors.Is(err, auth.ErrEmptyBearerToken) {
+						errMsg = "bearer token is empty"
+					}
+				}
+				writeError(w, http.StatusUnauthorized, CodeUnauthorized, errMsg, "")
 				return
 			}
 
 			ctx := WithUserID(r.Context(), tokenInfo.UID)
 			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
-			if provisioner != nil {
+			if provisioner != nil && provider.Name() != auth.ProviderAdmin {
 				role := domain.UserRoleUser
 				if tokenInfo.IsAdmin() {
 					role = domain.UserRoleAdmin
@@ -231,5 +214,26 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerif
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
+// Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
+func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
+	if defaultUserID == "" {
+		defaultUserID = "default"
+	}
+
+	var provider auth.Provider
+	if admin {
+		provider = auth.NewAdminAuthProvider(defaultUserID)
+	} else if verifier != nil {
+		if p, ok := verifier.(auth.Provider); ok {
+			provider = p
+		} else {
+			provider = auth.NewTokenVerifierProvider("verifier", verifier)
+		}
+	}
+
+	return AuthMiddlewareWithProvider(provider, provisioners...)
 }
 

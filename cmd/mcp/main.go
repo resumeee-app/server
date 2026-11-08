@@ -15,6 +15,7 @@ import (
 
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/branch"
 	"resumeee/internal/config"
 	"resumeee/internal/llm"
@@ -204,6 +205,16 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		Logger:           logger,
 		RESTTimeout:      cfg.RESTTimeout,
 		TailoringTimeout: cfg.LLMTimeout,
+	}
+
+	authReg, err := auth.NewRegistryFromConfig(cfg)
+	if err != nil {
+		logger.WarnContext(parent, "failed to initialize auth registry for mcp", "err", err)
+	} else if prov, err := authReg.Default(); err != nil {
+		logger.WarnContext(parent, "no active auth provider resolved for mcp from config", "err", err)
+	} else {
+		mcpCfg.AuthProvider = prov
+		mcpCfg.TokenVerifier = prov
 	}
 
 	if err := mcpCfg.EnsureTenant(parent, cfg.DefaultUserID); err != nil {

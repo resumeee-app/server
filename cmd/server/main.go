@@ -20,7 +20,6 @@ import (
 	"resumeee/internal/auth"
 	"resumeee/internal/branch"
 	"resumeee/internal/config"
-	"resumeee/internal/domain"
 	"resumeee/internal/llm"
 	resumeeeMCP "resumeee/internal/mcp"
 	"resumeee/internal/pdf"
@@ -146,16 +145,25 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	templateRenderer := renderer.NewTemplateRenderer()
 	provValidator := validator.New()
 
-	// 3. Initialize Firebase token verifier if configured and not in local admin mode
-	var tokenVerifier domain.TokenVerifier
-	if cfg.Admin {
-		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", cfg.DefaultUserID)
-	} else if cfg.FirebaseProjectID != "" {
-		tokenVerifier = auth.NewFirebaseTokenVerifier(cfg.FirebaseProjectID)
-		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
-	} else {
+	// 3. Initialize authentication registry and resolve active auth provider
+	authRegistry, err := auth.NewRegistryFromConfig(cfg)
+	if err != nil {
+		logger.Error("failed to initialize auth registry", "err", err)
+		return fmt.Errorf("initializing auth registry: %w", err)
+	}
+
+	authProvider, err := authRegistry.Default()
+	if err != nil {
 		logger.Error("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
 		return errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
+	}
+
+	if authProvider.Name() == auth.ProviderAdmin {
+		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", cfg.DefaultUserID)
+	} else if authProvider.Name() == auth.ProviderFirebase {
+		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
+	} else {
+		logger.Info("initialized authentication provider", "provider", authProvider.Name())
 	}
 
 	// 4. Initialize LLM registry and service adapter
@@ -222,7 +230,8 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		ModelEnumerator:   llmRegistry,
 		DefaultUserID:     cfg.DefaultUserID,
 		Admin:             cfg.Admin,
-		TokenVerifier:     tokenVerifier,
+		AuthProvider:      authProvider,
+		TokenVerifier:     authProvider,
 		FirebaseProjectID: cfg.FirebaseProjectID,
 		UserRepo:          store.User(),
 		Store:             store,
@@ -247,7 +256,8 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		JobEnqueuer:           workerPool,
 		DefaultUserID:         cfg.DefaultUserID,
 		Admin:                 cfg.Admin,
-		TokenVerifier:         tokenVerifier,
+		AuthProvider:          authProvider,
+		TokenVerifier:         authProvider,
 		Logger:                logger,
 		RESTTimeout:           cfg.RESTTimeout,
 		TailoringTimeout:      10 * time.Minute,

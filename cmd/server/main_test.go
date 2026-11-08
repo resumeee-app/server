@@ -475,4 +475,89 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 	}
 }
 
+func TestRun_AuthProviderConfigurations(t *testing.T) {
+	memStore, err := memory.NewSeeded(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+		return memStore, nil
+	}
+
+	t.Run("boot with AUTH_PROVIDER=admin environment variable", func(t *testing.T) {
+		t.Setenv("PORT", freePort(t))
+		t.Setenv("ADMIN_MODE", "false")
+		t.Setenv("AUTH_PROVIDER", "admin")
+		t.Setenv("FIREBASE_PROJECT_ID", "")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runWithStore(ctx, storeInit)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("expected clean shutdown with AUTH_PROVIDER=admin, got: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for shutdown")
+		}
+	})
+
+	t.Run("boot with -auth-provider=admin flag", func(t *testing.T) {
+		t.Setenv("PORT", freePort(t))
+		t.Setenv("ADMIN_MODE", "false")
+		t.Setenv("AUTH_PROVIDER", "")
+		t.Setenv("FIREBASE_PROJECT_ID", "")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runWithStore(ctx, storeInit, "-auth-provider=admin")
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("expected clean shutdown with -auth-provider=admin, got: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for shutdown")
+		}
+	})
+
+	t.Run("boot with FIREBASE_PROJECT_ID initializes firebase provider", func(t *testing.T) {
+		t.Setenv("PORT", freePort(t))
+		t.Setenv("ADMIN_MODE", "false")
+		t.Setenv("AUTH_PROVIDER", "")
+		t.Setenv("FIREBASE_PROJECT_ID", "test-firebase-proj")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runWithStore(ctx, storeInit)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("expected clean shutdown with firebase provider, got: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for shutdown")
+		}
+	})
+}
+
 

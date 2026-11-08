@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/domain"
 )
 
@@ -122,6 +123,48 @@ func TestAuthenticateRequest(t *testing.T) {
 		_, err = authenticateRequest(reqBad, cfg)
 		if err == nil {
 			t.Fatal("expected error for unknown static token")
+		}
+	})
+
+	t.Run("auth provider integration with AdminAuthProvider", func(t *testing.T) {
+		adminProvider := auth.NewAdminAuthProvider("default-user")
+		cfg := ServerConfig{
+			AuthProvider: adminProvider,
+		}
+
+		req := httptest.NewRequest("GET", "/mcp/sse", nil)
+		req.Header.Set("X-User-ID", "admin-mcp-tenant")
+		uid, err := authenticateRequest(req, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if uid != "admin-mcp-tenant" {
+			t.Errorf("expected uid 'admin-mcp-tenant', got %q", uid)
+		}
+	})
+
+	t.Run("auth provider integration with custom TokenVerifierProvider", func(t *testing.T) {
+		verifier := &mockTokenVerifier{
+			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+				if token == "mcp-token" {
+					return &domain.TokenInfo{UID: "custom-mcp-user"}, nil
+				}
+				return nil, domain.ErrUnauthorized
+			},
+		}
+		provider := auth.NewTokenVerifierProvider("custom", verifier)
+		cfg := ServerConfig{
+			AuthProvider: provider,
+		}
+
+		req := httptest.NewRequest("GET", "/mcp/sse", nil)
+		req.Header.Set("Authorization", "Bearer mcp-token")
+		uid, err := authenticateRequest(req, cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if uid != "custom-mcp-user" {
+			t.Errorf("expected uid 'custom-mcp-user', got %q", uid)
 		}
 	})
 }

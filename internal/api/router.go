@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 	"resumeee/internal/llm"
@@ -122,6 +123,7 @@ type RouterConfig struct {
 	ModelEnumerator ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
+	AuthProvider      auth.Provider
 	TokenVerifier     domain.TokenVerifier
 	FirebaseProjectID string
 	UserRepo          domain.UserRepository
@@ -243,7 +245,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	var handler http.Handler = mux
 	handler = ContentTypeMiddleware(handler)
 	handler = TimeoutMiddleware(cfg.RESTTimeout)(handler)
-	handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier, provisioner)(handler)
+
+	if cfg.AuthProvider != nil {
+		handler = AuthMiddlewareWithProvider(cfg.AuthProvider, provisioner)(handler)
+	} else {
+		handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier, provisioner)(handler)
+	}
+
 	handler = CORSMiddleware(handler)
 	handler = LoggingMiddleware(cfg.Logger)(handler)
 	handler = RecoveryMiddleware(cfg.Logger)(handler)

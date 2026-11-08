@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 	"resumeee/internal/profile"
@@ -45,6 +46,8 @@ type ServerConfig struct {
 	DefaultUserID string
 	// Admin indicates local single-user mode bypassing external token verification.
 	Admin bool
+	// AuthProvider authenticates incoming requests across transports.
+	AuthProvider auth.Provider
 	// TokenVerifier validates bearer tokens in multi-tenant mode.
 	TokenVerifier domain.TokenVerifier
 	// Logger provides structured diagnostic logging across MCP tool invocations and transports.

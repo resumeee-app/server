@@ -69,6 +69,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.FirebaseAuthDomain != "" {
 		t.Errorf("expected default FirebaseAuthDomain empty, got %q", cfg.FirebaseAuthDomain)
 	}
+	if cfg.AuthProvider != "" {
+		t.Errorf("expected default AuthProvider empty, got %q", cfg.AuthProvider)
+	}
 	if cfg.LLMDailyRequestLimit != 50 {
 		t.Errorf("expected default LLMDailyRequestLimit 50, got %d", cfg.LLMDailyRequestLimit)
 	}
@@ -93,6 +96,7 @@ func TestLoadOverrides(t *testing.T) {
 		"FIREBASE_PROJECT_ID":   "custom-project",
 		"FIREBASE_API_KEY":      "custom-api-key",
 		"FIREBASE_AUTH_DOMAIN":  "custom-domain.firebaseapp.com",
+		"AUTH_PROVIDER":         "firebase",
 		"ENV":                    "production",
 		"LOG_LEVEL":              "DEBUG",
 	}
@@ -153,6 +157,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.FirebaseAuthDomain != "custom-domain.firebaseapp.com" {
 		t.Errorf("expected FirebaseAuthDomain 'custom-domain.firebaseapp.com', got %q", cfg.FirebaseAuthDomain)
+	}
+	if cfg.AuthProvider != "firebase" {
+		t.Errorf("expected AuthProvider 'firebase', got %q", cfg.AuthProvider)
 	}
 }
 
@@ -1003,6 +1010,34 @@ func TestConfig_ParseFlags_Admin(t *testing.T) {
 		}
 		if cfg.Admin {
 			t.Errorf("expected Admin false after -admin=false flag, got true")
+		}
+	})
+}
+
+func TestConfig_ParseFlags_AuthProvider(t *testing.T) {
+	t.Run("-auth-provider flag sets AuthProvider", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-auth-provider", "admin"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.AuthProvider != "admin" {
+			t.Errorf("expected AuthProvider 'admin', got %q", cfg.AuthProvider)
+		}
+	})
+
+	t.Run("-auth-provider flag with equal sign", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := cfg.ParseFlags([]string{"-auth-provider=firebase"}); err != nil {
+			t.Fatalf("ParseFlags failed: %v", err)
+		}
+		if cfg.AuthProvider != "firebase" {
+			t.Errorf("expected AuthProvider 'firebase', got %q", cfg.AuthProvider)
 		}
 	})
 }

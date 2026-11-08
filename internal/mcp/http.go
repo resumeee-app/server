@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/domain"
 )
 
@@ -87,11 +88,7 @@ type sessionIDHolder struct {
 // Returns:
 //   - Authenticated user ID string, or an error if authorization fails.
 func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
-	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-	var bearerToken string
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		bearerToken = strings.TrimSpace(authHeader[7:])
-	}
+	bearerToken, _ := auth.ExtractBearerToken(r)
 
 	// 1. If explicit token dictionary configured, require valid Bearer token
 	if len(cfg.AuthTokens) > 0 {
@@ -105,7 +102,19 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 		return userID, nil
 	}
 
-	// 2. Multi-tenant mode (not Admin): strictly require token verification
+	// 2. AuthProvider if configured
+	if cfg.AuthProvider != nil {
+		tokenInfo, err := cfg.AuthProvider.AuthenticateRequest(r)
+		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
+			if cfg.AuthProvider.Name() != auth.ProviderAdmin && err != nil && (errors.Is(err, auth.ErrMissingBearerHeader) || errors.Is(err, auth.ErrEmptyBearerToken)) {
+				return "", errors.New("missing or malformed Authorization Bearer header")
+			}
+			return "", domain.ErrUnauthorized
+		}
+		return tokenInfo.UID, nil
+	}
+
+	// 3. Multi-tenant mode (not Admin): strictly require token verification
 	if !cfg.Admin {
 		if cfg.TokenVerifier == nil {
 			return "", domain.ErrUnauthorized
@@ -120,7 +129,7 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 		return tokenInfo.UID, nil
 	}
 
-	// 3. Local Admin Mode (cfg.Admin is true): X-User-ID -> DefaultUserID
+	// 4. Local Admin Mode (cfg.Admin is true): X-User-ID -> DefaultUserID
 	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
 		return uid, nil
 	}

@@ -18,6 +18,7 @@ type Config struct {
 	DBPath              string
 	DefaultUserID       string
 	Admin               bool
+	AuthProvider        string
 	FirebaseProjectID   string
 	FirebaseAPIKey      string
 	FirebaseAuthDomain  string
@@ -115,6 +116,9 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		}
 		cfg.Admin = a
 	}
+
+	// AuthProvider
+	cfg.AuthProvider = strings.TrimSpace(lookup("AUTH_PROVIDER"))
 
 	// FirebaseProjectID
 	cfg.FirebaseProjectID = strings.TrimSpace(lookup("FIREBASE_PROJECT_ID"))
@@ -289,6 +293,7 @@ func (c *Config) ParseFlags(args []string) error {
 
 	admin := fs.Bool("admin-mode", c.Admin, "Run in local single-user admin mode")
 	fs.BoolVar(admin, "admin", c.Admin, "Alias for -admin-mode")
+	authProvider := fs.String("auth-provider", c.AuthProvider, "Authentication provider to use (e.g. admin, firebase)")
 	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
 	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
 	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")
@@ -299,6 +304,7 @@ func (c *Config) ParseFlags(args []string) error {
 	}
 
 	c.Admin = *admin
+	c.AuthProvider = *authProvider
 	c.LLMDebugPrompts = *debugPrompts
 	c.LLMDebugDir = *debugDir
 	return nil

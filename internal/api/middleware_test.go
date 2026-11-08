@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"resumeee/internal/auth"
 	"resumeee/internal/domain"
 )
 
@@ -316,6 +317,47 @@ func TestAuthMiddleware(t *testing.T) {
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected status 401 when verifier is nil and admin is false, got %d", rec.Code)
+		}
+	})
+
+	t.Run("AuthMiddlewareWithProvider with AdminAuthProvider injects admin context", func(t *testing.T) {
+		provider := auth.NewAdminAuthProvider("test-default")
+		var capturedUID string
+		var capturedAdmin bool
+
+		handler := AuthMiddlewareWithProvider(provider)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedUID, _ = UserIDFromContext(r.Context())
+			capturedAdmin = IsAdminFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		req.Header.Set("X-User-ID", "custom-admin-id")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		if capturedUID != "custom-admin-id" {
+			t.Errorf("expected UID 'custom-admin-id', got %q", capturedUID)
+		}
+		if !capturedAdmin {
+			t.Errorf("expected capturedAdmin true")
+		}
+	})
+
+	t.Run("AuthMiddlewareWithProvider fails closed when provider is nil", func(t *testing.T) {
+		handler := AuthMiddlewareWithProvider(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 when provider is nil, got %d", rec.Code)
 		}
 	})
 }
