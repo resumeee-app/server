@@ -83,7 +83,6 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			"description":         "High-density technical bullets with quantified metrics.",
 			"system_instructions": "Focus strictly on quantifiable metrics, latency reductions, and core distributed systems.",
 			"suggested_theme_id":  "builtin-standard-clean",
-			"include_admin_fields": false,
 		}
 		raw, _ := json.Marshal(body)
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))

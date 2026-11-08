@@ -208,7 +208,6 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional default template set ID to suggest with this preset")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
 		mcpSDK.WithString("language", mcpSDK.Description("Target output language for contextual translation (e.g. 'English', 'Spanish', 'French'). Defaults to 'English'. RTL languages are rejected.")),
-		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
 	), handleCreatePreset(cfg))
 
 	// 12. update_preset
@@ -221,7 +220,6 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated default template set ID")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
 		mcpSDK.WithString("language", mcpSDK.Description("Updated target output language (validated, RTL languages rejected)")),
-		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
 	), handleUpdatePreset(cfg))
 
 	// 13. list_supported_languages
@@ -1025,8 +1023,6 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError(err.Error()), nil
 		}
 
-		includeAdminFields, _ := args["include_admin_fields"].(bool)
-
 		var suggestedTheme *string
 		if templateSetID != "" {
 			suggestedTheme = &templateSetID
@@ -1041,7 +1037,6 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			SuggestedThemeID:   suggestedTheme,
 			TemplateSetID:      templateSetID,
 			Language:           validatedLang,
-			IncludeAdminFields: includeAdminFields,
 		}
 
 		if err := cfg.PresetRepo.CreatePreset(ctx, &preset); err != nil {
@@ -1113,9 +1108,6 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 				return mcpSDK.NewToolResultError(err.Error()), nil
 			}
 			preset.Language = validatedLang
-		}
-		if incAdmin, ok := args["include_admin_fields"].(bool); ok {
-			preset.IncludeAdminFields = incAdmin
 		}
 
 		if err := cfg.PresetRepo.UpdatePreset(ctx, preset); err != nil {

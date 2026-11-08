@@ -36,7 +36,6 @@ type CreatePresetRequest struct {
 	TemplateSetID      string  `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
 	Language           string  `json:"language,omitempty"`
-	IncludeAdminFields bool    `json:"include_admin_fields"`
 }
 
 type UpdatePresetRequest struct {
@@ -46,7 +45,6 @@ type UpdatePresetRequest struct {
 	TemplateSetID      *string `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
 	Language           *string `json:"language,omitempty"`
-	IncludeAdminFields *bool   `json:"include_admin_fields"`
 }
 
 // validateReasoningLevel verifies that the given reasoning effort level is empty or
@@ -165,7 +163,6 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		SuggestedThemeID:   themeID,
 		TemplateSetID:      req.TemplateSetID,
 		Language:           lang,
-		IncludeAdminFields: req.IncludeAdminFields,
 	}
 	if preset.TemplateSetID == "" && themeID != nil {
 		preset.TemplateSetID = *themeID
@@ -259,9 +256,6 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		preset.Language = lang
-	}
-	if req.IncludeAdminFields != nil {
-		preset.IncludeAdminFields = *req.IncludeAdminFields
 	}
 
 	if err := h.cfg.PresetRepo.UpdatePreset(ctx, preset); err != nil {

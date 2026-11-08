@@ -2728,8 +2728,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
-        include_admin_fields:
-          type: boolean
         is_built_in:
           type: boolean
           description: Whether this is a system-provided built-in preset
@@ -2762,8 +2760,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
-        include_admin_fields:
-          type: boolean
 
     UpdatePresetRequest:
       type: object
@@ -2782,8 +2778,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation
-        include_admin_fields:
-          type: boolean
 
     TailoringStrategy:
       type: object
@@ -2811,8 +2805,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
-        include_admin_fields:
-          type: boolean
         is_built_in:
           type: boolean
           description: Whether this is a system-provided built-in tailoring strategy
@@ -2844,8 +2836,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
-        include_admin_fields:
-          type: boolean
 
     UpdateStrategyRequest:
       type: object
@@ -2864,8 +2854,6 @@ components:
         language:
           type: string
           description: Target language for contextual translation
-        include_admin_fields:
-          type: boolean
 
     TemplateSet:
       type: object

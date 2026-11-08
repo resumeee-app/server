@@ -124,7 +124,6 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 			SystemInstructions: "Focus on metrics and system design.",
 			TemplateSetID:      renderer.TemplateStandardCleanID,
 			Language:           "English",
-			IncludeAdminFields: false,
 		})
 		if err != nil {
 			t.Fatalf("failed to marshal request: %v", err)
