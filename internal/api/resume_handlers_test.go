@@ -512,3 +512,316 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		assertForbidden(t, resp)
 	})
 }
+
+func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
+	env := setupResumeTestServer(t)
+	client := env.server.Client()
+	baseURL := env.server.URL
+	ctx := context.Background()
+	userID := "user-resume-1"
+
+	score89 := 89.0
+
+	// Create a tailored branch
+	b := &domain.Branch{
+		ID:            "branch-api-gap-test",
+		UserID:        userID,
+		Name:          "Site Reliability Lead",
+		TemplateSetID: renderer.TemplateStandardCleanID,
+	}
+	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	// Create and complete a version with GapReport
+	v := &domain.BranchVersion{
+		ID:               "ver-api-gap-1",
+		BranchID:         b.ID,
+		Status:           domain.VersionStatusCompleted,
+		MainRevisionUsed: 1,
+		GapReport: &domain.GapReport{
+			OverallMatchSummary: "High match for SRE lead position",
+			MatchScore:          &score89,
+			MissingRequirements: []domain.GapItem{
+				{Requirement: "Terraform CDKTF", Importance: domain.GapImportancePreferred},
+			},
+		},
+	}
+	if err := env.branchRepo.CreateVersion(ctx, v); err != nil {
+		t.Fatalf("failed to create version: %v", err)
+	}
+	if err := env.branchRepo.CompleteVersion(ctx, v); err != nil {
+		t.Fatalf("failed to complete version: %v", err)
+	}
+
+	// 1. Test GET /api/v1/branches
+	t.Run("GET /api/v1/branches returns populated gap_report with match_score", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/branches", nil)
+		req.Header.Set("X-User-ID", userID)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/v1/branches failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		var branches []domain.Branch
+		if err := json.NewDecoder(resp.Body).Decode(&branches); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		var found *domain.Branch
+		for i := range branches {
+			if branches[i].ID == b.ID {
+				found = &branches[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("branch %s not found in GET /api/v1/branches", b.ID)
+		}
+		if found.GapReport == nil {
+			t.Fatalf("expected gap_report to be non-nil in GET /api/v1/branches, got nil")
+		}
+		if found.GapReport.MatchScore == nil || *found.GapReport.MatchScore != score89 {
+			t.Errorf("expected match score %f, got %v", score89, found.GapReport.MatchScore)
+		}
+		if found.GapReport.OverallMatchSummary != "High match for SRE lead position" {
+			t.Errorf("expected overall match summary 'High match for SRE lead position', got %q", found.GapReport.OverallMatchSummary)
+		}
+		if len(found.GapReport.MissingRequirements) != 1 {
+			t.Fatalf("expected 1 missing requirement, got %d", len(found.GapReport.MissingRequirements))
+		}
+		if found.GapReport.MissingRequirements[0].Requirement != "Terraform CDKTF" {
+			t.Errorf("expected missing requirement 'Terraform CDKTF', got %q", found.GapReport.MissingRequirements[0].Requirement)
+		}
+		if found.GapReport.MissingRequirements[0].Importance != domain.GapImportancePreferred {
+			t.Errorf("expected importance 'preferred', got %q", found.GapReport.MissingRequirements[0].Importance)
+		}
+	})
+
+	// 2. Test GET /api/v1/branches/{id}
+	t.Run("GET /api/v1/branches/{id} returns populated gap_report with match_score", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/branches/"+b.ID, nil)
+		req.Header.Set("X-User-ID", userID)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/v1/branches/{id} failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		var fetched domain.Branch
+		if err := json.NewDecoder(resp.Body).Decode(&fetched); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if fetched.GapReport == nil {
+			t.Fatalf("expected gap_report to be non-nil in GET /api/v1/branches/{id}, got nil")
+		}
+		if fetched.GapReport.MatchScore == nil || *fetched.GapReport.MatchScore != score89 {
+			t.Errorf("expected match score %f, got %v", score89, fetched.GapReport.MatchScore)
+		}
+		if fetched.GapReport.OverallMatchSummary != "High match for SRE lead position" {
+			t.Errorf("expected overall match summary 'High match for SRE lead position', got %q", fetched.GapReport.OverallMatchSummary)
+		}
+		if len(fetched.GapReport.MissingRequirements) != 1 {
+			t.Fatalf("expected 1 missing requirement, got %d", len(fetched.GapReport.MissingRequirements))
+		}
+		if fetched.GapReport.MissingRequirements[0].Requirement != "Terraform CDKTF" {
+			t.Errorf("expected missing requirement 'Terraform CDKTF', got %q", fetched.GapReport.MissingRequirements[0].Requirement)
+		}
+	})
+
+	// 3. Test PUT /api/v1/branches/{id} version switch
+	t.Run("PUT /api/v1/branches/{id} active version switch syncs gap_report match_score", func(t *testing.T) {
+		score96 := 96.0
+		v2 := &domain.BranchVersion{
+			ID:               "ver-api-gap-2",
+			BranchID:         b.ID,
+			Status:           domain.VersionStatusCompleted,
+			MainRevisionUsed: 1,
+			GapReport: &domain.GapReport{
+				OverallMatchSummary: "Exceptional candidate match after tailoring",
+				MatchScore:          &score96,
+				MissingRequirements: []domain.GapItem{
+					{Requirement: "Minor documentation polish", Importance: domain.GapImportanceNiceToHave},
+				},
+			},
+		}
+		if err := env.branchRepo.CreateVersion(ctx, v2); err != nil {
+			t.Fatalf("failed to create version 2: %v", err)
+		}
+		if err := env.branchRepo.CompleteVersion(ctx, v2); err != nil {
+			t.Fatalf("failed to complete version 2: %v", err)
+		}
+
+		// Switch active version back to v1 via PUT /api/v1/branches/{id}
+		reqBody := map[string]any{
+			"active_version_id": v.ID,
+		}
+		raw, _ := json.Marshal(reqBody)
+		putReq, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/branches/"+b.ID, bytes.NewReader(raw))
+		putReq.Header.Set("Content-Type", "application/json")
+		putReq.Header.Set("X-User-ID", userID)
+
+		putResp, err := client.Do(putReq)
+		if err != nil {
+			t.Fatalf("PUT /api/v1/branches/{id} failed: %v", err)
+		}
+		defer func() { _ = putResp.Body.Close() }()
+
+		if putResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", putResp.StatusCode)
+		}
+
+		var updated domain.Branch
+		if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
+			t.Fatalf("failed to decode PUT response: %v", err)
+		}
+
+		if updated.GapReport == nil || updated.GapReport.MatchScore == nil || *updated.GapReport.MatchScore != score89 {
+			t.Errorf("expected rolled back match score %f, got %v", score89, updated.GapReport)
+		}
+		if updated.GapReport.OverallMatchSummary != "High match for SRE lead position" {
+			t.Errorf("expected summary 'High match for SRE lead position', got %q", updated.GapReport.OverallMatchSummary)
+		}
+
+		// Now switch active version forward to v2 via PUT /api/v1/branches/{id}
+		reqBody2 := map[string]any{
+			"active_version_id": v2.ID,
+		}
+		raw2, _ := json.Marshal(reqBody2)
+		putReq2, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/branches/"+b.ID, bytes.NewReader(raw2))
+		putReq2.Header.Set("Content-Type", "application/json")
+		putReq2.Header.Set("X-User-ID", userID)
+
+		putResp2, err := client.Do(putReq2)
+		if err != nil {
+			t.Fatalf("PUT /api/v1/branches/{id} forward switch failed: %v", err)
+		}
+		defer func() { _ = putResp2.Body.Close() }()
+
+		if putResp2.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", putResp2.StatusCode)
+		}
+
+		var updated2 domain.Branch
+		if err := json.NewDecoder(putResp2.Body).Decode(&updated2); err != nil {
+			t.Fatalf("failed to decode second PUT response: %v", err)
+		}
+
+		if updated2.GapReport == nil || updated2.GapReport.MatchScore == nil || *updated2.GapReport.MatchScore != score96 {
+			t.Errorf("expected updated match score %f, got %v", score96, updated2.GapReport)
+		}
+		if updated2.GapReport.OverallMatchSummary != "Exceptional candidate match after tailoring" {
+			t.Errorf("expected summary 'Exceptional candidate match after tailoring', got %q", updated2.GapReport.OverallMatchSummary)
+		}
+	})
+
+	// 4. Test HTTP fallback resolution for legacy branches where gap_report in store is null
+	t.Run("HTTP endpoints fallback-resolve gap_report for legacy branch with null gap_report in store", func(t *testing.T) {
+		score91 := 91.0
+		bLegacy := &domain.Branch{
+			ID:            "branch-api-legacy-fallback",
+			UserID:        userID,
+			Name:          "Legacy Infrastructure Engineer",
+			TemplateSetID: renderer.TemplateStandardCleanID,
+		}
+		if err := env.branchRepo.CreateBranch(ctx, bLegacy); err != nil {
+			t.Fatalf("failed to create legacy branch: %v", err)
+		}
+
+		vLegacy := &domain.BranchVersion{
+			ID:               "ver-api-legacy-1",
+			BranchID:         bLegacy.ID,
+			Status:           domain.VersionStatusCompleted,
+			MainRevisionUsed: 1,
+			GapReport: &domain.GapReport{
+				OverallMatchSummary: "Legacy version match summary",
+				MatchScore:          &score91,
+				MissingRequirements: []domain.GapItem{
+					{Requirement: "Ansible automation", Importance: domain.GapImportancePreferred},
+				},
+			},
+		}
+		if err := env.branchRepo.CreateVersion(ctx, vLegacy); err != nil {
+			t.Fatalf("failed to create legacy version: %v", err)
+		}
+
+		// Directly set ActiveVersionID without gap_report in store (simulating legacy data)
+		bLegacy.ActiveVersionID = &vLegacy.ID
+		bLegacy.GapReport = nil
+		if err := env.branchRepo.UpdateBranch(ctx, bLegacy); err != nil {
+			t.Fatalf("failed to update legacy branch in repo: %v", err)
+		}
+
+		// Verify GET /api/v1/branches/{id} fallback resolution
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/branches/"+bLegacy.ID, nil)
+		getReq.Header.Set("X-User-ID", userID)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET legacy branch failed: %v", err)
+		}
+		defer func() { _ = getResp.Body.Close() }()
+
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
+		}
+
+		var fetchedLegacy domain.Branch
+		if err := json.NewDecoder(getResp.Body).Decode(&fetchedLegacy); err != nil {
+			t.Fatalf("decode failed: %v", err)
+		}
+
+		if fetchedLegacy.GapReport == nil {
+			t.Fatalf("expected fallback resolved gap_report, got nil")
+		}
+		if fetchedLegacy.GapReport.MatchScore == nil || *fetchedLegacy.GapReport.MatchScore != score91 {
+			t.Errorf("expected match score %f, got %v", score91, fetchedLegacy.GapReport.MatchScore)
+		}
+		if fetchedLegacy.GapReport.OverallMatchSummary != "Legacy version match summary" {
+			t.Errorf("expected summary 'Legacy version match summary', got %q", fetchedLegacy.GapReport.OverallMatchSummary)
+		}
+
+		// Verify GET /api/v1/branches list fallback resolution
+		listReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/branches", nil)
+		listReq.Header.Set("X-User-ID", userID)
+		listResp, err := client.Do(listReq)
+		if err != nil {
+			t.Fatalf("GET /api/v1/branches failed: %v", err)
+		}
+		defer func() { _ = listResp.Body.Close() }()
+
+		var branchList []domain.Branch
+		if err := json.NewDecoder(listResp.Body).Decode(&branchList); err != nil {
+			t.Fatalf("decode list failed: %v", err)
+		}
+
+		var foundLegacy *domain.Branch
+		for i := range branchList {
+			if branchList[i].ID == bLegacy.ID {
+				foundLegacy = &branchList[i]
+				break
+			}
+		}
+		if foundLegacy == nil {
+			t.Fatalf("legacy branch not found in list")
+		}
+		if foundLegacy.GapReport == nil {
+			t.Fatalf("expected fallback gap_report in list, got nil")
+		}
+		if foundLegacy.GapReport.MatchScore == nil || *foundLegacy.GapReport.MatchScore != score91 {
+			t.Errorf("expected match score %f, got %v", score91, foundLegacy.GapReport.MatchScore)
+		}
+	})
+}
+
