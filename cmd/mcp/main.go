@@ -23,7 +23,7 @@ import (
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/storage"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -42,7 +42,13 @@ type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog
 //   - repository.Store: Initialized SQLite store.
 //   - error: Non-nil if SQLite connection or seeding fails.
 func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
-	return sqlite.OpenStore(ctx, cfg.DBPath, cfg.DefaultUserID)
+	return storage.Open(ctx, storage.Config{
+		Driver:            storage.DriverSQLite,
+		DSN:               cfg.DBPath,
+		AutoMigrate:       true,
+		DefaultUserID:     cfg.DefaultUserID,
+		TemplateValidator: renderer.New(),
+	})
 }
 
 // main is the primary process entrypoint, listening for OS interrupt signals and launching run().

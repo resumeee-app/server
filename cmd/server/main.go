@@ -26,7 +26,7 @@ import (
 	"resumeee/internal/profile"
 	"resumeee/internal/renderer"
 	"resumeee/internal/repository"
-	"resumeee/internal/repository/sqlite"
+	"resumeee/internal/storage"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -45,7 +45,13 @@ type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog
 //   - repository.Store: Initialized SQLite store bundle.
 //   - error: Non-nil if database connection, schema migration, or default seeding fails.
 func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
-	store, err := sqlite.OpenStore(ctx, cfg.DBPath, cfg.DefaultUserID)
+	store, err := storage.Open(ctx, storage.Config{
+		Driver:            storage.DriverSQLite,
+		DSN:               cfg.DBPath,
+		AutoMigrate:       true,
+		DefaultUserID:     cfg.DefaultUserID,
+		TemplateValidator: renderer.New(),
+	})
 	if err != nil {
 		return nil, err
 	}
