@@ -60,6 +60,7 @@ type CreateBranchRequest struct {
 	TemplateSetID       string   `json:"template_set_id"`
 	ProviderOverride    string   `json:"provider_override"`
 	ModelOverride       string   `json:"model_override"`
+	ReasoningLevel      string   `json:"reasoning_level,omitempty"`
 	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
 	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
 }
@@ -76,6 +77,7 @@ type UpdateBranchRequest struct {
 	TemplateSetID       *string  `json:"template_set_id"`
 	ProviderOverride    *string  `json:"provider_override"`
 	ModelOverride       *string  `json:"model_override"`
+	ReasoningLevel      *string  `json:"reasoning_level,omitempty"`
 	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
 	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
 	ActiveVersionID     *string  `json:"active_version_id"`
@@ -169,6 +171,21 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	isAdmin := h.cfg.Admin || IsAdminFromContext(r.Context())
+	if !isAdmin && (req.ProviderOverride != "" || req.ModelOverride != "" || req.ReasoningLevel != "") {
+		writeError(w, http.StatusForbidden, CodeForbidden, "model and reasoning selection are restricted to administrators", "")
+		return
+	}
+
+	if err := validateReasoningLevel(req.ReasoningLevel); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+		return
+	}
+	if err := validateModelOverride(h.cfg.ModelEnumerator, req.ProviderOverride, req.ModelOverride); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+		return
+	}
+
 	directives := req.CustomDirectives
 	if directives == "" && req.BranchInstructions != "" {
 		directives = req.BranchInstructions
@@ -187,6 +204,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		TemplateSetID:            req.TemplateSetID,
 		ProviderOverride:         req.ProviderOverride,
 		ModelOverride:            req.ModelOverride,
+		ReasoningLevel:           req.ReasoningLevel,
 		PinnedEntityIDs:          req.PinnedEntityIDs,
 		ExcludedEntityIDs:        req.ExcludedEntityIDs,
 	}
@@ -271,6 +289,35 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	isAdmin := h.cfg.Admin || IsAdminFromContext(r.Context())
+	if !isAdmin && (req.ProviderOverride != nil || req.ModelOverride != nil || req.ReasoningLevel != nil) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "model and reasoning selection are restricted to administrators", "")
+		return
+	}
+
+	effectiveProvider := branch.ProviderOverride
+	if req.ProviderOverride != nil {
+		effectiveProvider = *req.ProviderOverride
+	}
+	effectiveModel := branch.ModelOverride
+	if req.ModelOverride != nil {
+		effectiveModel = *req.ModelOverride
+	}
+
+	if req.ReasoningLevel != nil {
+		if err := validateReasoningLevel(*req.ReasoningLevel); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+			return
+		}
+	}
+
+	if req.ProviderOverride != nil || req.ModelOverride != nil {
+		if err := validateModelOverride(h.cfg.ModelEnumerator, effectiveProvider, effectiveModel); err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+			return
+		}
+	}
+
 	if req.TailoringStrategyID != nil {
 		branch.TailoringStrategyID = req.TailoringStrategyID
 		branch.PresetID = req.TailoringStrategyID
@@ -286,6 +333,9 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ModelOverride != nil {
 		branch.ModelOverride = *req.ModelOverride
+	}
+	if req.ReasoningLevel != nil {
+		branch.ReasoningLevel = *req.ReasoningLevel
 	}
 	if req.PinnedEntityIDs != nil {
 		branch.PinnedEntityIDs = req.PinnedEntityIDs

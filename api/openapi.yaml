@@ -3048,6 +3048,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort constraint for thinking models (e.g. none, low, medium, high)
         pinned_entity_ids:
           type: array
           items:
@@ -3104,6 +3113,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort constraint for thinking models (e.g. none, low, medium, high)
         pinned_entity_ids:
           type: array
           items:
@@ -3140,6 +3158,15 @@ components:
           type: string
         model_override:
           type: string
+        reasoning_level:
+          type: string
+          enum:
+            - ""
+            - none
+            - low
+            - medium
+            - high
+          description: Optional reasoning effort constraint for thinking models (e.g. none, low, medium, high)
         pinned_entity_ids:
           type: array
           items:

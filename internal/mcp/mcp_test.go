@@ -539,6 +539,253 @@ func TestTool_CreateBranch(t *testing.T) {
 			t.Fatalf("expected new branch to be created in repository, count: %d", len(branches))
 		}
 	})
+
+	adminCtx := domain.WithIsAdmin(ctx, true)
+
+	t.Run("non-admin branch creation with model selection is rejected", func(t *testing.T) {
+		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"name":              "Anthropic AI Engineer",
+					"target_company":    "Anthropic",
+					"target_role":       "AI Engineer",
+					"provider_override": "anthropic",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error for non-admin model selection")
+		}
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		if !strings.Contains(text, "model and reasoning selection are restricted to administrators") {
+			t.Errorf("expected admin restriction message, got: %s", text)
+		}
+	})
+
+	t.Run("branch creation with model selection fields", func(t *testing.T) {
+		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"name":                  "Anthropic AI Engineer",
+					"target_company":        "Anthropic",
+					"target_role":           "AI Engineer",
+					"target_requirements":   "LLMs, Prompt Engineering, Python",
+					"tailoring_strategy_id": "builtin-1-page-tech-resume",
+					"template_set_id":       "builtin-standard-clean",
+					"provider_override":     "anthropic",
+					"model_override":        "claude-3-7-sonnet",
+					"reasoning_level":       "high",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("expected success, got error: %+v", result)
+		}
+
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		var created domain.Branch
+		if err := json.Unmarshal([]byte(text), &created); err != nil {
+			t.Fatalf("failed to unmarshal created branch JSON: %v", err)
+		}
+
+		if created.ProviderOverride != "anthropic" {
+			t.Errorf("expected provider_override 'anthropic', got %q", created.ProviderOverride)
+		}
+		if created.ModelOverride != "claude-3-7-sonnet" {
+			t.Errorf("expected model_override 'claude-3-7-sonnet', got %q", created.ModelOverride)
+		}
+		if created.ReasoningLevel != "high" {
+			t.Errorf("expected reasoning_level 'high', got %q", created.ReasoningLevel)
+		}
+
+		saved, err := env.branchRepo.GetBranch(ctx, "user-1", created.ID)
+		if err != nil || saved == nil {
+			t.Fatalf("failed to retrieve saved branch: %v", err)
+		}
+		if saved.ReasoningLevel != "high" || saved.ModelOverride != "claude-3-7-sonnet" || saved.ProviderOverride != "anthropic" {
+			t.Errorf("persisted branch missing model selection fields: %+v", saved)
+		}
+	})
+
+	t.Run("branch creation rejects invalid reasoning_level", func(t *testing.T) {
+		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"name":            "Invalid Effort Branch",
+					"target_company":  "OpenAI",
+					"target_role":     "Research Scientist",
+					"reasoning_level": "super-turbo",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error on invalid reasoning_level, got success")
+		}
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		if !strings.Contains(text, "reasoning_level must be one of") {
+			t.Errorf("expected validation message, got: %s", text)
+		}
+	})
+}
+
+func TestTool_UpdateBranch(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
+
+	// Pre-create branch for testing update
+	initBranch := &domain.Branch{
+		ID:            "br-update-1",
+		UserID:        "user-1",
+		Name:          "Initial Branch",
+		TargetCompany: "Acme",
+		TargetRole:    "Engineer",
+		TemplateSetID: "builtin-standard-clean",
+	}
+	if err := env.branchRepo.CreateBranch(ctx, initBranch); err != nil {
+		t.Fatalf("failed to seed branch: %v", err)
+	}
+
+	tool := env.mcpServer.GetTool("update_branch")
+	if tool == nil {
+		t.Fatal("tool update_branch not found")
+	}
+
+	t.Run("missing branch id", func(t *testing.T) {
+		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"name": "Updated Name",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error when id is missing")
+		}
+	})
+
+	t.Run("nonexistent branch id", func(t *testing.T) {
+		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"id":   "nonexistent-branch-id",
+					"name": "Updated Name",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error for nonexistent branch")
+		}
+	})
+
+	adminCtx := domain.WithIsAdmin(ctx, true)
+
+	t.Run("non-admin update with model selection is rejected", func(t *testing.T) {
+		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"id":                "br-update-1",
+					"provider_override": "gemini",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error for non-admin update")
+		}
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		if !strings.Contains(text, "model and reasoning selection are restricted to administrators") {
+			t.Errorf("expected admin restriction message, got: %s", text)
+		}
+	})
+
+	t.Run("rejects invalid reasoning_level", func(t *testing.T) {
+		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"id":              "br-update-1",
+					"reasoning_level": "extreme",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error for invalid reasoning_level on update")
+		}
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		if !strings.Contains(text, "reasoning_level must be one of") {
+			t.Errorf("expected validation message, got: %s", text)
+		}
+	})
+
+	t.Run("successful update with model selection and metadata", func(t *testing.T) {
+		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"id":                    "br-update-1",
+					"name":                  "Google Staff Site Reliability Engineer",
+					"target_company":        "Google",
+					"target_role":           "Staff SRE",
+					"target_requirements":   "Distributed Systems, Go, SRE",
+					"provider_override":     "gemini",
+					"model_override":        "gemini-2.5-pro",
+					"reasoning_level":       "medium",
+					"tailoring_strategy_id": "builtin-1-page-tech-resume",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("expected success, got error: %+v", result)
+		}
+
+		text := result.Content[0].(mcpSDK.TextContent).Text
+		var updated domain.Branch
+		if err := json.Unmarshal([]byte(text), &updated); err != nil {
+			t.Fatalf("failed to unmarshal updated branch: %v", err)
+		}
+
+		if updated.Name != "Google Staff Site Reliability Engineer" {
+			t.Errorf("expected name 'Google Staff Site Reliability Engineer', got %q", updated.Name)
+		}
+		if updated.ProviderOverride != "gemini" {
+			t.Errorf("expected provider_override 'gemini', got %q", updated.ProviderOverride)
+		}
+		if updated.ModelOverride != "gemini-2.5-pro" {
+			t.Errorf("expected model_override 'gemini-2.5-pro', got %q", updated.ModelOverride)
+		}
+		if updated.ReasoningLevel != "medium" {
+			t.Errorf("expected reasoning_level 'medium', got %q", updated.ReasoningLevel)
+		}
+
+		saved, err := env.branchRepo.GetBranch(ctx, "user-1", "br-update-1")
+		if err != nil || saved == nil {
+			t.Fatalf("failed to retrieve updated branch: %v", err)
+		}
+		if saved.ModelOverride != "gemini-2.5-pro" || saved.ReasoningLevel != "medium" || saved.ProviderOverride != "gemini" {
+			t.Errorf("persisted branch has unexpected model fields: %+v", saved)
+		}
+	})
 }
 
 func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
@@ -603,6 +850,54 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 		!strings.HasSuffix(strings.TrimSpace(updatedBranch.CustomDirectives), "</custom_instructions>") {
 		t.Errorf("expected XML boundary fencing on CustomDirectives, got: %s", updatedBranch.CustomDirectives)
 	}
+
+	t.Run("tailor resume rejects non-admin model selection overrides", func(t *testing.T) {
+		res, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"branch_id":         "br-tailor-1",
+					"job_description":   "Senior Distributed Systems Engineer",
+					"provider_override": "openai",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatal("expected error for non-admin tailor resume model override")
+		}
+	})
+
+	t.Run("tailor resume accepts model selection overrides for admin", func(t *testing.T) {
+		adminCtx := domain.WithIsAdmin(ctx, true)
+		res, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"branch_id":         "br-tailor-1",
+					"job_description":   "Senior Distributed Systems Engineer",
+					"provider_override": "openai",
+					"model_override":    "o3-mini",
+					"reasoning_level":   "high",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("expected success, got error: %+v", res)
+		}
+
+		tailoredBranch, err := env.branchRepo.GetBranch(ctx, "user-1", "br-tailor-1")
+		if err != nil || tailoredBranch == nil {
+			t.Fatalf("failed to get tailored branch: %v", err)
+		}
+		if tailoredBranch.ProviderOverride != "openai" || tailoredBranch.ModelOverride != "o3-mini" || tailoredBranch.ReasoningLevel != "high" {
+			t.Errorf("expected branch model fields updated, got: provider=%q model=%q reasoning=%q",
+				tailoredBranch.ProviderOverride, tailoredBranch.ModelOverride, tailoredBranch.ReasoningLevel)
+		}
+	})
 }
 
 func TestTool_RunGapAnalysis(t *testing.T) {

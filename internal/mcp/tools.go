@@ -147,14 +147,37 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("target_requirements", mcpSDK.Description("Target job description requirements or posting text")),
 		mcpSDK.WithString("tailoring_strategy_id", mcpSDK.Description("Optional preset / tailoring strategy ID")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional template set ID (defaults to 'builtin-standard-clean')")),
+		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional AI provider override (e.g., 'gemini', 'anthropic', 'openai')")),
+		mcpSDK.WithString("model_override", mcpSDK.Description("Optional LLM model override")),
+		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
 	), handleCreateBranch(cfg))
 
-	// 7. tailor_resume
+	// 7. update_branch
+	s.AddTool(mcpSDK.NewTool("update_branch",
+		mcpSDK.WithDescription("Updates an existing targeted resume branch's configuration, target job requirements, prompt directives, template, or LLM model settings."),
+		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target resume branch to update")),
+		mcpSDK.WithString("branch_id", mcpSDK.Description("Alias for id")),
+		mcpSDK.WithString("name", mcpSDK.Description("Updated descriptive name for the branch")),
+		mcpSDK.WithString("target_company", mcpSDK.Description("Updated target company name")),
+		mcpSDK.WithString("target_role", mcpSDK.Description("Updated target role title")),
+		mcpSDK.WithString("target_requirements", mcpSDK.Description("Updated target job description requirements or posting text")),
+		mcpSDK.WithString("custom_directives", mcpSDK.Description("Updated custom candidate prompt directives")),
+		mcpSDK.WithString("tailoring_strategy_id", mcpSDK.Description("Updated preset / tailoring strategy ID")),
+		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated template set ID")),
+		mcpSDK.WithString("provider_override", mcpSDK.Description("Updated LLM provider override (e.g. 'gemini', 'anthropic', 'openai')")),
+		mcpSDK.WithString("model_override", mcpSDK.Description("Updated model identifier override")),
+		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Updated reasoning effort constraint: 'none', 'low', 'medium', 'high'")),
+	), handleUpdateBranch(cfg))
+
+	// 8. tailor_resume
 	s.AddTool(mcpSDK.NewTool("tailor_resume",
 		mcpSDK.WithDescription("Initiates an asynchronous tailoring generation pipeline for a branch against job requirements, applying XML boundary fencing."),
 		mcpSDK.WithString("branch_id", mcpSDK.Required(), mcpSDK.Description("ID of the target resume branch")),
 		mcpSDK.WithString("job_description", mcpSDK.Required(), mcpSDK.Description("Target job description text")),
 		mcpSDK.WithString("custom_instructions", mcpSDK.Description("Optional candidate directives or emphasis instructions")),
+		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional LLM provider override")),
+		mcpSDK.WithString("model_override", mcpSDK.Description("Optional LLM model override")),
+		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
 	), handleTailorResume(cfg))
 
 	// 8. run_gap_analysis
@@ -178,15 +201,12 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 
 	// 11. create_preset
 	s.AddTool(mcpSDK.NewTool("create_preset",
-		mcpSDK.WithDescription("Creates a new custom tailoring strategy preset for the authenticated user with customizable prompt instructions, language, and reasoning constraints."),
+		mcpSDK.WithDescription("Creates a new custom tailoring strategy preset for the authenticated user with customizable prompt instructions and language."),
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the preset")),
 		mcpSDK.WithString("system_instructions", mcpSDK.Required(), mcpSDK.Description("Core system instructions and tailoring prompt strategy guidelines")),
 		mcpSDK.WithString("description", mcpSDK.Description("Optional human-readable description of the preset purpose")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional default template set ID to suggest with this preset")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
-		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional LLM provider override (e.g., 'gemini', 'anthropic', 'openai')")),
-		mcpSDK.WithString("model_override", mcpSDK.Description("Optional model identifier override")),
-		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
 		mcpSDK.WithString("language", mcpSDK.Description("Target output language for contextual translation (e.g. 'English', 'Spanish', 'French'). Defaults to 'English'. RTL languages are rejected.")),
 		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
 	), handleCreatePreset(cfg))
@@ -200,9 +220,6 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("system_instructions", mcpSDK.Description("Updated system instructions")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated default template set ID")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
-		mcpSDK.WithString("provider_override", mcpSDK.Description("Updated LLM provider override")),
-		mcpSDK.WithString("model_override", mcpSDK.Description("Updated model identifier override")),
-		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Updated reasoning effort constraint: 'none', 'low', 'medium', 'high'")),
 		mcpSDK.WithString("language", mcpSDK.Description("Updated target output language (validated, RTL languages rejected)")),
 		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
 	), handleUpdatePreset(cfg))
@@ -553,12 +570,28 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		targetRequirements, _ := args["target_requirements"].(string)
 		strategyID, _ := args["tailoring_strategy_id"].(string)
 		templateSetID, _ := args["template_set_id"].(string)
+		providerOverride, _ := args["provider_override"].(string)
+		modelOverride, _ := args["model_override"].(string)
+		reasoningLevel, _ := args["reasoning_level"].(string)
 
 		name = strings.TrimSpace(name)
 		targetCompany = strings.TrimSpace(targetCompany)
 		targetRole = strings.TrimSpace(targetRole)
 		strategyID = strings.TrimSpace(strategyID)
 		templateSetID = strings.TrimSpace(templateSetID)
+		providerOverride = strings.TrimSpace(providerOverride)
+		modelOverride = strings.TrimSpace(modelOverride)
+		reasoningLevel = strings.TrimSpace(strings.ToLower(reasoningLevel))
+		switch reasoningLevel {
+		case "", "none", "low", "medium", "high":
+		default:
+			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
+		}
+
+		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		if !isAdmin && (providerOverride != "" || modelOverride != "" || reasoningLevel != "") {
+			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
+		}
 
 		if name == "" || targetCompany == "" || targetRole == "" {
 			return mcpSDK.NewToolResultError("name, target_company, and target_role are required"), nil
@@ -605,6 +638,9 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			TailoringStrategyID: stratPtr,
 			PresetID:            stratPtr,
 			TemplateSetID:       templateSetID,
+			ProviderOverride:    providerOverride,
+			ModelOverride:       modelOverride,
+			ReasoningLevel:      reasoningLevel,
 		}
 
 		createdBranch, err := cfg.BranchService.CreateBranch(ctx, branch)
@@ -616,6 +652,123 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		res, err := jsonToolResult(createdBranch)
 		if err != nil {
 			return mcpSDK.NewToolResultError("failed to serialize created branch"), nil
+		}
+		return res, nil
+	}
+}
+
+// handleUpdateBranch handles tool 'update_branch', updating an existing targeted resume branch.
+func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+		args := parseArguments(req)
+
+		branchID, _ := args["id"].(string)
+		if branchID == "" {
+			branchID, _ = args["branch_id"].(string)
+		}
+		branchID = strings.TrimSpace(branchID)
+		if branchID == "" {
+			return mcpSDK.NewToolResultError("id is required"), nil
+		}
+
+		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		if err != nil || branch == nil {
+			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", branchID)), nil
+		}
+
+		if name, ok := args["name"].(string); ok && strings.TrimSpace(name) != "" {
+			branch.Name = strings.TrimSpace(name)
+		}
+		if company, ok := args["target_company"].(string); ok {
+			branch.TargetCompany = strings.TrimSpace(company)
+		}
+		if role, ok := args["target_role"].(string); ok {
+			branch.TargetRole = strings.TrimSpace(role)
+		}
+		if reqs, ok := args["target_requirements"].(string); ok {
+			reqs = strings.TrimSpace(reqs)
+			if reqs != "" {
+				branch.TargetRequirements = sanitizeXMLFence(reqs, "target_job_description")
+			} else {
+				branch.TargetRequirements = ""
+			}
+		}
+		if dirs, ok := args["custom_directives"].(string); ok {
+			dirs = strings.TrimSpace(dirs)
+			if dirs != "" {
+				fenced := sanitizeXMLFence(dirs, "custom_instructions")
+				branch.CustomDirectives = fenced
+				branch.BranchInstructions = fenced
+			} else {
+				branch.CustomDirectives = ""
+				branch.BranchInstructions = ""
+			}
+		}
+		if strat, ok := args["tailoring_strategy_id"].(string); ok {
+			strat = strings.TrimSpace(strat)
+			if strat != "" {
+				preset, err := cfg.PresetRepo.GetPreset(ctx, userID, strat)
+				if err != nil && (strings.HasPrefix(strat, "builtin-") || cfg.DefaultUserID != "") {
+					if p, pErr := cfg.PresetRepo.GetPreset(ctx, cfg.DefaultUserID, strat); pErr == nil && p != nil {
+						preset = p
+						err = nil
+					}
+				}
+				if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+					return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strat)), nil
+				}
+				branch.TailoringStrategyID = &strat
+				branch.PresetID = &strat
+			} else {
+				branch.TailoringStrategyID = nil
+				branch.PresetID = nil
+			}
+		}
+		if tmplID, ok := args["template_set_id"].(string); ok {
+			tmplID = strings.TrimSpace(tmplID)
+			if tmplID != "" {
+				tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, tmplID)
+				if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+					return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", tmplID)), nil
+				}
+				branch.TemplateSetID = tmplID
+			}
+		}
+		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		if !isAdmin && (args["provider_override"] != nil || args["model_override"] != nil || args["reasoning_level"] != nil) {
+			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
+		}
+
+		if prov, ok := args["provider_override"].(string); ok {
+			branch.ProviderOverride = strings.TrimSpace(prov)
+		}
+		if mod, ok := args["model_override"].(string); ok {
+			branch.ModelOverride = strings.TrimSpace(mod)
+		}
+		if rLvl, ok := args["reasoning_level"].(string); ok {
+			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
+			switch rLvl {
+			case "", "none", "low", "medium", "high":
+				branch.ReasoningLevel = rLvl
+			default:
+				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
+			}
+		}
+
+		updatedBranch, err := cfg.BranchService.UpdateBranch(ctx, branch)
+		if err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to update branch", "branch_id", branchID, "err", err)
+			return mcpSDK.NewToolResultError(fmt.Sprintf("failed to update branch: %v", err)), nil
+		}
+
+		res, err := jsonToolResult(updatedBranch)
+		if err != nil {
+			return mcpSDK.NewToolResultError("failed to serialize updated branch"), nil
 		}
 		return res, nil
 	}
@@ -650,6 +803,27 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if customInstructions != "" {
 			branch.CustomDirectives = sanitizeXMLFence(customInstructions, "custom_instructions")
 			branch.BranchInstructions = branch.CustomDirectives
+		}
+
+		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		if !isAdmin && (args["provider_override"] != nil || args["model_override"] != nil || args["reasoning_level"] != nil) {
+			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
+		}
+
+		if prov, ok := args["provider_override"].(string); ok && strings.TrimSpace(prov) != "" {
+			branch.ProviderOverride = strings.TrimSpace(prov)
+		}
+		if mod, ok := args["model_override"].(string); ok && strings.TrimSpace(mod) != "" {
+			branch.ModelOverride = strings.TrimSpace(mod)
+		}
+		if rLvl, ok := args["reasoning_level"].(string); ok && strings.TrimSpace(rLvl) != "" {
+			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
+			switch rLvl {
+			case "none", "low", "medium", "high":
+				branch.ReasoningLevel = rLvl
+			default:
+				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
+			}
 		}
 
 		if err := cfg.BranchRepo.UpdateBranch(ctx, branch); err != nil {
@@ -845,22 +1019,12 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			}
 		}
 
-		reasoningLevel, _ := args["reasoning_level"].(string)
-		reasoningLevel = strings.TrimSpace(strings.ToLower(reasoningLevel))
-		switch reasoningLevel {
-		case "", "none", "low", "medium", "high":
-		default:
-			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
-		}
-
 		langRaw, _ := args["language"].(string)
 		validatedLang, err := domain.ValidateLanguage(langRaw)
 		if err != nil {
 			return mcpSDK.NewToolResultError(err.Error()), nil
 		}
 
-		providerOverride, _ := args["provider_override"].(string)
-		modelOverride, _ := args["model_override"].(string)
 		includeAdminFields, _ := args["include_admin_fields"].(bool)
 
 		var suggestedTheme *string
@@ -876,9 +1040,6 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			SystemInstructions: instructions,
 			SuggestedThemeID:   suggestedTheme,
 			TemplateSetID:      templateSetID,
-			ProviderOverride:   strings.TrimSpace(providerOverride),
-			ModelOverride:      strings.TrimSpace(modelOverride),
-			ReasoningLevel:     reasoningLevel,
 			Language:           validatedLang,
 			IncludeAdminFields: includeAdminFields,
 		}
@@ -945,21 +1106,6 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			}
 			preset.TemplateSetID = rawTemplateID
 			preset.SuggestedThemeID = &rawTemplateID
-		}
-		if prov, ok := args["provider_override"].(string); ok {
-			preset.ProviderOverride = strings.TrimSpace(prov)
-		}
-		if mod, ok := args["model_override"].(string); ok {
-			preset.ModelOverride = strings.TrimSpace(mod)
-		}
-		if rLvl, ok := args["reasoning_level"].(string); ok {
-			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
-			switch rLvl {
-			case "", "none", "low", "medium", "high":
-				preset.ReasoningLevel = rLvl
-			default:
-				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
-			}
 		}
 		if langRaw, ok := args["language"].(string); ok {
 			validatedLang, err := domain.ValidateLanguage(langRaw)
