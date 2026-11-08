@@ -340,7 +340,7 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, AsyncJobEnqueued{
 			VersionID: ver.ID,
 			Status:    ver.Status,
-			Message:   "Resume rendered from master profile",
+			Message:   "Resume rendered from main profile",
 		})
 		return
 	}

@@ -27,7 +27,7 @@ type profileHandler struct {
 func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &profileHandler{cfg: cfg}
 
-	// Master Profile
+	// Main Profile
 	mux.HandleFunc("GET /api/v1/profile", h.getProfile)
 	mux.HandleFunc("PUT /api/v1/profile", h.updateProfile)
 	mux.HandleFunc("GET /api/v1/profile/full", h.getFullProfile)
@@ -264,7 +264,7 @@ func parseSkillsInput(skillIDs []string) []domain.Skill {
 	return skills
 }
 
-// --- Master Profile Handlers ---
+// --- Main Profile Handlers ---
 
 // getProfile retrieves basic profile fields for the authenticated user.
 func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, prof)
 }
 
-// updateProfile validates and upserts the user's master profile record.
+// updateProfile validates and upserts the user's main profile record.
 func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -294,9 +294,9 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			prof = &domain.Profile{
-				ID:             "profile-" + userID,
-				UserID:         userID,
-				MasterRevision: 0,
+				ID:           "profile-" + userID,
+				UserID:       userID,
+				MainRevision: 0,
 			}
 		} else {
 			writeDomainError(w, err)
@@ -402,7 +402,7 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, snap)
 }
 
-// exportJSONResume exports the user's master career graph as a standard JSON Resume document.
+// exportJSONResume exports the user's main career graph as a standard JSON Resume document.
 func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
@@ -425,7 +425,7 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 const DefaultPDFParseTimeout = 10 * time.Minute
 
 // resolveExtractionProviderAndModel determines the active LLM provider and model for resume parsing.
-// Explicit request values take precedence; omitted fields fall back to the authenticated user's master
+// Explicit request values take precedence; omitted fields fall back to the authenticated user's main
 // profile defaults, verified against configured models when ModelEnumerator is present.
 func (h *profileHandler) resolveExtractionProviderAndModel(ctx context.Context, userID, reqProvider, reqModel string) (string, string) {
 	provider := strings.TrimSpace(reqProvider)
@@ -829,7 +829,7 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, job)
 }
 
-// commitPDFResume commits approved JSON Resume data into the user's master career graph.
+// commitPDFResume commits approved JSON Resume data into the user's main career graph.
 func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)

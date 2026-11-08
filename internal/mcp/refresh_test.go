@@ -59,11 +59,11 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 		t.Fatalf("expected new tenant to be unprovisioned initially")
 	}
 
-	// Invoke get_master_profile tool for the unprovisioned tenant
+	// Invoke get_main_profile tool for the unprovisioned tenant
 	tenantCtx := resumeeeMCP.WithUserID(ctx, newTenantID)
-	tool := server.GetTool("get_master_profile")
+	tool := server.GetTool("get_main_profile")
 	if tool == nil {
-		t.Fatal("tool get_master_profile not found")
+		t.Fatal("tool get_main_profile not found")
 	}
 
 	res, err := tool.Handler(tenantCtx, mcpSDK.CallToolRequest{})

@@ -40,7 +40,7 @@ func registerPrompts(s *serverSDK.MCPServer, cfg ServerConfig) {
 	// 1. prepare_job_application
 	s.AddPrompt(
 		mcpSDK.NewPrompt("prepare_job_application",
-			mcpSDK.WithPromptDescription("Guides the AI assistant to analyze job requirements against candidate master profile, run gap analysis, create a targeted branch, and tailor the resume."),
+			mcpSDK.WithPromptDescription("Guides the AI assistant to analyze job requirements against candidate main profile, run gap analysis, create a targeted branch, and tailor the resume."),
 			mcpSDK.WithArgument("job_description", mcpSDK.ArgumentDescription("Target job description or requirements text"), mcpSDK.RequiredArgument()),
 			mcpSDK.WithArgument("branch_name", mcpSDK.ArgumentDescription("Optional descriptive name for the targeted resume branch")),
 		),

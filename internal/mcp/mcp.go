@@ -2,7 +2,7 @@
 // exposing career profile tools, resources, and guided prompts over stdio and HTTP SSE transports.
 //
 // It enables desktop AI assistants (such as Claude Desktop, Cursor, and Antigravity)
-// to inspect candidate master profiles, trigger targeted resume tailoring runs,
+// to inspect candidate main profiles, trigger targeted resume tailoring runs,
 // retrieve resume versions, and execute anti-hallucination validation checks.
 //
 // Transports:

@@ -21,7 +21,7 @@ const userIDContextKey contextKey = "mcp_user_id"
 // ServerConfig encapsulates all dependencies, repositories, services, timeouts, and authorization
 // parameters required by the MCP server subsystem across both stdio and SSE HTTP transports.
 type ServerConfig struct {
-	// ProfileService provides master career profile snapshot retrieval and mutation operations.
+	// ProfileService provides main career profile snapshot retrieval and mutation operations.
 	ProfileService profile.Service
 	// BranchService coordinates targeted resume branch lifecycles, version generation, and gap analysis.
 	BranchService branch.Service

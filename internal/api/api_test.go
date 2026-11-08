@@ -161,14 +161,14 @@ func TestFullUserJourney(t *testing.T) {
 	client := env.server.Client()
 	baseURL := env.server.URL
 
-	// 1. GET /api/v1/profile -> Verify default seeded user initialized with master_revision: 1
+	// 1. GET /api/v1/profile -> Verify default seeded user initialized with main_revision: 1
 	resp, body := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile", nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /profile failed: %d, body: %s", resp.StatusCode, string(body))
 	}
 	prof := decodeJSON[domain.Profile](t, body)
-	if prof.MasterRevision != 1 {
-		t.Fatalf("expected initial master_revision: 1, got: %d", prof.MasterRevision)
+	if prof.MainRevision != 1 {
+		t.Fatalf("expected initial main_revision: 1, got: %d", prof.MainRevision)
 	}
 
 	// 2. POST /api/v1/skills -> Create Go skill
@@ -382,12 +382,12 @@ func TestFullUserJourney(t *testing.T) {
 		t.Fatalf("PUT /certifications/{id} failed: %d", resp.StatusCode)
 	}
 
-	// 20. GET /api/v1/profile/full -> Verify master profile snapshot contains career graph
+	// 20. GET /api/v1/profile/full -> Verify main profile snapshot contains career graph
 	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/full", nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /profile/full failed: %d", resp.StatusCode)
 	}
-	snapshot := decodeJSON[domain.MasterProfileSnapshot](t, body)
+	snapshot := decodeJSON[domain.MainProfileSnapshot](t, body)
 	if len(snapshot.Skills) < 1 || len(snapshot.Experiences) < 1 || len(snapshot.Facts) < 1 {
 		t.Fatalf("snapshot missing entities: %+v", snapshot)
 	}
@@ -608,10 +608,10 @@ func TestFullUserJourney(t *testing.T) {
 		t.Fatalf("expected Content-Type application/json, got: %s", ct)
 	}
 
-	// 33. GET /api/v1/profile/jsonresume/export (Master Profile export)
+	// 33. GET /api/v1/profile/jsonresume/export (Main Profile export)
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/jsonresume/export", nil, nil)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("export master jsonresume failed: %d", resp.StatusCode)
+		t.Fatalf("export main jsonresume failed: %d", resp.StatusCode)
 	}
 
 	// 34. GET /api/v1/profile/jsonresume/export?version_id=...
@@ -638,7 +638,7 @@ func TestFullUserJourney(t *testing.T) {
 
 	// Re-fetch snapshot to get new IDs after import
 	_, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/full", nil, nil)
-	freshSnap := decodeJSON[domain.MasterProfileSnapshot](t, body)
+	freshSnap := decodeJSON[domain.MainProfileSnapshot](t, body)
 
 	// 36. POST /api/v1/branches/{id}/versions/1/edit -> Manual edit creating v2 with 201 Created
 	var validSkillID, validExpID, validFactID string
@@ -833,7 +833,7 @@ func TestErrorEnvelopes(t *testing.T) {
 			ID:                 "ver-prov-test",
 			BranchID:           branch.ID,
 			Status:             domain.VersionStatusCompleted,
-			MasterRevisionUsed: 1,
+			MainRevisionUsed:   1,
 			TemplateSetIDUsed:  renderer.TemplateStandardCleanID,
 			SourceType:         domain.SourceTypeLLMGeneration,
 		}
@@ -1738,7 +1738,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		}
 	})
 
-	t.Run("Omitting provider and model resolves from user master profile", func(t *testing.T) {
+	t.Run("Omitting provider and model resolves from user main profile", func(t *testing.T) {
 		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 		var capturedProvider, capturedModel string
 
@@ -2087,7 +2087,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var snap domain.MasterProfileSnapshot
+		var snap domain.MainProfileSnapshot
 		if err := json.Unmarshal(body, &snap); err != nil {
 			t.Fatalf("failed to decode snapshot: %v", err)
 		}
@@ -2095,8 +2095,8 @@ func TestProfilePDF_Commit(t *testing.T) {
 		if snap.Profile.FullName != "Morgan BrandNew" {
 			t.Errorf("expected FullName 'Morgan BrandNew', got: %q", snap.Profile.FullName)
 		}
-		if snap.MasterRevision < 2 {
-			t.Errorf("expected MasterRevision >= 2, got: %d", snap.MasterRevision)
+		if snap.MainRevision < 2 {
+			t.Errorf("expected MainRevision >= 2, got: %d", snap.MainRevision)
 		}
 		if len(snap.Skills) != 2 {
 			t.Errorf("expected 2 skills, got: %d", len(snap.Skills))
@@ -2106,7 +2106,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 		}
 	})
 
-	t.Run("Valid commit for NEW user who has never filled anything initializes master resume", func(t *testing.T) {
+	t.Run("Valid commit for NEW user who has never filled anything initializes main resume", func(t *testing.T) {
 		newUserID := "new-user-fresh-9999"
 		headers := map[string]string{
 			"X-User-ID": newUserID,
@@ -2118,7 +2118,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 			t.Fatalf("expected status 200 for new user commit, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var snap domain.MasterProfileSnapshot
+		var snap domain.MainProfileSnapshot
 		if err := json.Unmarshal(body, &snap); err != nil {
 			t.Fatalf("failed to decode snapshot: %v", err)
 		}
@@ -2129,8 +2129,8 @@ func TestProfilePDF_Commit(t *testing.T) {
 		if snap.Profile.Email != "morgan@brandnew.dev" {
 			t.Errorf("expected Email 'morgan@brandnew.dev', got: %q", snap.Profile.Email)
 		}
-		if snap.MasterRevision != 1 {
-			t.Errorf("expected MasterRevision 1 for fresh user, got: %d", snap.MasterRevision)
+		if snap.MainRevision != 1 {
+			t.Errorf("expected MainRevision 1 for fresh user, got: %d", snap.MainRevision)
 		}
 		if len(snap.Skills) != 2 {
 			t.Errorf("expected 2 skills, got: %d", len(snap.Skills))
@@ -2145,7 +2145,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 			t.Errorf("expected 1 project, got: %d", len(snap.Projects))
 		}
 
-		// 2. Query GET /api/v1/profile for this new user to ensure master profile is fully persisted
+		// 2. Query GET /api/v1/profile for this new user to ensure main profile is fully persisted
 		getResp, getBody := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile", nil, headers)
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK for GET /profile on new user, got %d (body: %s)", getResp.StatusCode, string(getBody))
@@ -2157,8 +2157,8 @@ func TestProfilePDF_Commit(t *testing.T) {
 		if prof.FullName != "Morgan BrandNew" {
 			t.Errorf("expected FullName 'Morgan BrandNew', got: %q", prof.FullName)
 		}
-		if prof.MasterRevision != 1 {
-			t.Errorf("expected MasterRevision 1, got: %d", prof.MasterRevision)
+		if prof.MainRevision != 1 {
+			t.Errorf("expected MainRevision 1, got: %d", prof.MainRevision)
 		}
 	})
 }
@@ -2600,7 +2600,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to get full profile: %d: %s", resp.StatusCode, string(body))
 	}
-	var snapshot domain.MasterProfileSnapshot
+	var snapshot domain.MainProfileSnapshot
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatalf("failed to unmarshal profile snapshot: %v", err)
 	}

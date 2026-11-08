@@ -171,7 +171,7 @@ func TestServer_Registration(t *testing.T) {
 
 	// Verify all 8 tools are registered
 	expectedTools := []string{
-		"get_master_profile",
+		"get_main_profile",
 		"list_branches",
 		"render_resume",
 		"add_experience",
@@ -201,13 +201,13 @@ func TestServer_Registration(t *testing.T) {
 	}
 }
 
-func TestTool_GetMasterProfile(t *testing.T) {
+func TestTool_GetMainProfile(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
-	tool := env.mcpServer.GetTool("get_master_profile")
+	tool := env.mcpServer.GetTool("get_main_profile")
 	if tool == nil {
-		t.Fatal("tool get_master_profile not found")
+		t.Fatal("tool get_main_profile not found")
 	}
 
 	result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{})
@@ -222,7 +222,7 @@ func TestTool_GetMasterProfile(t *testing.T) {
 	}
 
 	text := result.Content[0].(mcpSDK.TextContent).Text
-	var snapshot domain.MasterProfileSnapshot
+	var snapshot domain.MainProfileSnapshot
 	if err := json.Unmarshal([]byte(text), &snapshot); err != nil {
 		t.Fatalf("failed to unmarshal snapshot JSON: %v, raw: %s", err, text)
 	}
@@ -669,7 +669,7 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 		BranchID:           b.ID,
 		VersionNumber:      1,
 		Status:             domain.VersionStatusCompleted,
-		MasterRevisionUsed: 1,
+		MainRevisionUsed:   1,
 		TemplateSetIDUsed:  "builtin-standard-clean",
 		HTMLOutput:         rawHTMLWithScript,
 		MarkdownOutput:     "# John Doe\nEngineer",
@@ -990,7 +990,7 @@ func TestPrompts_PrepareJobApplication(t *testing.T) {
 
 		if !strings.Contains(textContent.Text, "Senior Backend Go Engineer at Stripe") ||
 			!strings.Contains(textContent.Text, `Branch Name: "Stripe Staff"`) ||
-			!strings.Contains(textContent.Text, "get_master_profile") ||
+			!strings.Contains(textContent.Text, "get_main_profile") ||
 			!strings.Contains(textContent.Text, "STAR method") {
 			t.Errorf("expected embedded template instructions mentioning job description, branch name, and tools, got: %s", textContent.Text)
 		}
@@ -1082,19 +1082,19 @@ func TestPrompts_MockInterviewPrep(t *testing.T) {
 	})
 }
 
-func TestResources_MasterProfile(t *testing.T) {
+func TestResources_MainProfile(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
 	resources := env.mcpServer.ListResources()
-	res, ok := resources["resumeee://profile/master"]
+	res, ok := resources["resumeee://profile/main"]
 	if !ok {
-		t.Fatal("resource resumeee://profile/master not registered")
+		t.Fatal("resource resumeee://profile/main not registered")
 	}
 
 	contents, err := res.Handler(ctx, mcpSDK.ReadResourceRequest{
 		Params: mcpSDK.ReadResourceParams{
-			URI: "resumeee://profile/master",
+			URI: "resumeee://profile/main",
 		},
 	})
 	if err != nil {
@@ -1109,7 +1109,7 @@ func TestResources_MasterProfile(t *testing.T) {
 		t.Fatal("expected TextResourceContents")
 	}
 	if !strings.Contains(textRes.Text, "Default User") {
-		t.Errorf("expected master profile snapshot text, got: %s", textRes.Text)
+		t.Errorf("expected main profile snapshot text, got: %s", textRes.Text)
 	}
 }
 

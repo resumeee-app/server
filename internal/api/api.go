@@ -4,7 +4,7 @@
 // It provides HTTP routers, middleware (CORS, content type negotiation, structured
 // logging, panic recovery, and timeout handling), and request/response handlers for:
 //   - Profile management and career graph querying (/api/v1/profile)
-//   - Master profile snapshot imports and exports (/api/v1/profile/jsonresume/*)
+//   - Main profile snapshot imports and exports (/api/v1/profile/jsonresume/*)
 //   - Asynchronous PDF resume parsing jobs (/api/v1/profile/pdf/*)
 //   - Resume branch creation, updates, and synchronization (/api/v1/branches/*)
 //   - Resume version generation, iteration, and rendering (/api/v1/branches/{id}/versions/*)

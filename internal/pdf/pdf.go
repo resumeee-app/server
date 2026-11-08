@@ -3,5 +3,5 @@
 //
 // It extracts structured text streams and plaintext content from PDF files,
 // allowing upstream services and background workers to parse legacy resumes
-// into structured JSON Resume profiles and master profile career graphs.
+// into structured JSON Resume profiles and main profile career graphs.
 package pdf

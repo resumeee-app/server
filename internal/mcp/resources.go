@@ -40,13 +40,13 @@ func jsonResourceContents(uri string, v any) ([]mcpSDK.ResourceContents, error) 
 //   - s: Pointer to the MCPServer instance.
 //   - cfg: ServerConfig specifying dependencies and timeouts.
 func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
-	// 1. resumeee://profile/master
+	// 1. resumeee://profile/main
 	s.AddResource(
-		mcpSDK.NewResource("resumeee://profile/master", "Master Profile",
-			mcpSDK.WithResourceDescription("Verified canonical master career profile snapshot for the authenticated user"),
+		mcpSDK.NewResource("resumeee://profile/main", "Main Profile",
+			mcpSDK.WithResourceDescription("Verified canonical main career profile snapshot for the authenticated user"),
 			mcpSDK.WithMIMEType("application/json"),
 		),
-		handleResourceMasterProfile(cfg),
+		handleResourceMainProfile(cfg),
 	)
 
 	// 2. resumeee://languages
@@ -86,15 +86,15 @@ func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
 	)
 }
 
-// handleResourceMasterProfile constructs a ResourceHandlerFunc that retrieves the authenticated user's
-// canonical master career profile snapshot and returns it formatted as JSON.
+// handleResourceMainProfile constructs a ResourceHandlerFunc that retrieves the authenticated user's
+// canonical main career profile snapshot and returns it formatted as JSON.
 //
 // Parameters:
 //   - cfg: ServerConfig providing profile service and REST timeout bounds.
 //
 // Returns:
 //   - ResourceHandlerFunc compatible with the MCP SDK.
-func handleResourceMasterProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
+func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
 		defer cancel()
@@ -102,7 +102,7 @@ func handleResourceMasterProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *domain.MasterProfileSnapshot
+		var snapshot *domain.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
 			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
@@ -113,11 +113,11 @@ func handleResourceMasterProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc
 		}
 
 		if err != nil {
-			cfg.Logger.ErrorContext(ctx, "failed to read master profile resource", "user_id", userID, "err", err)
+			cfg.Logger.ErrorContext(ctx, "failed to read main profile resource", "user_id", userID, "err", err)
 			return nil, errors.New("failed to retrieve profile due to an internal repository error")
 		}
 
-		contents, err := jsonResourceContents("resumeee://profile/master", snapshot)
+		contents, err := jsonResourceContents("resumeee://profile/main", snapshot)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to serialize profile snapshot", "user_id", userID, "err", err)
 			return nil, errors.New("failed to serialize profile snapshot")

@@ -229,7 +229,7 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 const defaultSeededProfileName = "Default User"
 
 // hasCustomProfileData returns true if the profile contains non-empty custom user data rather than unconfigured defaults.
-func hasCustomProfileData(prof *domain.Profile, snap *domain.MasterProfileSnapshot) bool {
+func hasCustomProfileData(prof *domain.Profile, snap *domain.MainProfileSnapshot) bool {
 	if prof == nil {
 		return false
 	}

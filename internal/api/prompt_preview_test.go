@@ -74,7 +74,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if strings.Contains(preview.UserPrompt, "[John Doe]") {
 		t.Errorf("expected UserPrompt to NOT contain candidate placeholder '[John Doe]' since name is stripped")
 	}
-	for _, forbidden := range []string{`"user_id"`, `"created_at"`, `"updated_at"`, `"metadata"`, `"master_revision"`, `"exported_at"`} {
+	for _, forbidden := range []string{`"user_id"`, `"created_at"`, `"updated_at"`, `"metadata"`, `"main_revision"`, `"exported_at"`} {
 		if strings.Contains(preview.UserPrompt, forbidden) {
 			t.Errorf("expected UserPrompt to NOT leak internal field %s", forbidden)
 		}
@@ -134,20 +134,20 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if profResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK fetching profile, got %d", profResp.StatusCode)
 	}
-	var masterProf struct {
+	var mainProf struct {
 		Experiences []domain.WorkExperience `json:"experiences"`
 		Projects    []domain.Project        `json:"projects"`
 	}
-	if err := json.Unmarshal(profBody, &masterProf); err != nil {
+	if err := json.Unmarshal(profBody, &mainProf); err != nil {
 		t.Fatalf("failed to decode profile: %v", err)
 	}
 
 	var pinnedID, excludedID string
-	if len(masterProf.Experiences) > 0 {
-		pinnedID = masterProf.Experiences[0].ID
+	if len(mainProf.Experiences) > 0 {
+		pinnedID = mainProf.Experiences[0].ID
 	}
-	if len(masterProf.Projects) > 0 {
-		excludedID = masterProf.Projects[0].ID
+	if len(mainProf.Projects) > 0 {
+		excludedID = mainProf.Projects[0].ID
 	}
 
 	advancedOverrides := map[string]any{

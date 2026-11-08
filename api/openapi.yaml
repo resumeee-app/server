@@ -3,7 +3,7 @@ info:
   title: Resumeee REST API
   version: 0.1.0
   description: >-
-    Headless resume tailoring and career graph engine. Provides Master Profile
+    Headless resume tailoring and career graph engine. Provides Main Profile
     CRUD with transactional atomic revision tracking, reusable presets,
     multi-format Go templates (HTML, Markdown, Plain Text), dynamic resume
     branches, asynchronous LLM generation with provenance validation ("No
@@ -13,7 +13,7 @@ servers:
     description: Primary API v1 endpoint
 
 tags:
-  - name: Master Profile
+  - name: Main Profile
     description: Operations on root user profile, career snapshot, and JSON Resume import/export
   - name: Career Entities
     description: Granular career graph entities (skills, experiences, projects, education, certs, facts)
@@ -87,12 +87,12 @@ paths:
   /profile:
     get:
       tags:
-        - Master Profile
-      summary: Get user master profile
+        - Main Profile
+      summary: Get user main profile
       operationId: getProfile
       responses:
         '200':
-          description: Master profile retrieved successfully
+          description: Main profile retrieved successfully
           content:
             application/json:
               schema:
@@ -103,9 +103,9 @@ paths:
           $ref: '#/components/responses/InternalError'
     put:
       tags:
-        - Master Profile
-      summary: Update master profile
-      description: Updates basic profile details, contact info, default LLM provider/model, or Tier-1 global rules. Atomically increments master_revision.
+        - Main Profile
+      summary: Update main profile
+      description: Updates basic profile details, contact info, default LLM provider/model, or Tier-1 global rules. Atomically increments main_revision.
       operationId: updateProfile
       requestBody:
         required: true
@@ -128,8 +128,8 @@ paths:
   /profile/full:
     get:
       tags:
-        - Master Profile
-      summary: Get full master profile career graph
+        - Main Profile
+      summary: Get full main profile career graph
       description: Returns the complete career graph snapshot including profile, all skills, experiences, projects, education, certifications, and polymorphic facts.
       operationId: getFullProfile
       responses:
@@ -138,7 +138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MasterProfileSnapshot'
+                $ref: '#/components/schemas/MainProfileSnapshot'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -147,9 +147,9 @@ paths:
   /profile/jsonresume/import:
     post:
       tags:
-        - Master Profile
+        - Main Profile
       summary: Import standard JSON Resume payload
-      description: Ingests an external JSON Resume schema payload into the Master Profile, replacing or merging career records and incrementing master_revision.
+      description: Ingests an external JSON Resume schema payload into the Main Profile, replacing or merging career records and incrementing main_revision.
       operationId: importJSONResume
       requestBody:
         required: true
@@ -164,7 +164,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MasterProfileSnapshot'
+                $ref: '#/components/schemas/MainProfileSnapshot'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -173,15 +173,15 @@ paths:
   /profile/jsonresume/export:
     get:
       tags:
-        - Master Profile
+        - Main Profile
       summary: Export career data in standard JSON Resume format
-      description: Exports either the Master Profile or a specific tailored branch version formatted according to the standard JSON Resume schema.
+      description: Exports either the Main Profile or a specific tailored branch version formatted according to the standard JSON Resume schema.
       operationId: exportJSONResume
       parameters:
         - name: version_id
           in: query
           required: false
-          description: Optional branch version UUID. If omitted, exports current Master Profile.
+          description: Optional branch version UUID. If omitted, exports current Main Profile.
           schema:
             type: string
       responses:
@@ -199,7 +199,7 @@ paths:
   /profile/pdf/parse:
     post:
       tags:
-        - Master Profile
+        - Main Profile
       summary: Parse PDF resume using LLM
       description: Extracts raw text from an uploaded PDF resume (max 10MB) and invokes structured LLM extraction into candidate JSON Resume format for interactive staging and review.
       operationId: parsePDFResume
@@ -244,7 +244,7 @@ paths:
   /profile/pdf/jobs/{id}:
     get:
       tags:
-        - Master Profile
+        - Main Profile
       summary: Get asynchronous PDF parse job status and candidate result
       description: Returns the lifecycle state and candidate JSON Resume result of an asynchronous PDF parsing job.
       operationId: getPDFParseJob
@@ -272,9 +272,9 @@ paths:
   /profile/pdf/commit:
     post:
       tags:
-        - Master Profile
-      summary: Commit reviewed PDF resume into Master Profile
-      description: Ingests verified/edited JSON Resume draft, updates the Master Profile career graph, initializes profile for new users if not previously present, and increments master_revision.
+        - Main Profile
+      summary: Commit reviewed PDF resume into Main Profile
+      description: Ingests verified/edited JSON Resume draft, updates the Main Profile career graph, initializes profile for new users if not previously present, and increments main_revision.
       operationId: commitPDFResume
       requestBody:
         required: true
@@ -285,11 +285,11 @@ paths:
               description: Standard JSON Resume compliant object
       responses:
         '200':
-          description: Successfully committed resume into Master Profile
+          description: Successfully committed resume into Main Profile
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MasterProfileSnapshot'
+                $ref: '#/components/schemas/MainProfileSnapshot'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -315,7 +315,7 @@ paths:
             default: all
       responses:
         '200':
-          description: List of master skills
+          description: List of main skills
           content:
             application/json:
               schema:
@@ -330,7 +330,7 @@ paths:
       tags:
         - Career Entities
       summary: Create a new skill
-      description: Adds a skill and atomically increments master_revision.
+      description: Adds a skill and atomically increments main_revision.
       operationId: createSkill
       requestBody:
         required: true
@@ -373,7 +373,7 @@ paths:
       tags:
         - Career Entities
       summary: Update skill
-      description: Updates a skill and atomically increments master_revision.
+      description: Updates a skill and atomically increments main_revision.
       operationId: updateSkill
       requestBody:
         required: true
@@ -398,7 +398,7 @@ paths:
       tags:
         - Career Entities
       summary: Delete skill
-      description: Deletes a skill and atomically increments master_revision.
+      description: Deletes a skill and atomically increments main_revision.
       operationId: deleteSkill
       responses:
         '204':
@@ -429,7 +429,7 @@ paths:
       tags:
         - Career Entities
       summary: Create work experience
-      description: Adds a work experience entry and atomically increments master_revision.
+      description: Adds a work experience entry and atomically increments main_revision.
       operationId: createExperience
       requestBody:
         required: true
@@ -472,7 +472,7 @@ paths:
       tags:
         - Career Entities
       summary: Update work experience
-      description: Updates work experience and atomically increments master_revision.
+      description: Updates work experience and atomically increments main_revision.
       operationId: updateExperience
       requestBody:
         required: true
@@ -497,7 +497,7 @@ paths:
       tags:
         - Career Entities
       summary: Delete work experience
-      description: Deletes work experience, associated polymorphic facts, and increments master_revision.
+      description: Deletes work experience, associated polymorphic facts, and increments main_revision.
       operationId: deleteExperience
       responses:
         '204':
@@ -832,7 +832,7 @@ paths:
       tags:
         - Career Entities
       summary: Create granular fact
-      description: Creates an atomic achievement or responsibility bullet and attaches relational skill IDs. Increments master_revision.
+      description: Creates an atomic achievement or responsibility bullet and attaches relational skill IDs. Increments main_revision.
       operationId: createFact
       requestBody:
         required: true
@@ -875,7 +875,7 @@ paths:
       tags:
         - Career Entities
       summary: Update fact
-      description: Updates statement, impact metric, or skill associations, incrementing master_revision.
+      description: Updates statement, impact metric, or skill associations, incrementing main_revision.
       operationId: updateFact
       requestBody:
         required: true
@@ -900,7 +900,7 @@ paths:
       tags:
         - Career Entities
       summary: Delete fact
-      description: Deletes fact and increments master_revision.
+      description: Deletes fact and increments main_revision.
       operationId: deleteFact
       responses:
         '204':
@@ -1297,7 +1297,7 @@ paths:
       tags:
         - Branches & Versions
       summary: List resume branches
-      description: Lists all tailored resume lines. Includes dynamically computed is_stale boolean indicating whether Profile.MasterRevision has advanced past last_synced_master_revision.
+      description: Lists all tailored resume lines. Includes dynamically computed is_stale boolean indicating whether Profile.MainRevision has advanced past last_synced_main_revision.
       operationId: listBranches
       parameters:
         - name: stale
@@ -1456,7 +1456,7 @@ paths:
       summary: Preview prompt draft for a branch
       description: >-
         Renders the assembled system and user prompt templates against the candidate's
-        current master profile and branch target requirements without calling the LLM.
+        current main profile and branch target requirements without calling the LLM.
       operationId: getPromptPreview
       responses:
         '200':
@@ -1872,7 +1872,7 @@ components:
           example:
             error:
               code: PROVENANCE_ERROR
-              message: Source entity or fact UUID does not exist in user Master Profile
+              message: Source entity or fact UUID does not exist in user Main Profile
               details: "invalid source_fact_id: fact-999"
 
     QueueFull:
@@ -2094,7 +2094,7 @@ components:
         - id
         - user_id
         - full_name
-        - master_revision
+        - main_revision
       properties:
         id:
           type: string
@@ -2124,7 +2124,7 @@ components:
         default_model:
           type: string
           default: gemini-3.8-flash
-        master_revision:
+        main_revision:
           type: integer
           format: int64
         metadata:
@@ -3061,12 +3061,12 @@ components:
           nullable: true
         gap_report:
           $ref: '#/components/schemas/GapReport'
-        last_synced_master_revision:
+        last_synced_main_revision:
           type: integer
           format: int64
         is_stale:
           type: boolean
-          description: Computed flag indicating whether master profile has advanced past last_synced_master_revision
+          description: Computed flag indicating whether main profile has advanced past last_synced_main_revision
         created_at:
           type: string
           format: date-time
@@ -3455,7 +3455,7 @@ components:
           type: integer
         status:
           $ref: '#/components/schemas/VersionStatus'
-        master_revision_used:
+        main_revision_used:
           type: integer
           format: int64
         template_set_id_used:
@@ -3607,16 +3607,16 @@ components:
         tailored_content:
           $ref: '#/components/schemas/TailoredContent'
 
-    MasterProfileSnapshot:
+    MainProfileSnapshot:
       type: object
       required:
         - profile
-        - master_revision
+        - main_revision
         - exported_at
       properties:
         profile:
           $ref: '#/components/schemas/Profile'
-        master_revision:
+        main_revision:
           type: integer
           format: int64
         skills:

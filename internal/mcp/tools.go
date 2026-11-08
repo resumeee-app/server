@@ -53,7 +53,7 @@ func SanitizeXMLFence(content, tagName string) string {
 
 // sanitizeXMLFence applies regex matching against tag variations, whitespace, attributes, and parent enclosure tags.
 func sanitizeXMLFence(content, tagName string) string {
-	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|master_career_profile|target_job_description|custom_instructions)\b[^>]*>`, regexp.QuoteMeta(tagName)))
+	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions)\b[^>]*>`, regexp.QuoteMeta(tagName)))
 	safe := tagRegex.ReplaceAllStringFunc(content, func(m string) string {
 		escaped := strings.ReplaceAll(m, "<", "&lt;")
 		return strings.ReplaceAll(escaped, ">", "&gt;")
@@ -98,10 +98,10 @@ func extractFormatOutput(format domain.OutputFormat, html, md, text string) stri
 //   - s: Pointer to the MCPServer instance.
 //   - cfg: ServerConfig providing dependencies, repositories, and timeouts.
 func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
-	// 1. get_master_profile
-	s.AddTool(mcpSDK.NewTool("get_master_profile",
-		mcpSDK.WithDescription("Retrieves the canonical master career profile snapshot (experiences, bullet facts, skills, education, certifications) for the authenticated user."),
-	), handleGetMasterProfile(cfg))
+	// 1. get_main_profile
+	s.AddTool(mcpSDK.NewTool("get_main_profile",
+		mcpSDK.WithDescription("Retrieves the canonical main career profile snapshot (experiences, bullet facts, skills, education, certifications) for the authenticated user."),
+	), handleGetMainProfile(cfg))
 
 	// 2. list_branches
 	s.AddTool(mcpSDK.NewTool("list_branches",
@@ -120,7 +120,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 
 	// 4. add_experience
 	s.AddTool(mcpSDK.NewTool("add_experience",
-		mcpSDK.WithDescription("Adds a new employment work experience to the authenticated user's master career profile."),
+		mcpSDK.WithDescription("Adds a new employment work experience to the authenticated user's main career profile."),
 		mcpSDK.WithString("company", mcpSDK.Required(), mcpSDK.Description("Name of employing organization")),
 		mcpSDK.WithString("role_title", mcpSDK.Required(), mcpSDK.Description("Job title / role held")),
 		mcpSDK.WithString("start_date", mcpSDK.Required(), mcpSDK.Description("Start date in ISO-8601 YYYY-MM-DD or YYYY-MM format")),
@@ -240,8 +240,8 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	), handleUpdateSkill(cfg))
 }
 
-// handleGetMasterProfile handles tool 'get_master_profile', returning the authenticated user's profile snapshot.
-func handleGetMasterProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+// handleGetMainProfile handles tool 'get_main_profile', returning the authenticated user's profile snapshot.
+func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
 		defer cancel()
@@ -249,7 +249,7 @@ func handleGetMasterProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *domain.MasterProfileSnapshot
+		var snapshot *domain.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
 			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
@@ -261,13 +261,13 @@ func handleGetMasterProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to get profile snapshot", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to retrieve master profile due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to retrieve main profile due to an internal repository error"), nil
 		}
 
 		res, err := jsonToolResult(snapshot)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to marshal profile snapshot", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to serialize master profile snapshot"), nil
+			return mcpSDK.NewToolResultError("failed to serialize main profile snapshot"), nil
 		}
 		return res, nil
 	}
@@ -401,7 +401,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	}
 }
 
-// handleAddExperience handles tool 'add_experience', appending employment history to the master profile.
+// handleAddExperience handles tool 'add_experience', appending employment history to the main profile.
 func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
