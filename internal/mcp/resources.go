@@ -8,6 +8,8 @@ import (
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
+
+	"resumeee/internal/domain"
 )
 
 // jsonResourceContents serializes any data structure into indented JSON text resource contents.
@@ -47,7 +49,16 @@ func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
 		handleResourceMasterProfile(cfg),
 	)
 
-	// 2. resumeee://branches/{id}
+	// 2. resumeee://languages
+	s.AddResource(
+		mcpSDK.NewResource("resumeee://languages", "Supported Languages",
+			mcpSDK.WithResourceDescription("Supported Left-to-Right languages and canonical default language for resume tailoring"),
+			mcpSDK.WithMIMEType("application/json"),
+		),
+		handleResourceSupportedLanguages(cfg),
+	)
+
+	// 3. resumeee://branches/{id}
 	s.AddResourceTemplate(
 		mcpSDK.NewResourceTemplate("resumeee://branches/{id}", "Branch Details",
 			mcpSDK.WithTemplateDescription("Resume branch metadata, target requirements, and active tailored version content"),
@@ -56,13 +67,22 @@ func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
 		handleResourceBranchDetails(cfg),
 	)
 
-	// 3. resumeee://templates/{id}
+	// 4. resumeee://templates/{id}
 	s.AddResourceTemplate(
 		mcpSDK.NewResourceTemplate("resumeee://templates/{id}", "Template Set",
 			mcpSDK.WithTemplateDescription("Multi-format HTML, Markdown, and text resume template definition"),
 			mcpSDK.WithTemplateMIMEType("application/json"),
 		),
 		handleResourceTemplateSet(cfg),
+	)
+
+	// 5. resumeee://presets/{id}
+	s.AddResourceTemplate(
+		mcpSDK.NewResourceTemplate("resumeee://presets/{id}", "Tailoring Preset",
+			mcpSDK.WithTemplateDescription("Tailoring strategy preset details, instructions, language, and model configuration"),
+			mcpSDK.WithTemplateMIMEType("application/json"),
+		),
+		handleResourcePresetDetails(cfg),
 	)
 }
 
@@ -80,8 +100,18 @@ func handleResourceMasterProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 
-		snapshot, err := cfg.ProfileService.GetSnapshot(ctx, userID)
+		var snapshot *domain.MasterProfileSnapshot
+		var err error
+		if cfg.ProfileService != nil {
+			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
+		} else if cfg.ProfileRepo != nil {
+			snapshot, err = cfg.ProfileRepo.GetSnapshot(ctx, userID)
+		} else {
+			return nil, errors.New("profile service and repository unavailable")
+		}
+
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to read master profile resource", "user_id", userID, "err", err)
 			return nil, errors.New("failed to retrieve profile due to an internal repository error")
@@ -94,6 +124,17 @@ func handleResourceMasterProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc
 		}
 
 		return contents, nil
+	}
+}
+
+// handleResourceSupportedLanguages returns the supported and default languages for resume tailoring.
+func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+		payload := map[string]any{
+			"default_language":    domain.DefaultLanguage,
+			"supported_languages": domain.SupportedLanguages,
+		}
+		return jsonResourceContents("resumeee://languages", payload)
 	}
 }
 
@@ -111,6 +152,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 
 		branchID := strings.TrimPrefix(req.Params.URI, "resumeee://branches/")
 		branchID = strings.TrimSpace(branchID)
@@ -160,6 +202,7 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 
 		templateID := strings.TrimPrefix(req.Params.URI, "resumeee://templates/")
 		templateID = strings.TrimSpace(templateID)
@@ -168,7 +211,7 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 		}
 
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
 			return nil, errors.New("template not found or access denied")
 		}
@@ -177,6 +220,41 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to serialize template resource", "template_id", templateID, "err", err)
 			return nil, errors.New("failed to serialize template resource")
+		}
+
+		return contents, nil
+	}
+}
+
+// handleResourcePresetDetails retrieves a tailoring strategy preset by identifier.
+func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		presetID := strings.TrimPrefix(req.Params.URI, "resumeee://presets/")
+		presetID = strings.TrimSpace(presetID)
+		if presetID == "" {
+			return nil, errors.New("invalid preset URI: missing preset ID")
+		}
+
+		if cfg.PresetRepo == nil {
+			return nil, errors.New("preset repository unavailable")
+		}
+
+		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)
+			return nil, errors.New("preset not found or access denied")
+		}
+
+		contents, err := jsonResourceContents(req.Params.URI, preset)
+		if err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to serialize preset resource", "preset_id", presetID, "err", err)
+			return nil, errors.New("failed to serialize preset resource")
 		}
 
 		return contents, nil

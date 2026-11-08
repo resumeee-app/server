@@ -242,6 +242,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		BranchRepo:            branchRepo,
 		TemplateRepo:          templateRepo,
 		PresetRepo:            presetRepo,
+		UserRepo:              store.User(),
 		ResumeExtractor:       resumeExtractor,
 		JobEnqueuer:           workerPool,
 		DefaultUserID:         cfg.DefaultUserID,

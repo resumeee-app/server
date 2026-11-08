@@ -176,6 +176,9 @@ func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handl
 			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
+		if pErr := cfg.EnsureTenant(r.Context(), userID); pErr != nil {
+			cfg.Logger.ErrorContext(r.Context(), "failed to lazily provision tenant", "user_id", userID, "err", pErr)
+		}
 		ctx := WithUserID(r.Context(), userID)
 		r = r.WithContext(ctx)
 

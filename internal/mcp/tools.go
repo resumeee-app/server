@@ -140,7 +140,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 
 	// 6. create_branch
 	s.AddTool(mcpSDK.NewTool("create_branch",
-		mcpSDK.WithDescription("Creates a new targeted resume branch tailored for a specific company, role, tailoring strategy, and template."),
+		mcpSDK.WithDescription("Creates a new targeted resume branch tailored for a specific company, role, tailoring strategy, and template. Presets govern target language (EffectiveLanguage) and prompt instructions."),
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the resume branch")),
 		mcpSDK.WithString("target_company", mcpSDK.Required(), mcpSDK.Description("Name of the prospective employer")),
 		mcpSDK.WithString("target_role", mcpSDK.Required(), mcpSDK.Description("Target job title")),
@@ -163,6 +163,81 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("job_description", mcpSDK.Required(), mcpSDK.Description("Target job description or requirements text")),
 		mcpSDK.WithString("branch_id", mcpSDK.Description("Optional branch ID to contextually align analysis against")),
 	), handleRunGapAnalysis(cfg))
+
+	// 9. list_presets
+	s.AddTool(mcpSDK.NewTool("list_presets",
+		mcpSDK.WithDescription("Lists all tailoring strategy presets accessible to the authenticated user, including system built-in presets and custom tenant presets."),
+		mcpSDK.WithString("language", mcpSDK.Description("Optional filter by target language (e.g., 'English', 'Spanish')")),
+	), handleListPresets(cfg))
+
+	// 10. get_preset
+	s.AddTool(mcpSDK.NewTool("get_preset",
+		mcpSDK.WithDescription("Retrieves the full configuration and system instructions for a specific tailoring strategy preset."),
+		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target tailoring preset")),
+	), handleGetPreset(cfg))
+
+	// 11. create_preset
+	s.AddTool(mcpSDK.NewTool("create_preset",
+		mcpSDK.WithDescription("Creates a new custom tailoring strategy preset for the authenticated user with customizable prompt instructions, language, and reasoning constraints."),
+		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the preset")),
+		mcpSDK.WithString("system_instructions", mcpSDK.Required(), mcpSDK.Description("Core system instructions and tailoring prompt strategy guidelines")),
+		mcpSDK.WithString("description", mcpSDK.Description("Optional human-readable description of the preset purpose")),
+		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional default template set ID to suggest with this preset")),
+		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
+		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional LLM provider override (e.g., 'gemini', 'anthropic', 'openai')")),
+		mcpSDK.WithString("model_override", mcpSDK.Description("Optional model identifier override")),
+		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
+		mcpSDK.WithString("language", mcpSDK.Description("Target output language for contextual translation (e.g. 'English', 'Spanish', 'French'). Defaults to 'English'. RTL languages are rejected.")),
+		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
+	), handleCreatePreset(cfg))
+
+	// 12. update_preset
+	s.AddTool(mcpSDK.NewTool("update_preset",
+		mcpSDK.WithDescription("Updates mutable fields on an existing custom tailoring strategy preset. Built-in presets are immutable and cannot be updated."),
+		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target preset to update")),
+		mcpSDK.WithString("name", mcpSDK.Description("Updated descriptive name")),
+		mcpSDK.WithString("description", mcpSDK.Description("Updated description")),
+		mcpSDK.WithString("system_instructions", mcpSDK.Description("Updated system instructions")),
+		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated default template set ID")),
+		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
+		mcpSDK.WithString("provider_override", mcpSDK.Description("Updated LLM provider override")),
+		mcpSDK.WithString("model_override", mcpSDK.Description("Updated model identifier override")),
+		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Updated reasoning effort constraint: 'none', 'low', 'medium', 'high'")),
+		mcpSDK.WithString("language", mcpSDK.Description("Updated target output language (validated, RTL languages rejected)")),
+		mcpSDK.WithBoolean("include_admin_fields", mcpSDK.Description("Whether to include administrative government/visa CV fields")),
+	), handleUpdatePreset(cfg))
+
+	// 13. list_supported_languages
+	s.AddTool(mcpSDK.NewTool("list_supported_languages",
+		mcpSDK.WithDescription("Lists all supported left-to-right output languages and the default language ('English') for resume tailoring and presets."),
+	), handleListSupportedLanguages(cfg))
+
+	// 14. list_skills
+	s.AddTool(mcpSDK.NewTool("list_skills",
+		mcpSDK.WithDescription("Lists skills registered in the candidate career profile and global system catalog, with optional type filtering ('all', 'global', 'custom')."),
+		mcpSDK.WithString("type", mcpSDK.Description("Filter by skill origin: 'all', 'global', or 'custom'")),
+	), handleListSkills(cfg))
+
+	// 15. add_skill
+	s.AddTool(mcpSDK.NewTool("add_skill",
+		mcpSDK.WithDescription("Adds a custom skill to the authenticated candidate's career profile."),
+		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Name of the skill")),
+		mcpSDK.WithString("category", mcpSDK.Description("Category classification (e.g. 'Languages', 'Cloud', 'Frameworks')")),
+		mcpSDK.WithString("proficiency", mcpSDK.Description("Skill proficiency level (e.g. 'Familiar', 'Proficient', 'Expert')")),
+		mcpSDK.WithNumber("years_experience", mcpSDK.Description("Number of years experience with this skill")),
+		mcpSDK.WithString("keywords", mcpSDK.Description("Comma-separated list of searchable skill keywords")),
+	), handleAddSkill(cfg))
+
+	// 16. update_skill
+	s.AddTool(mcpSDK.NewTool("update_skill",
+		mcpSDK.WithDescription("Updates properties of an existing custom skill in the authenticated candidate's profile."),
+		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target skill to update")),
+		mcpSDK.WithString("name", mcpSDK.Description("Updated name of the skill")),
+		mcpSDK.WithString("category", mcpSDK.Description("Updated category classification")),
+		mcpSDK.WithString("proficiency", mcpSDK.Description("Updated skill proficiency level")),
+		mcpSDK.WithNumber("years_experience", mcpSDK.Description("Updated number of years experience")),
+		mcpSDK.WithString("keywords", mcpSDK.Description("Updated comma-separated list of searchable skill keywords")),
+	), handleUpdateSkill(cfg))
 }
 
 // handleGetMasterProfile handles tool 'get_master_profile', returning the authenticated user's profile snapshot.
@@ -172,8 +247,18 @@ func handleGetMasterProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 
-		snapshot, err := cfg.ProfileService.GetSnapshot(ctx, userID)
+		var snapshot *domain.MasterProfileSnapshot
+		var err error
+		if cfg.ProfileService != nil {
+			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
+		} else if cfg.ProfileRepo != nil {
+			snapshot, err = cfg.ProfileRepo.GetSnapshot(ctx, userID)
+		} else {
+			return mcpSDK.NewToolResultError("profile service and repository unavailable"), nil
+		}
+
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to get profile snapshot", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to retrieve master profile due to an internal repository error"), nil
@@ -195,6 +280,7 @@ func handleListBranches(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 
 		branches, err := cfg.BranchRepo.ListBranches(ctx, userID)
 		if err != nil {
@@ -218,6 +304,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		branchID, _ := args["branch_id"].(string)
@@ -289,7 +376,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -321,6 +408,7 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		company, _ := args["company"].(string)
@@ -390,6 +478,7 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		ownerID, _ := args["owner_id"].(string)
@@ -455,6 +544,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		name, _ := args["name"].(string)
@@ -484,7 +574,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 					err = nil
 				}
 			}
-			if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && !strings.HasPrefix(preset.ID, "builtin-")) {
+			if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strategyID)), nil
 			}
 			stratPtr = &strategyID
@@ -495,7 +585,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			templateSetID = "builtin-standard-clean"
 		}
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -535,6 +625,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		branchID, _ := args["branch_id"].(string)
@@ -595,6 +686,7 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
 		args := parseArguments(req)
 
 		jobDescription, _ := args["job_description"].(string)
@@ -647,5 +739,462 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("failed to serialize gap analysis report"), nil
 		}
 		return res, nil
+	}
+}
+
+// handleListPresets handles tool 'list_presets', enumerating all presets visible to the user.
+func handleListPresets(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.PresetRepo == nil {
+			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+		}
+
+		presets, err := cfg.PresetRepo.ListPresets(ctx, userID)
+		if err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to list presets", "user_id", userID, "err", err)
+			return mcpSDK.NewToolResultError("failed to list presets due to an internal repository error"), nil
+		}
+		if presets == nil {
+			presets = []domain.Preset{}
+		}
+
+		args := parseArguments(req)
+		if langRaw, ok := args["language"].(string); ok && strings.TrimSpace(langRaw) != "" {
+			targetLang := strings.TrimSpace(langRaw)
+			filtered := make([]domain.Preset, 0, len(presets))
+			for _, p := range presets {
+				if strings.EqualFold(p.EffectiveLanguage(), targetLang) {
+					filtered = append(filtered, p)
+				}
+			}
+			presets = filtered
+		}
+
+		return jsonToolResult(presets)
+	}
+}
+
+// handleGetPreset handles tool 'get_preset', retrieving a specific preset by ID.
+func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.PresetRepo == nil {
+			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		presetID, _ := args["id"].(string)
+		presetID = strings.TrimSpace(presetID)
+		if presetID == "" {
+			return mcpSDK.NewToolResultError("id is required"), nil
+		}
+
+		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
+		}
+
+		return jsonToolResult(preset)
+	}
+}
+
+// handleCreatePreset handles tool 'create_preset', validating and storing a new custom preset.
+func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.PresetRepo == nil {
+			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		name, _ := args["name"].(string)
+		name = strings.TrimSpace(name)
+		instructions, _ := args["system_instructions"].(string)
+		instructions = strings.TrimSpace(instructions)
+		if name == "" || instructions == "" {
+			return mcpSDK.NewToolResultError("name and system_instructions are required fields"), nil
+		}
+
+		desc, _ := args["description"].(string)
+		templateSetID, _ := args["template_set_id"].(string)
+		if templateSetID == "" {
+			templateSetID, _ = args["suggested_theme_id"].(string)
+		}
+		templateSetID = strings.TrimSpace(templateSetID)
+
+		if templateSetID != "" && cfg.TemplateRepo != nil {
+			tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
+			if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
+			}
+		}
+
+		reasoningLevel, _ := args["reasoning_level"].(string)
+		reasoningLevel = strings.TrimSpace(strings.ToLower(reasoningLevel))
+		switch reasoningLevel {
+		case "", "none", "low", "medium", "high":
+		default:
+			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
+		}
+
+		langRaw, _ := args["language"].(string)
+		validatedLang, err := domain.ValidateLanguage(langRaw)
+		if err != nil {
+			return mcpSDK.NewToolResultError(err.Error()), nil
+		}
+
+		providerOverride, _ := args["provider_override"].(string)
+		modelOverride, _ := args["model_override"].(string)
+		includeAdminFields, _ := args["include_admin_fields"].(bool)
+
+		var suggestedTheme *string
+		if templateSetID != "" {
+			suggestedTheme = &templateSetID
+		}
+
+		preset := domain.Preset{
+			ID:                 "preset-" + uuid.New().String(),
+			UserID:             userID,
+			Name:               name,
+			Description:        desc,
+			SystemInstructions: instructions,
+			SuggestedThemeID:   suggestedTheme,
+			TemplateSetID:      templateSetID,
+			ProviderOverride:   strings.TrimSpace(providerOverride),
+			ModelOverride:      strings.TrimSpace(modelOverride),
+			ReasoningLevel:     reasoningLevel,
+			Language:           validatedLang,
+			IncludeAdminFields: includeAdminFields,
+		}
+
+		if err := cfg.PresetRepo.CreatePreset(ctx, &preset); err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to create preset", "user_id", userID, "err", err)
+			return mcpSDK.NewToolResultError("failed to create preset due to an internal repository error"), nil
+		}
+
+		return jsonToolResult(preset)
+	}
+}
+
+// handleUpdatePreset handles tool 'update_preset', modifying an existing user preset and enforcing immutability on built-ins.
+func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.PresetRepo == nil {
+			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		presetID, _ := args["id"].(string)
+		presetID = strings.TrimSpace(presetID)
+		if presetID == "" {
+			return mcpSDK.NewToolResultError("id is required"), nil
+		}
+
+		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
+		}
+
+		if preset.IsBuiltIn() || strings.HasPrefix(preset.ID, "builtin-") || preset.UserID == domain.SystemUserID {
+			return mcpSDK.NewToolResultError("built-in presets cannot be modified (immutable)"), nil
+		}
+
+		if name, ok := args["name"].(string); ok && strings.TrimSpace(name) != "" {
+			preset.Name = strings.TrimSpace(name)
+		}
+		if desc, ok := args["description"].(string); ok {
+			preset.Description = strings.TrimSpace(desc)
+		}
+		if sys, ok := args["system_instructions"].(string); ok && strings.TrimSpace(sys) != "" {
+			preset.SystemInstructions = strings.TrimSpace(sys)
+		}
+		var rawTemplateID string
+		if tmplID, ok := args["template_set_id"].(string); ok {
+			rawTemplateID = strings.TrimSpace(tmplID)
+		} else if themeID, ok := args["suggested_theme_id"].(string); ok {
+			rawTemplateID = strings.TrimSpace(themeID)
+		}
+		if rawTemplateID != "" {
+			if cfg.TemplateRepo != nil {
+				tmpl, tErr := cfg.TemplateRepo.GetTemplate(ctx, userID, rawTemplateID)
+				if tErr != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+					return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)), nil
+				}
+			}
+			preset.TemplateSetID = rawTemplateID
+			preset.SuggestedThemeID = &rawTemplateID
+		}
+		if prov, ok := args["provider_override"].(string); ok {
+			preset.ProviderOverride = strings.TrimSpace(prov)
+		}
+		if mod, ok := args["model_override"].(string); ok {
+			preset.ModelOverride = strings.TrimSpace(mod)
+		}
+		if rLvl, ok := args["reasoning_level"].(string); ok {
+			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
+			switch rLvl {
+			case "", "none", "low", "medium", "high":
+				preset.ReasoningLevel = rLvl
+			default:
+				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
+			}
+		}
+		if langRaw, ok := args["language"].(string); ok {
+			validatedLang, err := domain.ValidateLanguage(langRaw)
+			if err != nil {
+				return mcpSDK.NewToolResultError(err.Error()), nil
+			}
+			preset.Language = validatedLang
+		}
+		if incAdmin, ok := args["include_admin_fields"].(bool); ok {
+			preset.IncludeAdminFields = incAdmin
+		}
+
+		if err := cfg.PresetRepo.UpdatePreset(ctx, preset); err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to update preset", "preset_id", presetID, "err", err)
+			return mcpSDK.NewToolResultError("failed to update preset due to an internal repository error"), nil
+		}
+
+		return jsonToolResult(preset)
+	}
+}
+
+// handleListSupportedLanguages handles tool 'list_supported_languages', returning supported Left-to-Right languages.
+func handleListSupportedLanguages(_ ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(_ context.Context, _ mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		return jsonToolResult(map[string]any{
+			"default_language":    domain.DefaultLanguage,
+			"supported_languages": domain.SupportedLanguages,
+		})
+	}
+}
+
+// handleListSkills handles tool 'list_skills', returning skills for the user with optional origin filter.
+func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.ProfileRepo == nil {
+			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		skillType, _ := args["type"].(string)
+		skillType = strings.ToLower(strings.TrimSpace(skillType))
+
+		var skills []domain.Skill
+		var err error
+		switch skillType {
+		case "global":
+			skills, err = cfg.ProfileRepo.ListGlobalSkills(ctx)
+		case "custom":
+			all, lErr := cfg.ProfileRepo.ListSkills(ctx, userID)
+			if lErr == nil {
+				skills = make([]domain.Skill, 0, len(all))
+				for _, s := range all {
+					if !s.IsGlobal && s.UserID == userID {
+						skills = append(skills, s)
+					}
+				}
+			}
+			err = lErr
+		default:
+			skills, err = cfg.ProfileRepo.ListSkills(ctx, userID)
+		}
+
+		if err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to list skills", "user_id", userID, "err", err)
+			return mcpSDK.NewToolResultError("failed to list skills due to an internal repository error"), nil
+		}
+		if skills == nil {
+			skills = []domain.Skill{}
+		}
+
+		return jsonToolResult(skills)
+	}
+}
+
+// parseOptionalYearsExperience extracts and casts an optional years of experience value.
+func parseOptionalYearsExperience(raw any) (*float64, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	switch val := raw.(type) {
+	case float64:
+		return &val, true
+	case int:
+		f := float64(val)
+		return &f, true
+	case string:
+		if trimmed := strings.TrimSpace(val); trimmed != "" {
+			if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+				return &parsed, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// parseOptionalKeywords extracts and normalizes an optional slice of string keywords.
+func parseOptionalKeywords(raw any) ([]string, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	switch val := raw.(type) {
+	case string:
+		var keywords []string
+		for _, p := range strings.Split(val, ",") {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				keywords = append(keywords, trimmed)
+			}
+		}
+		return keywords, true
+	case []any:
+		var keywords []string
+		for _, item := range val {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				keywords = append(keywords, strings.TrimSpace(s))
+			}
+		}
+		return keywords, true
+	case []string:
+		var keywords []string
+		for _, s := range val {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				keywords = append(keywords, trimmed)
+			}
+		}
+		return keywords, true
+	}
+	return nil, false
+}
+
+// handleAddSkill handles tool 'add_skill', persisting a new custom skill for the user profile.
+func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.ProfileRepo == nil {
+			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		name, _ := args["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return mcpSDK.NewToolResultError("name is required"), nil
+		}
+
+		category, _ := args["category"].(string)
+		proficiency, _ := args["proficiency"].(string)
+
+		var years float64
+		if yPtr, ok := parseOptionalYearsExperience(args["years_experience"]); ok && yPtr != nil {
+			years = *yPtr
+		}
+
+		var keywords []string
+		if kw, ok := parseOptionalKeywords(args["keywords"]); ok {
+			keywords = kw
+		}
+
+		skill := domain.Skill{
+			ID:              domain.GenerateID("skill"),
+			ShortID:         domain.GenerateShortID("skill"),
+			UserID:          userID,
+			Name:            name,
+			Category:        strings.TrimSpace(category),
+			Proficiency:     strings.TrimSpace(proficiency),
+			YearsExperience: years,
+			Keywords:        keywords,
+		}
+
+		if err := cfg.ProfileRepo.CreateSkill(ctx, &skill); err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to create skill", "user_id", userID, "err", err)
+			return mcpSDK.NewToolResultError("failed to create skill due to an internal repository error"), nil
+		}
+
+		return jsonToolResult(skill)
+	}
+}
+
+// handleUpdateSkill handles tool 'update_skill', updating properties of an existing custom skill.
+func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.ProfileRepo == nil {
+			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		}
+
+		args := parseArguments(req)
+		id, _ := args["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return mcpSDK.NewToolResultError("id is required"), nil
+		}
+
+		skill, err := cfg.ProfileRepo.GetSkill(ctx, userID, id)
+		if err != nil || skill == nil || skill.UserID != userID {
+			return mcpSDK.NewToolResultError(fmt.Sprintf("skill with ID %q not found or access denied", id)), nil
+		}
+
+		if name, ok := args["name"].(string); ok && strings.TrimSpace(name) != "" {
+			skill.Name = strings.TrimSpace(name)
+		}
+		if cat, ok := args["category"].(string); ok {
+			skill.Category = strings.TrimSpace(cat)
+		}
+		if prof, ok := args["proficiency"].(string); ok {
+			skill.Proficiency = strings.TrimSpace(prof)
+		}
+		if yPtr, ok := parseOptionalYearsExperience(args["years_experience"]); ok && yPtr != nil {
+			skill.YearsExperience = *yPtr
+		}
+		if kw, ok := parseOptionalKeywords(args["keywords"]); ok {
+			skill.Keywords = kw
+		}
+
+		if err := cfg.ProfileRepo.UpdateSkill(ctx, skill); err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to update skill", "id", id, "err", err)
+			return mcpSDK.NewToolResultError("failed to update skill due to an internal repository error"), nil
+		}
+
+		return jsonToolResult(skill)
 	}
 }

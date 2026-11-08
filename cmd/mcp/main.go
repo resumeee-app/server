@@ -196,6 +196,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		BranchRepo:       branchRepo,
 		TemplateRepo:     templateRepo,
 		PresetRepo:       presetRepo,
+		UserRepo:         store.User(),
 		ResumeExtractor:  resumeExtractor,
 		JobEnqueuer:      workerPool,
 		DefaultUserID:    cfg.DefaultUserID,
@@ -203,6 +204,10 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		Logger:           logger,
 		RESTTimeout:      cfg.RESTTimeout,
 		TailoringTimeout: cfg.LLMTimeout,
+	}
+
+	if err := mcpCfg.EnsureTenant(parent, cfg.DefaultUserID); err != nil {
+		logger.WarnContext(parent, "failed to provision default tenant", "user_id", cfg.DefaultUserID, "err", err)
 	}
 
 	mcpServer := resumeeeMCP.NewServer(mcpCfg)

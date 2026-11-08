@@ -8,6 +8,7 @@ import (
 	"resumeee/internal/branch"
 	"resumeee/internal/domain"
 	"resumeee/internal/profile"
+	"resumeee/internal/repository"
 	"resumeee/internal/worker"
 )
 
@@ -34,6 +35,8 @@ type ServerConfig struct {
 	TemplateRepo domain.TemplateRepository
 	// PresetRepo provides access to tailoring presets and strategy instructions.
 	PresetRepo domain.PresetRepository
+	// UserRepo provides persistence access for multi-tenant user accounts.
+	UserRepo domain.UserRepository
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
 	ResumeExtractor worker.ResumeExtractor
 	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
@@ -111,3 +114,13 @@ func (c *ServerConfig) setDefaults() {
 		c.MaxTotalConnections = 100
 	}
 }
+
+// EnsureTenant lazily provisions a tenant in the repository if unprovisioned.
+// It ensures default profile, branch, and templates exist for the given user.
+func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
+	if userID == "" || c.ProfileRepo == nil || c.BranchRepo == nil || c.TemplateRepo == nil {
+		return nil
+	}
+	return repository.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
+}
+
