@@ -152,10 +152,19 @@ func isPublicRoute(p string) bool {
 	return clean == "/healthz" || clean == "/api/v1/health" || clean == "/health" || clean == "/api/v1/models" || clean == "/models"
 }
 
+// TenantProvisioner defines an interface for lazy onboarding of newly authenticated tenants.
+type TenantProvisioner interface {
+	EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *domain.User) error
+}
+
 // AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
-func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier) func(http.Handler) http.Handler {
+func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
 	if defaultUserID == "" {
 		defaultUserID = "default"
+	}
+	var provisioner TenantProvisioner
+	if len(provisioners) > 0 {
+		provisioner = provisioners[0]
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +212,22 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerif
 
 			ctx := WithUserID(r.Context(), tokenInfo.UID)
 			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
+			if provisioner != nil {
+				role := domain.UserRoleUser
+				if tokenInfo.IsAdmin() {
+					role = domain.UserRoleAdmin
+				}
+				if err := provisioner.EnsureTenantProvisioned(r.Context(), tokenInfo.UID, &domain.User{
+					ID:       tokenInfo.UID,
+					Email:    tokenInfo.Email,
+					Role:     role,
+					IsActive: true,
+				}); err != nil {
+					slog.ErrorContext(r.Context(), "failed to provision tenant", "user_id", tokenInfo.UID, "error", err)
+					writeError(w, http.StatusInternalServerError, CodeInternalError, "internal server error provisioning tenant", "")
+					return
+				}
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

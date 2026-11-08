@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"resumeee/internal/branch"
@@ -11,6 +13,7 @@ import (
 	"resumeee/internal/llm"
 	"resumeee/internal/pdf"
 	"resumeee/internal/profile"
+	"resumeee/internal/repository"
 	"resumeee/internal/validator"
 	"resumeee/internal/worker"
 )
@@ -120,11 +123,40 @@ type RouterConfig struct {
 	DefaultUserID     string
 	Admin             bool
 	TokenVerifier     domain.TokenVerifier
+	FirebaseProjectID string
+	UserRepo          domain.UserRepository
+	Store             repository.Store
+	Provisioner       TenantProvisioner
 	Logger            *slog.Logger
 	RESTTimeout       time.Duration
 	LLMTimeout        time.Duration
 	DailyRequestLimit int
 	MonthlyTokenLimit int
+}
+
+type defaultTenantProvisioner struct {
+	store        repository.Store
+	profileRepo  domain.ProfileRepository
+	branchRepo   domain.BranchRepository
+	templateRepo domain.TemplateRepository
+	userRepo     domain.UserRepository
+	provisioned  sync.Map
+}
+
+func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *domain.User) error {
+	if _, ok := p.provisioned.Load(userID); ok {
+		return nil
+	}
+	var err error
+	if p.store != nil {
+		err = repository.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
+	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
+		err = repository.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+	}
+	if err == nil {
+		p.provisioned.Store(userID, true)
+	}
+	return err
 }
 
 // getUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
@@ -196,11 +228,22 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerBranchRoutes(mux, cfg)
 	registerQuotaRoutes(mux, cfg)
 
+	provisioner := cfg.Provisioner
+	if provisioner == nil && (cfg.Store != nil || cfg.ProfileRepo != nil) {
+		provisioner = &defaultTenantProvisioner{
+			store:        cfg.Store,
+			profileRepo:  cfg.ProfileRepo,
+			branchRepo:   cfg.BranchRepo,
+			templateRepo: cfg.TemplateRepo,
+			userRepo:     cfg.UserRepo,
+		}
+	}
+
 	// Wrap in middleware chain: Recovery -> Logging -> CORS -> Auth -> Timeout -> ContentType
 	var handler http.Handler = mux
 	handler = ContentTypeMiddleware(handler)
 	handler = TimeoutMiddleware(cfg.RESTTimeout)(handler)
-	handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier)(handler)
+	handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier, provisioner)(handler)
 	handler = CORSMiddleware(handler)
 	handler = LoggingMiddleware(cfg.Logger)(handler)
 	handler = RecoveryMiddleware(cfg.Logger)(handler)

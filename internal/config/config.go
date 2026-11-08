@@ -19,6 +19,8 @@ type Config struct {
 	DefaultUserID       string
 	Admin               bool
 	FirebaseProjectID   string
+	FirebaseAPIKey      string
+	FirebaseAuthDomain  string
 	LLMDailyRequestLimit int
 	LLMMonthlyTokenLimit int
 	WorkerConcurrency          int
@@ -105,25 +107,26 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		cfg.DefaultUserID = val
 	}
 
-	// Admin mode: checks ADMIN_MODE, falling back to legacy ADMIN
-	adminVal := strings.TrimSpace(lookup("ADMIN_MODE"))
-	adminVar := "ADMIN_MODE"
-	if adminVal == "" {
-		if v := strings.TrimSpace(lookup("ADMIN")); v != "" {
-			adminVal = v
-			adminVar = "ADMIN"
-		}
-	}
-	if adminVal != "" {
+	// Admin mode: checks ADMIN_MODE
+	if adminVal := strings.TrimSpace(lookup("ADMIN_MODE")); adminVal != "" {
 		a, err := strconv.ParseBool(adminVal)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s value %q: must be a boolean", adminVar, adminVal)
+			return nil, fmt.Errorf("invalid ADMIN_MODE value %q: must be a boolean", adminVal)
 		}
 		cfg.Admin = a
 	}
 
 	// FirebaseProjectID
 	cfg.FirebaseProjectID = strings.TrimSpace(lookup("FIREBASE_PROJECT_ID"))
+
+	// FirebaseAPIKey
+	cfg.FirebaseAPIKey = strings.TrimSpace(lookup("FIREBASE_API_KEY"))
+
+	// FirebaseAuthDomain
+	cfg.FirebaseAuthDomain = strings.TrimSpace(lookup("FIREBASE_AUTH_DOMAIN"))
+	if cfg.FirebaseAuthDomain == "" && cfg.FirebaseProjectID != "" {
+		cfg.FirebaseAuthDomain = cfg.FirebaseProjectID + ".firebaseapp.com"
+	}
 
 	// LLMDailyRequestLimit
 	if val := strings.TrimSpace(lookup("LLM_DAILY_REQUEST_LIMIT")); val != "" {

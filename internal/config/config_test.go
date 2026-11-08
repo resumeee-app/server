@@ -63,6 +63,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.FirebaseProjectID != "" {
 		t.Errorf("expected default FirebaseProjectID empty, got %q", cfg.FirebaseProjectID)
 	}
+	if cfg.FirebaseAPIKey != "" {
+		t.Errorf("expected default FirebaseAPIKey empty, got %q", cfg.FirebaseAPIKey)
+	}
+	if cfg.FirebaseAuthDomain != "" {
+		t.Errorf("expected default FirebaseAuthDomain empty, got %q", cfg.FirebaseAuthDomain)
+	}
 	if cfg.LLMDailyRequestLimit != 50 {
 		t.Errorf("expected default LLMDailyRequestLimit 50, got %d", cfg.LLMDailyRequestLimit)
 	}
@@ -84,6 +90,9 @@ func TestLoadOverrides(t *testing.T) {
 		"ANTHROPIC_API_KEY":      "ant-secret",
 		"OPENAI_COMPAT_BASE_URL": "http://localhost:11434/v1",
 		"OPENAI_COMPAT_API_KEY":  "ollama-secret",
+		"FIREBASE_PROJECT_ID":   "custom-project",
+		"FIREBASE_API_KEY":      "custom-api-key",
+		"FIREBASE_AUTH_DOMAIN":  "custom-domain.firebaseapp.com",
 		"ENV":                    "production",
 		"LOG_LEVEL":              "DEBUG",
 	}
@@ -135,6 +144,15 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Errorf("expected LogLevel LevelDebug, got %v", cfg.LogLevel)
+	}
+	if cfg.FirebaseProjectID != "custom-project" {
+		t.Errorf("expected FirebaseProjectID 'custom-project', got %q", cfg.FirebaseProjectID)
+	}
+	if cfg.FirebaseAPIKey != "custom-api-key" {
+		t.Errorf("expected FirebaseAPIKey 'custom-api-key', got %q", cfg.FirebaseAPIKey)
+	}
+	if cfg.FirebaseAuthDomain != "custom-domain.firebaseapp.com" {
+		t.Errorf("expected FirebaseAuthDomain 'custom-domain.firebaseapp.com', got %q", cfg.FirebaseAuthDomain)
 	}
 }
 
@@ -884,45 +902,6 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("Fallback to legacy ADMIN when ADMIN_MODE is unset", func(t *testing.T) {
-		env := map[string]string{
-			"ADMIN": "true",
-		}
-		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !cfg.Admin {
-			t.Errorf("expected Admin true from fallback ADMIN, got false")
-		}
-	})
-
-	t.Run("ADMIN_MODE precedence over ADMIN", func(t *testing.T) {
-		env := map[string]string{
-			"ADMIN_MODE": "true",
-			"ADMIN":      "false",
-		}
-		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !cfg.Admin {
-			t.Errorf("expected ADMIN_MODE=true to take precedence over ADMIN=false")
-		}
-
-		env = map[string]string{
-			"ADMIN_MODE": "false",
-			"ADMIN":      "true",
-		}
-		cfg, err = config.LoadFrom(func(k string) string { return env[k] })
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cfg.Admin {
-			t.Errorf("expected ADMIN_MODE=false to take precedence over ADMIN=true")
-		}
-	})
-
 	t.Run("ADMIN_MODE boolean parsing error", func(t *testing.T) {
 		env := map[string]string{
 			"ADMIN_MODE": "not-a-bool",
@@ -932,20 +911,6 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 			t.Fatalf("expected error for invalid ADMIN_MODE boolean, got nil")
 		}
 		expected := `invalid ADMIN_MODE value "not-a-bool": must be a boolean`
-		if !strings.Contains(err.Error(), expected) {
-			t.Fatalf("expected error containing %q, got: %v", expected, err)
-		}
-	})
-
-	t.Run("ADMIN boolean parsing error fallback", func(t *testing.T) {
-		env := map[string]string{
-			"ADMIN": "not-a-bool",
-		}
-		_, err := config.LoadFrom(func(k string) string { return env[k] })
-		if err == nil {
-			t.Fatalf("expected error for invalid ADMIN boolean, got nil")
-		}
-		expected := `invalid ADMIN value "not-a-bool": must be a boolean`
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("expected error containing %q, got: %v", expected, err)
 		}

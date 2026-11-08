@@ -3155,3 +3155,100 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	}
 }
 
+type testMockTokenVerifier struct {
+	tokens map[string]*domain.TokenInfo
+}
+
+func (m *testMockTokenVerifier) VerifyIDToken(_ context.Context, token string) (*domain.TokenInfo, error) {
+	if info, ok := m.tokens[token]; ok {
+		return info, nil
+	}
+	return nil, domain.ErrUnauthorized
+}
+
+func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
+	ctx := context.Background()
+	store, err := memory.NewSeeded(ctx, "default")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	verifier := &testMockTokenVerifier{
+		tokens: map[string]*domain.TokenInfo{
+			"token-firebase-new-123": {
+				UID:   "firebase-new-user-123",
+				Email: "newuser@example.com",
+				Role:  "user",
+			},
+		},
+	}
+
+	profileSvc := profile.NewService(store, store)
+	enqueuer := api.NewChannelJobEnqueuer(10)
+	router := api.NewRouter(api.RouterConfig{
+		ProfileRepo:    store,
+		PresetRepo:     store,
+		TemplateRepo:   store,
+		BranchRepo:     store,
+		QuotaRepo:      store,
+		UserRepo:       store,
+		Store:          store,
+		ProfileService: profileSvc,
+		Renderer:       renderer.NewTemplateRenderer(),
+		Validator:      validator.New(),
+		JobEnqueuer:    enqueuer,
+		Admin:          false,
+		TokenVerifier:  verifier,
+	})
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	headers := map[string]string{
+		"Authorization": "Bearer token-firebase-new-123",
+	}
+
+	// 1. GET /api/v1/profile for the new user should return 200 OK (lazy provisioned)
+	resp, body := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile", nil, headers)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /profile on first login, got %d: %s", resp.StatusCode, string(body))
+	}
+	var prof domain.Profile
+	if err := json.Unmarshal(body, &prof); err != nil {
+		t.Fatalf("decode profile: %v", err)
+	}
+	if prof.UserID != "firebase-new-user-123" {
+		t.Errorf("expected UserID 'firebase-new-user-123', got %q", prof.UserID)
+	}
+
+	// 2. GET /api/v1/profile/full should return 200 OK
+	snapResp, snapBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/full", nil, headers)
+	if snapResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /profile/full, got %d: %s", snapResp.StatusCode, string(snapBody))
+	}
+
+	// 3. GET /api/v1/branches should return 200 OK with default branch
+	branchResp, branchBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/branches", nil, headers)
+	if branchResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /branches, got %d: %s", branchResp.StatusCode, string(branchBody))
+	}
+	var branches []domain.Branch
+	if err := json.Unmarshal(branchBody, &branches); err != nil {
+		t.Fatalf("decode branches: %v", err)
+	}
+	if len(branches) != 1 || !branches[0].IsDefault {
+		t.Fatalf("expected 1 default branch, got %+v", branches)
+	}
+
+	// 4. Verify user record in UserRepo
+	user, err := store.User().GetUser(ctx, "firebase-new-user-123")
+	if err != nil {
+		t.Fatalf("failed to retrieve provisioned user: %v", err)
+	}
+	if user.Email != "newuser@example.com" {
+		t.Errorf("expected email 'newuser@example.com', got %q", user.Email)
+	}
+}
+
+
