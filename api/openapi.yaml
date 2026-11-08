@@ -2725,19 +2725,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
@@ -2772,19 +2759,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
@@ -2805,19 +2779,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation
@@ -2847,19 +2808,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
@@ -2893,19 +2841,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation (defaults to English)
@@ -2926,19 +2861,6 @@ components:
           nullable: true
         template_set_id:
           type: string
-        provider_override:
-          type: string
-        model_override:
-          type: string
-        reasoning_level:
-          type: string
-          enum:
-            - ""
-            - none
-            - low
-            - medium
-            - high
-          description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
         language:
           type: string
           description: Target language for contextual translation

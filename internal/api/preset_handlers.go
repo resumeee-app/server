@@ -35,12 +35,8 @@ type CreatePresetRequest struct {
 	SystemInstructions string  `json:"system_instructions"`
 	TemplateSetID      string  `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
-	ProviderOverride   string  `json:"provider_override"`
-	ModelOverride      string  `json:"model_override"`
-	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "none", "low", "medium", "high").
-	ReasoningLevel     string `json:"reasoning_level,omitempty"`
-	Language           string `json:"language,omitempty"`
-	IncludeAdminFields bool   `json:"include_admin_fields"`
+	Language           string  `json:"language,omitempty"`
+	IncludeAdminFields bool    `json:"include_admin_fields"`
 }
 
 type UpdatePresetRequest struct {
@@ -49,10 +45,6 @@ type UpdatePresetRequest struct {
 	SystemInstructions *string `json:"system_instructions"`
 	TemplateSetID      *string `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
-	ProviderOverride   *string `json:"provider_override"`
-	ModelOverride      *string `json:"model_override"`
-	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "", "none", "low", "medium", "high").
-	ReasoningLevel     *string `json:"reasoning_level,omitempty"`
 	Language           *string `json:"language,omitempty"`
 	IncludeAdminFields *bool   `json:"include_admin_fields"`
 }
@@ -158,16 +150,6 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := validateReasoningLevel(req.ReasoningLevel); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
-		return
-	}
-
-	if err := validateModelOverride(h.cfg.ModelEnumerator, req.ProviderOverride, req.ModelOverride); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
-		return
-	}
-
 	lang, err := domain.ValidateLanguage(req.Language)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
@@ -182,9 +164,6 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		SystemInstructions: req.SystemInstructions,
 		SuggestedThemeID:   themeID,
 		TemplateSetID:      req.TemplateSetID,
-		ProviderOverride:   req.ProviderOverride,
-		ModelOverride:      req.ModelOverride,
-		ReasoningLevel:     req.ReasoningLevel,
 		Language:           lang,
 		IncludeAdminFields: req.IncludeAdminFields,
 	}
@@ -240,28 +219,6 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ReasoningLevel != nil {
-		if err := validateReasoningLevel(*req.ReasoningLevel); err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
-			return
-		}
-	}
-
-	effectiveProvider := preset.ProviderOverride
-	if req.ProviderOverride != nil {
-		effectiveProvider = *req.ProviderOverride
-	}
-
-	effectiveModel := preset.ModelOverride
-	if req.ModelOverride != nil {
-		effectiveModel = *req.ModelOverride
-	}
-
-	if err := validateModelOverride(h.cfg.ModelEnumerator, effectiveProvider, effectiveModel); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
-		return
-	}
-
 	if req.Name != nil {
 		preset.Name = *req.Name
 	}
@@ -294,15 +251,6 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		if preset.SuggestedThemeID == nil && *req.TemplateSetID != "" {
 			preset.SuggestedThemeID = req.TemplateSetID
 		}
-	}
-	if req.ProviderOverride != nil {
-		preset.ProviderOverride = *req.ProviderOverride
-	}
-	if req.ModelOverride != nil {
-		preset.ModelOverride = *req.ModelOverride
-	}
-	if req.ReasoningLevel != nil {
-		preset.ReasoningLevel = *req.ReasoningLevel
 	}
 	if req.Language != nil {
 		lang, err := domain.ValidateLanguage(*req.Language)
