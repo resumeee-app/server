@@ -39,6 +39,7 @@ type CreatePresetRequest struct {
 	ModelOverride      string  `json:"model_override"`
 	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "none", "low", "medium", "high").
 	ReasoningLevel     string `json:"reasoning_level,omitempty"`
+	Language           string `json:"language,omitempty"`
 	IncludeAdminFields bool   `json:"include_admin_fields"`
 }
 
@@ -52,6 +53,7 @@ type UpdatePresetRequest struct {
 	ModelOverride      *string `json:"model_override"`
 	// ReasoningLevel specifies the optional reasoning effort constraint for thinking models (valid values: "", "none", "low", "medium", "high").
 	ReasoningLevel     *string `json:"reasoning_level,omitempty"`
+	Language           *string `json:"language,omitempty"`
 	IncludeAdminFields *bool   `json:"include_admin_fields"`
 }
 
@@ -166,6 +168,12 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lang, err := domain.ValidateLanguage(req.Language)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+		return
+	}
+
 	preset := domain.Preset{
 		ID:                 "preset-" + uuid.New().String(),
 		UserID:             userID,
@@ -177,6 +185,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		ProviderOverride:   req.ProviderOverride,
 		ModelOverride:      req.ModelOverride,
 		ReasoningLevel:     req.ReasoningLevel,
+		Language:           lang,
 		IncludeAdminFields: req.IncludeAdminFields,
 	}
 	if preset.TemplateSetID == "" && themeID != nil {
@@ -294,6 +303,14 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ReasoningLevel != nil {
 		preset.ReasoningLevel = *req.ReasoningLevel
+	}
+	if req.Language != nil {
+		lang, err := domain.ValidateLanguage(*req.Language)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
+			return
+		}
+		preset.Language = lang
 	}
 	if req.IncludeAdminFields != nil {
 		preset.IncludeAdminFields = *req.IncludeAdminFields

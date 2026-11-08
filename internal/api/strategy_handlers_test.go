@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -311,6 +312,215 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		errDelete := repos.presetRepo.DeletePreset(ctx, "system", "builtin-immutability-test")
 		if errDelete != domain.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from DeletePreset, got %v", errDelete)
+		}
+	})
+
+	// 6. Language selection and validation in strategy creation/update
+	t.Run("CreateStrategy_WithSupportedLanguage_Success", func(t *testing.T) {
+		body := map[string]any{
+			"name":                "Spanish Strategy",
+			"system_instructions": "Focus on high-level impact in Spanish.",
+			"suggested_theme_id":  "builtin-standard-clean",
+			"language":            "Spanish",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "user-1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
+		}
+
+		var created domain.TailoringStrategy
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if created.Language != "Spanish" {
+			t.Errorf("expected language Spanish, got %q", created.Language)
+		}
+	})
+
+	t.Run("CreateStrategy_RTL_Rejected", func(t *testing.T) {
+		body := map[string]any{
+			"name":                "Arabic Strategy",
+			"system_instructions": "Focus on high-level impact in Arabic.",
+			"suggested_theme_id":  "builtin-standard-clean",
+			"language":            "Arabic",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "user-1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for RTL language, got %d", resp.StatusCode)
+		}
+
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeInvalidRequest {
+			t.Errorf("expected error code %q, got %q", api.CodeInvalidRequest, errResp.Error.Code)
+		}
+		if !strings.Contains(strings.ToLower(errResp.Error.Message), "right-to-left") {
+			t.Errorf("expected error message to mention right-to-left, got: %q", errResp.Error.Message)
+		}
+	})
+
+	t.Run("CreateStrategy_UnsupportedLanguage_Rejected", func(t *testing.T) {
+		body := map[string]any{
+			"name":                "Klingon Strategy",
+			"system_instructions": "Focus on high-level impact in Klingon.",
+			"suggested_theme_id":  "builtin-standard-clean",
+			"language":            "Klingon",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "user-1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for unsupported language, got %d", resp.StatusCode)
+		}
+
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeInvalidRequest {
+			t.Errorf("expected error code %q, got %q", api.CodeInvalidRequest, errResp.Error.Code)
+		}
+		if !strings.Contains(strings.ToLower(errResp.Error.Message), "unsupported") {
+			t.Errorf("expected error message to mention unsupported, got: %q", errResp.Error.Message)
+		}
+	})
+
+	t.Run("UpdateStrategy_Language_Success", func(t *testing.T) {
+		// First create a strategy
+		body := map[string]any{
+			"name":                "Update Language Strategy",
+			"system_instructions": "Original instructions.",
+			"suggested_theme_id":  "builtin-standard-clean",
+			"language":            "French",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "user-1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		var created domain.TailoringStrategy
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode created strategy: %v", err)
+		}
+
+		// Update language to German
+		updateBody := map[string]any{
+			"language": "German",
+		}
+		rawUpdate, _ := json.Marshal(updateBody)
+		putReq, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/tailoring-strategies/"+created.ID, bytes.NewReader(rawUpdate))
+		putReq.Header.Set("Content-Type", "application/json")
+		putReq.Header.Set("X-User-ID", "user-1")
+
+		putResp, err := client.Do(putReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = putResp.Body.Close() }()
+
+		if putResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", putResp.StatusCode)
+		}
+
+		var updated domain.TailoringStrategy
+		if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if updated.Language != "German" {
+			t.Errorf("expected language German, got %q", updated.Language)
+		}
+	})
+
+	t.Run("UpdateStrategy_InvalidLanguage_Rejected", func(t *testing.T) {
+		// Create initial strategy
+		body := map[string]any{
+			"name":                "Strategy For Invalid Update",
+			"system_instructions": "Original instructions.",
+			"suggested_theme_id":  "builtin-standard-clean",
+			"language":            "English",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", "user-1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		var created domain.TailoringStrategy
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode created strategy: %v", err)
+		}
+
+		// Update with RTL language
+		updateBody := map[string]any{
+			"language": "Arabic",
+		}
+		rawUpdate, _ := json.Marshal(updateBody)
+		putReq, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/tailoring-strategies/"+created.ID, bytes.NewReader(rawUpdate))
+		putReq.Header.Set("Content-Type", "application/json")
+		putReq.Header.Set("X-User-ID", "user-1")
+
+		putResp, err := client.Do(putReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = putResp.Body.Close() }()
+
+		if putResp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for RTL language update, got %d", putResp.StatusCode)
+		}
+
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(putResp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeInvalidRequest {
+			t.Errorf("expected error code %q, got %q", api.CodeInvalidRequest, errResp.Error.Code)
+		}
+		if !strings.Contains(strings.ToLower(errResp.Error.Message), "right-to-left") {
+			t.Errorf("expected error message to mention right-to-left, got: %q", errResp.Error.Message)
 		}
 	})
 }

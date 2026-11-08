@@ -2732,6 +2732,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation (defaults to English)
         include_admin_fields:
           type: boolean
         is_built_in:
@@ -2776,6 +2779,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation (defaults to English)
         include_admin_fields:
           type: boolean
 
@@ -2806,6 +2812,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation
         include_admin_fields:
           type: boolean
 
@@ -2845,6 +2854,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation (defaults to English)
         include_admin_fields:
           type: boolean
         is_built_in:
@@ -2888,6 +2900,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation (defaults to English)
         include_admin_fields:
           type: boolean
 
@@ -2918,6 +2933,9 @@ components:
             - medium
             - high
           description: Optional reasoning effort or depth constraint for thinking models (empty string clears override)
+        language:
+          type: string
+          description: Target language for contextual translation
         include_admin_fields:
           type: boolean
 
