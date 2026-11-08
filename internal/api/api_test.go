@@ -608,6 +608,46 @@ func TestFullUserJourney(t *testing.T) {
 		t.Fatalf("expected Content-Type application/json, got: %s", ct)
 	}
 
+	// 32b. GET /api/v1/branches/{id}/versions/1/export with dynamic template_set_id override
+	customTmplReq := api.CreateTemplateRequest{
+		Name:             "Export Override Template",
+		HTMLTemplate:     `<div class="export-custom"><h1>{{.FullName}}</h1><p>{{.Summary}}</p></div>`,
+		MarkdownTemplate: `### CUSTOM_EXPORT: {{.FullName}}` + "\n" + `{{.Summary}}`,
+		TextTemplate:     `CUSTOM_EXPORT: {{.FullName}}` + "\n" + `{{.Summary}}`,
+	}
+	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/templates", customTmplReq, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /templates for export override failed: %d", resp.StatusCode)
+	}
+	customTmpl := decodeJSON[domain.TemplateSet](t, body)
+
+	// Export HTML with template_set_id
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/versions/1/export?format=html&template_set_id="+customTmpl.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export html with template_set_id failed: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `class="export-custom"`) {
+		t.Fatalf("expected exported html to contain class export-custom, got: %s", string(body))
+	}
+
+	// Export Markdown with template_set_id
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/versions/1/export?format=markdown&template_set_id="+customTmpl.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export markdown with template_set_id failed: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `### CUSTOM_EXPORT:`) {
+		t.Fatalf("expected exported markdown to contain ### CUSTOM_EXPORT:, got: %s", string(body))
+	}
+
+	// Export Text with template_set_id
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/versions/1/export?format=text&template_set_id="+customTmpl.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export text with template_set_id failed: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `CUSTOM_EXPORT:`) {
+		t.Fatalf("expected exported text to contain CUSTOM_EXPORT:, got: %s", string(body))
+	}
+
 	// 33. GET /api/v1/profile/jsonresume/export (Main Profile export)
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/jsonresume/export", nil, nil)
 	if resp.StatusCode != http.StatusOK {

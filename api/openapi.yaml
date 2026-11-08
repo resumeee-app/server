@@ -1643,6 +1643,12 @@ paths:
           type: string
           enum: [html, markdown, text, jsonresume]
           default: html
+      - name: template_set_id
+        in: query
+        required: false
+        description: Optional visual template set ID override for dynamic export rendering
+        schema:
+          type: string
     get:
       tags:
         - Branches & Versions

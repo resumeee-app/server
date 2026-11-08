@@ -470,83 +470,13 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, ver)
 }
 
-// exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
-func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	branchID := r.PathValue("id")
-	v := r.PathValue("v")
-
-	if _, err := h.svc.GetBranch(ctx, userID, branchID); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	ver, err := h.svc.GetVersion(ctx, branchID, v)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	format := strings.ToLower(r.URL.Query().Get("format"))
-	if format == "" {
-		format = "html"
-	}
-
-	switch format {
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(ver.HTMLOutput))
-	case "markdown":
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(ver.MarkdownOutput))
-	case "text":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(ver.PlainTextOutput))
-	case "jsonresume":
-		if h.cfg.ProfileService == nil {
-			writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
-			return
-		}
-		res, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, &ver.ID)
-		if err != nil {
-			writeDomainError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, res)
-	default:
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "unsupported export format: "+format, "")
-	}
-}
-
-// previewBranchVersion serves rendered branch version resume outputs across HTML, Markdown, and text formats.
-func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	branchID := r.PathValue("id")
-	v := r.PathValue("v")
-
-	b, err := h.svc.GetBranch(ctx, userID, branchID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	ver, err := h.svc.GetVersion(ctx, branchID, v)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
+// getOrRenderVersionOutputs resolves or dynamically re-renders resume outputs incorporating targetTemplateID.
+func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, branchID, v string, b *domain.Branch, ver *domain.BranchVersion, targetTemplateID string) domain.RenderOutput {
 	htmlOut := ver.HTMLOutput
 	mdOut := ver.MarkdownOutput
 	txtOut := ver.PlainTextOutput
 
-	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
-	if targetTemplateID == "" {
+	if targetTemplateID == "" && b != nil {
 		targetTemplateID = b.TemplateSetID
 	}
 	if targetTemplateID == "" {
@@ -560,7 +490,7 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 	if shouldRender && h.cfg.Renderer != nil && h.cfg.TemplateRepo != nil && targetTemplateID != "" {
 		tmpl, tErr := h.cfg.TemplateRepo.GetTemplate(ctx, userID, targetTemplateID)
 		if tErr != nil {
-			slog.WarnContext(ctx, "failed to load template for branch version preview",
+			slog.WarnContext(ctx, "failed to load template for branch version rendering",
 				"error", tErr,
 				"user_id", userID,
 				"branch_id", branchID,
@@ -575,7 +505,7 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 			if ver.TailoredContent != nil {
 				rendered, rErr := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)
 				if rErr != nil {
-					slog.ErrorContext(ctx, "failed to dynamically render branch version preview",
+					slog.ErrorContext(ctx, "failed to dynamically render branch version",
 						"error", rErr,
 						"user_id", userID,
 						"branch_id", branchID,
@@ -614,11 +544,92 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	writeRenderOutput(w, r, domain.RenderOutput{
+	return domain.RenderOutput{
 		HTML:      htmlOut,
 		Markdown:  mdOut,
 		PlainText: txtOut,
-	})
+	}
+}
+
+// exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
+func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	v := r.PathValue("v")
+
+	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	if format == "" {
+		format = "html"
+	}
+
+	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
+	outputs := h.getOrRenderVersionOutputs(ctx, userID, branchID, v, b, ver, targetTemplateID)
+
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(outputs.HTML))
+	case "markdown", "md":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(outputs.Markdown))
+	case "text", "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(outputs.PlainText))
+	case "jsonresume":
+		if h.cfg.ProfileService == nil {
+			writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+			return
+		}
+		res, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, &ver.ID)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	default:
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "unsupported export format: "+format, "")
+	}
+}
+
+// previewBranchVersion serves rendered branch version resume outputs across HTML, Markdown, and text formats.
+func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	v := r.PathValue("v")
+
+	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
+	outputs := h.getOrRenderVersionOutputs(ctx, userID, branchID, v, b, ver, targetTemplateID)
+
+	writeRenderOutput(w, r, outputs)
 }
 
 // editBranchVersion validates provenance and creates an edited resume version with updated tailored content.
