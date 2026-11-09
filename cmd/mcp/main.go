@@ -43,11 +43,10 @@ type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog
 //   - error: Non-nil if SQLite connection or seeding fails.
 func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
 	return storage.Open(ctx, storage.Config{
-		Driver:            storage.DriverSQLite,
-		DSN:               cfg.DBPath,
-		AutoMigrate:       true,
-		DefaultUserID:     cfg.DefaultUserID,
-		TemplateValidator: renderer.New(),
+		Driver:        storage.DriverSQLite,
+		DSN:           cfg.DBPath,
+		AutoMigrate:   true,
+		DefaultUserID: cfg.DefaultUserID,
 	})
 }
 
