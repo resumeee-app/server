@@ -179,6 +179,7 @@ func TestServer_Registration(t *testing.T) {
 		"create_branch",
 		"tailor_resume",
 		"run_gap_analysis",
+		"simulate_ats",
 	}
 
 	tools := env.mcpServer.ListTools()
@@ -1723,3 +1724,75 @@ func TestResources_ErrorSanitization(t *testing.T) {
 		}
 	}
 }
+
+func TestTools_SimulateATS(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
+
+	b := &domain.Branch{
+		ID:                 "branch-mcp-ats-1",
+		UserID:             "user-1",
+		Name:               "MCP Cloud Engineer",
+		TargetRole:         "Staff Cloud Engineer",
+		TargetRequirements: "Go, Kubernetes, and AWS infrastructure.",
+		TemplateSetID:      "builtin-standard-clean",
+	}
+	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+	v1 := &domain.BranchVersion{
+		ID:               "ver-mcp-ats-1",
+		BranchID:         b.ID,
+		MainRevisionUsed: 1,
+		Status:           domain.VersionStatusCompleted,
+		MarkdownOutput:   "# Candidate\n## Summary\nCloud Engineer experienced in Go, Kubernetes, and AWS.",
+	}
+	if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
+		t.Fatalf("CreateVersion failed: %v", err)
+	}
+	if err := env.branchRepo.CompleteVersion(ctx, v1); err != nil {
+		t.Fatalf("CompleteVersion failed: %v", err)
+	}
+
+	tool := env.mcpServer.GetTool("simulate_ats")
+	if tool == nil {
+		t.Fatal("tool simulate_ats not found")
+	}
+
+	req := mcpSDK.CallToolRequest{}
+	req.Params.Name = "simulate_ats"
+	req.Params.Arguments = map[string]any{
+		"branch_id": b.ID,
+		"format":    "markdown",
+	}
+
+	res, err := tool.Handler(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected simulate_ats tool success, got error: %+v", res.Content)
+	}
+
+	text := res.Content[0].(mcpSDK.TextContent).Text
+	var score domain.ATSScore
+	if err := json.Unmarshal([]byte(text), &score); err != nil {
+		t.Fatalf("failed to unmarshal ATSScore from tool output: %v (raw: %s)", err, text)
+	}
+	if score.ExtractionConfidenceScore <= 0 || score.ExtractionConfidenceScore > 100 {
+		t.Errorf("expected ExtractionConfidenceScore in (0, 100], got %v", score.ExtractionConfidenceScore)
+	}
+	if score.JobMatchingScore <= 0 || score.JobMatchingScore > 100 {
+		t.Errorf("expected JobMatchingScore in (0, 100], got %v", score.JobMatchingScore)
+	}
+
+	// Calling simulate_ats a second time on the same version returns a tool error (triggers once per tailored version)
+	resDup, err := tool.Handler(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected handler error on duplicate call: %v", err)
+	}
+	if !resDup.IsError {
+		t.Errorf("expected duplicate simulate_ats call on same version to return tool error")
+	}
+}
+

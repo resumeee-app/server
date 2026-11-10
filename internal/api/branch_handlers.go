@@ -36,6 +36,7 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 		mux.HandleFunc("POST "+base+"/{id}/generate", h.generateBranchVersion)
 		mux.HandleFunc("POST "+base+"/{id}/tailor", h.generateBranchVersion)
 		mux.HandleFunc("POST "+base+"/{id}/gap-analysis", h.analyzeBranchGaps)
+		mux.HandleFunc("POST "+base+"/{id}/ats-score", h.simulateBranchATSScore)
 		mux.HandleFunc("GET "+base+"/{id}/prompt-preview", h.getPromptPreview)
 		mux.HandleFunc("POST "+base+"/{id}/prompt-preview", h.previewPrompt)
 		mux.HandleFunc("GET "+base+"/{id}/versions", h.listBranchVersions)
@@ -44,6 +45,7 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 		mux.HandleFunc("GET "+base+"/{id}/versions/{v}/export", h.exportBranchVersion)
 		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/edit", h.editBranchVersion)
 		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/render-preview", h.renderPreview)
+		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/ats-score", h.simulateBranchATSScore)
 	}
 }
 
@@ -683,6 +685,35 @@ func (h *branchHandler) analyzeBranchGaps(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, report)
+}
+
+// simulateBranchATSScore executes on-demand ATS extraction and job matching score calculation for a tailored branch version.
+func (h *branchHandler) simulateBranchATSScore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := getUserID(r, h.cfg.DefaultUserID)
+	branchID := r.PathValue("id")
+	if strings.TrimSpace(branchID) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "branch ID is required", "")
+		return
+	}
+
+	var opts domain.ATSSimulationOptions
+	if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+		if !decodeJSON(w, r, &opts) {
+			return
+		}
+	}
+	if vPath := strings.TrimSpace(r.PathValue("v")); vPath != "" && opts.VersionID == "" {
+		opts.VersionID = vPath
+	}
+
+	score, err := h.svc.SimulateATS(ctx, userID, branchID, &opts)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, score)
 }
 
 // requireAdmin verifies administrative privilege, writing a 403 Forbidden response if unauthorized.

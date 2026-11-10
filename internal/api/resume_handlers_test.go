@@ -825,3 +825,149 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 	})
 }
 
+func TestAPI_SimulateATSScore(t *testing.T) {
+	ctx := context.Background()
+	env := setupResumeTestServer(t)
+	baseURL := env.server.URL
+	client := env.server.Client()
+	userID := "user-resume-1"
+
+	// 1. Default Main Branch must be rejected
+	t.Run("POST /api/v1/branches/{id}/ats-score rejects default branch with 400 Bad Request", func(t *testing.T) {
+		branches, err := env.branchRepo.ListBranches(ctx, userID)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+		var defaultBranchID string
+		for _, b := range branches {
+			if b.IsDefault {
+				defaultBranchID = b.ID
+				break
+			}
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches/"+defaultBranchID+"/ats-score", nil)
+		req.Header.Set("X-User-ID", userID)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request for default branch, got %d", resp.StatusCode)
+		}
+	})
+
+	// 2. Tailored branch without job description must be rejected
+	t.Run("POST /api/v1/branches/{id}/ats-score rejects missing job description with 400 Bad Request", func(t *testing.T) {
+		bNoJD := &domain.Branch{
+			ID:                 "branch-api-ats-no-jd",
+			UserID:             userID,
+			Name:               "No JD Variant",
+			TargetRole:         "Go Engineer",
+			TargetRequirements: "",
+			TemplateSetID:      renderer.TemplateStandardCleanID,
+		}
+		if err := env.branchRepo.CreateBranch(ctx, bNoJD); err != nil {
+			t.Fatalf("CreateBranch failed: %v", err)
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches/"+bNoJD.ID+"/ats-score", nil)
+		req.Header.Set("X-User-ID", userID)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request for missing job description, got %d", resp.StatusCode)
+		}
+	})
+
+	// 3. Successful on-demand ATS score calculation, single-trigger conflict enforcement, and persistence
+	t.Run("POST /api/v1/branches/{id}/ats-score calculates once and persists across active version switches", func(t *testing.T) {
+		b := &domain.Branch{
+			ID:                 "branch-api-ats-1",
+			UserID:             userID,
+			Name:               "Distributed Systems Engineer",
+			TargetRole:         "Staff Go Engineer",
+			TargetRequirements: "5+ years Go, Kubernetes, and distributed consensus experience.",
+			TemplateSetID:      renderer.TemplateStandardCleanID,
+		}
+		if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+			t.Fatalf("CreateBranch failed: %v", err)
+		}
+
+		v1 := &domain.BranchVersion{
+			ID:               "ver-api-ats-1",
+			BranchID:         b.ID,
+			MainRevisionUsed: 1,
+			Status:           domain.VersionStatusCompleted,
+			MarkdownOutput:   "# Jane Doe\n## Summary\nDistributed systems engineer skilled in Go and Kubernetes.\n## Experience\n- Built high-availability services.",
+		}
+		if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
+			t.Fatalf("CreateVersion failed: %v", err)
+		}
+		if err := env.branchRepo.CompleteVersion(ctx, v1); err != nil {
+			t.Fatalf("CompleteVersion failed: %v", err)
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches/"+b.ID+"/ats-score", strings.NewReader(`{"format":"markdown"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", userID)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST ats-score failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		var score domain.ATSScore
+		if err := json.NewDecoder(resp.Body).Decode(&score); err != nil {
+			t.Fatalf("failed to decode ATSScore: %v", err)
+		}
+		if score.ExtractionConfidenceScore <= 0 || score.ExtractionConfidenceScore > 100 {
+			t.Errorf("expected ExtractionConfidenceScore in (0, 100], got %v", score.ExtractionConfidenceScore)
+		}
+		if score.JobMatchingScore <= 0 || score.JobMatchingScore > 100 {
+			t.Errorf("expected JobMatchingScore in (0, 100], got %v", score.JobMatchingScore)
+		}
+
+		// Duplicate trigger on same version must return 409 Conflict
+		reqDup, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches/"+b.ID+"/versions/1/ats-score", nil)
+		reqDup.Header.Set("X-User-ID", userID)
+		respDup, err := client.Do(reqDup)
+		if err != nil {
+			t.Fatalf("duplicate POST failed: %v", err)
+		}
+		defer func() { _ = respDup.Body.Close() }()
+
+		if respDup.StatusCode != http.StatusConflict {
+			t.Errorf("expected 409 Conflict on duplicate ATS trigger for same version, got %d", respDup.StatusCode)
+		}
+
+		// Verify GET /api/v1/branches/{id} returns persisted ats_score
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/branches/"+b.ID, nil)
+		getReq.Header.Set("X-User-ID", userID)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET branch failed: %v", err)
+		}
+		defer func() { _ = getResp.Body.Close() }()
+
+		var fetchedBranch domain.Branch
+		if err := json.NewDecoder(getResp.Body).Decode(&fetchedBranch); err != nil {
+			t.Fatalf("failed to decode branch: %v", err)
+		}
+		if fetchedBranch.ATSScore == nil || fetchedBranch.ATSScore.ExtractionConfidenceScore != score.ExtractionConfidenceScore {
+			t.Errorf("expected persisted ATSScore on branch, got %+v", fetchedBranch.ATSScore)
+		}
+	})
+}
+
+

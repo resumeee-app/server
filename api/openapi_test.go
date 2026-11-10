@@ -68,6 +68,10 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"/branches/{id}/versions/{v}/edit:",
 		"/branches/{id}/versions/{v}/render-preview:",
 		"/resumes/{id}/versions/{v}/render-preview:",
+		"/branches/{id}/ats-score:",
+		"/branches/{id}/versions/{v}/ats-score:",
+		"/resumes/{id}/ats-score:",
+		"/resumes/{id}/versions/{v}/ats-score:",
 	}
 
 	for _, endpoint := range expectedEndpoints {
@@ -100,6 +104,9 @@ func TestOpenAPISpecificationIntegrity(t *testing.T) {
 		"EditVersionRequest:",
 		"PromptPreviewResponse:",
 		"RenderPreviewRequest:",
+		"ATSScore:",
+		"ATSExtractedCandidate:",
+		"ATSSimulationRequest:",
 	}
 
 	for _, schema := range expectedSchemas {

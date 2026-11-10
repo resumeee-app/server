@@ -1447,6 +1447,170 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /branches/{id}/ats-score:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+    post:
+      tags:
+        - Branches & Versions
+      summary: Simulate ATS extraction and job matching score on-demand
+      description: >-
+        Executes a two-stage ATS parsing simulation on the active (or specified) completed
+        tailored version, producing an Extraction Confidence Score and Job Matching Score (0-100%).
+        Triggers once per successfully tailored version.
+      operationId: simulateBranchATSScore
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ATSSimulationRequest'
+      responses:
+        '200':
+          description: ATS extraction and matching score calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ATSScore'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /branches/{id}/versions/{v}/ats-score:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+      - name: v
+        in: path
+        required: true
+        description: Sequential version number (e.g. 1, 2) or version UUID
+        schema:
+          type: string
+    post:
+      tags:
+        - Branches & Versions
+      summary: Simulate ATS extraction and job matching score for a specific tailored version
+      description: >-
+        Executes a two-stage ATS parsing simulation on the specified completed tailored version,
+        producing an Extraction Confidence Score and Job Matching Score (0-100%).
+        Triggers once per successfully tailored version.
+      operationId: simulateBranchVersionATSScore
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ATSSimulationRequest'
+      responses:
+        '200':
+          description: ATS extraction and matching score calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ATSScore'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /resumes/{id}/ats-score:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+    post:
+      tags:
+        - Branches & Versions
+      summary: Simulate ATS extraction and job matching score on-demand for target resume
+      description: >-
+        Executes a two-stage ATS parsing simulation on the active (or specified) completed
+        tailored version of a target resume, producing an Extraction Confidence Score and Job Matching Score (0-100%).
+        Triggers once per successfully tailored version.
+      operationId: simulateResumeATSScore
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ATSSimulationRequest'
+      responses:
+        '200':
+          description: ATS extraction and matching score calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ATSScore'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /resumes/{id}/versions/{v}/ats-score:
+    parameters:
+      - $ref: '#/components/parameters/EntityId'
+      - name: v
+        in: path
+        required: true
+        description: Sequential version number (e.g. 1, 2) or version UUID
+        schema:
+          type: string
+    post:
+      tags:
+        - Branches & Versions
+      summary: Simulate ATS extraction and job matching score for a specific target resume version
+      description: >-
+        Executes a two-stage ATS parsing simulation on the specified completed tailored version
+        of a target resume, producing an Extraction Confidence Score and Job Matching Score (0-100%).
+        Triggers once per successfully tailored version.
+      operationId: simulateResumeVersionATSScore
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ATSSimulationRequest'
+      responses:
+        '200':
+          description: ATS extraction and matching score calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ATSScore'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /branches/{id}/prompt-preview:
     parameters:
       - $ref: '#/components/parameters/EntityId'
@@ -1924,6 +2088,17 @@ components:
             error:
               code: UNPROCESSABLE_ENTITY
               message: Version does not have tailored content to render
+
+    TooManyRequests:
+      description: Tenant daily request or monthly token quota exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: QUOTA_EXCEEDED
+              message: Daily LLM request quota exceeded
 
   schemas:
     TenantQuota:
@@ -2986,6 +3161,8 @@ components:
           nullable: true
         gap_report:
           $ref: '#/components/schemas/GapReport'
+        ats_score:
+          $ref: '#/components/schemas/ATSScore'
         last_synced_main_revision:
           type: integer
           format: int64
@@ -3382,6 +3559,105 @@ components:
           type: number
           nullable: true
 
+    ATSSimulationRequest:
+      type: object
+      properties:
+        version_id:
+          type: string
+          description: Optional version ID or sequential version number (defaults to active version)
+        format:
+          type: string
+          enum:
+            - markdown
+            - html
+            - text
+          description: Optional text resume format to evaluate (defaults to markdown)
+
+    ATSExtractedExperience:
+      type: object
+      required:
+        - company
+        - title
+      properties:
+        company:
+          type: string
+        title:
+          type: string
+        date_range:
+          type: string
+        highlights:
+          type: array
+          items:
+            type: string
+
+    ATSExtractedEducation:
+      type: object
+      required:
+        - institution
+        - degree
+      properties:
+        institution:
+          type: string
+        degree:
+          type: string
+        field:
+          type: string
+        date_range:
+          type: string
+
+    ATSExtractedCandidate:
+      type: object
+      properties:
+        summary:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        experiences:
+          type: array
+          items:
+            $ref: '#/components/schemas/ATSExtractedExperience'
+        educations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ATSExtractedEducation'
+        certifications:
+          type: array
+          items:
+            type: string
+
+    ATSScore:
+      type: object
+      required:
+        - extraction_confidence_score
+        - job_matching_score
+      properties:
+        extraction_confidence_score:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 92.5
+          description: Extraction confidence score ranging from 0 to 100%
+        job_matching_score:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 86.0
+          description: Perceived job matching score ranging from 0 to 100%
+        format_used:
+          type: string
+          example: markdown
+        extraction_summary:
+          type: string
+        matching_summary:
+          type: string
+        extracted_candidate:
+          $ref: '#/components/schemas/ATSExtractedCandidate'
+        evaluated_at:
+          type: string
+          format: date-time
+
     BranchVersion:
       type: object
       required:
@@ -3416,6 +3692,8 @@ components:
           $ref: '#/components/schemas/TailoredContent'
         gap_report:
           $ref: '#/components/schemas/GapReport'
+        ats_score:
+          $ref: '#/components/schemas/ATSScore'
         validation_warnings:
           type: array
           items:

@@ -53,7 +53,7 @@ func SanitizeXMLFence(content, tagName string) string {
 
 // sanitizeXMLFence applies regex matching against tag variations, whitespace, attributes, and parent enclosure tags.
 func sanitizeXMLFence(content, tagName string) string {
-	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions)\b[^>]*>`, regexp.QuoteMeta(tagName)))
+	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions|resume_document|extracted_candidate_data|ats_extraction_rules|ats_matching_rules|response_schema)\b[^>]*>`, regexp.QuoteMeta(tagName)))
 	safe := tagRegex.ReplaceAllStringFunc(content, func(m string) string {
 		escaped := strings.ReplaceAll(m, "<", "&lt;")
 		return strings.ReplaceAll(escaped, ">", "&gt;")
@@ -186,6 +186,14 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("job_description", mcpSDK.Required(), mcpSDK.Description("Target job description or requirements text")),
 		mcpSDK.WithString("branch_id", mcpSDK.Description("Optional branch ID to contextually align analysis against")),
 	), handleRunGapAnalysis(cfg))
+
+	// 8b. simulate_ats
+	s.AddTool(mcpSDK.NewTool("simulate_ats",
+		mcpSDK.WithDescription("Executes on-demand ATS extraction confidence and job matching score simulation for a completed tailored branch version."),
+		mcpSDK.WithString("branch_id", mcpSDK.Required(), mcpSDK.Description("ID of the target tailored resume branch")),
+		mcpSDK.WithString("version_id", mcpSDK.Description("Optional version ID or sequential version number (defaults to the active version)")),
+		mcpSDK.WithString("format", mcpSDK.Description("Optional text resume format to parse: 'markdown', 'html', or 'text' (defaults to 'markdown')")),
+	), handleSimulateATS(cfg))
 
 	// 9. list_presets
 	s.AddTool(mcpSDK.NewTool("list_presets",
@@ -909,6 +917,42 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		res, err := jsonToolResult(report)
 		if err != nil {
 			return mcpSDK.NewToolResultError("failed to serialize gap analysis report"), nil
+		}
+		return res, nil
+	}
+}
+
+// handleSimulateATS handles tool 'simulate_ats', executing on-demand ATS extraction and job matching score evaluation for a tailored branch version.
+func handleSimulateATS(cfg ServerConfig) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
+		defer cancel()
+
+		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
+		_ = cfg.EnsureTenant(ctx, userID)
+		args := parseArguments(req)
+
+		branchID, _ := args["branch_id"].(string)
+		versionID, _ := args["version_id"].(string)
+		format, _ := args["format"].(string)
+
+		branchID = strings.TrimSpace(branchID)
+		if branchID == "" {
+			return mcpSDK.NewToolResultError("branch_id is required"), nil
+		}
+
+		score, err := cfg.BranchService.SimulateATS(ctx, userID, branchID, &domain.ATSSimulationOptions{
+			VersionID: strings.TrimSpace(versionID),
+			Format:    strings.TrimSpace(format),
+		})
+		if err != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to simulate ATS score", "branch_id", branchID, "err", err)
+			return mcpSDK.NewToolResultError(fmt.Sprintf("failed to simulate ATS score: %v", err)), nil
+		}
+
+		res, err := jsonToolResult(score)
+		if err != nil {
+			return mcpSDK.NewToolResultError("failed to serialize ATS score"), nil
 		}
 		return res, nil
 	}
