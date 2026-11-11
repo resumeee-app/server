@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/config"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -1045,7 +1045,6 @@ func TestConfig_ParseFlags_AuthProvider(t *testing.T) {
 func TestEnvironmentTemplates_CleanDocHeaders(t *testing.T) {
 	templates := []string{
 		filepath.Join("..", "..", ".env.example"),
-		filepath.Join("..", "..", "web", ".env.example"),
 	}
 
 	issuePattern := regexp.MustCompile(`(?i)(issue\s*#?\s*\d+|ticket\s*#?\s*\d+|spec\s*#?\s*\d+|gap\s*\d+|pr\s*#?\s*\d+|task\s*#?\s*\d+|\(#[0-9]+\))`)

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/api"
-	"resumeee/internal/branch"
-	"resumeee/internal/domain"
-	"resumeee/internal/renderer"
-	"resumeee/internal/repository/memory"
-	"resumeee/internal/validator"
+	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 type mockLLMProvider struct {

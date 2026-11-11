@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"resumeee/internal/auth"
-	"resumeee/internal/domain"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 type mockTokenVerifier struct {

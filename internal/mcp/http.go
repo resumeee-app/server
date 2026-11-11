@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"resumeee/internal/auth"
-	"resumeee/internal/domain"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // connectionLimiter manages active SSE stream concurrency limits per user and across the system.

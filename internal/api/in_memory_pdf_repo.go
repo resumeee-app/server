@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // inMemoryPDFJobRepository provides a concurrent in-memory implementation of domain.PDFParseJobRepository.

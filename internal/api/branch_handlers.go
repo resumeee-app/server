@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"resumeee/internal/branch"
-	"resumeee/internal/domain"
-	"resumeee/internal/renderer"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
 type branchHandler struct {

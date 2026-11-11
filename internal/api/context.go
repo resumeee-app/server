@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // WithUserID binds an authenticated tenant user ID into the request context.

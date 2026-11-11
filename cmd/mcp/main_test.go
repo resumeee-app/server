@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/config"
-	"resumeee/internal/repository"
-	"resumeee/internal/repository/memory"
+	"github.com/resumeee-app/resumeee-api/internal/config"
+	repository "github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/memory"
 )
 
 func TestCLI_Run_StdioHandshake(t *testing.T) {

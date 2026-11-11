@@ -8,15 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"resumeee/internal/auth"
-	"resumeee/internal/branch"
-	"resumeee/internal/domain"
-	"resumeee/internal/llm"
-	"resumeee/internal/pdf"
-	"resumeee/internal/profile"
-	"resumeee/internal/repository"
-	"resumeee/internal/validator"
-	"resumeee/internal/worker"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 // JobEnqueuer defines the interface for submitting version jobs to the async generation worker pool.
@@ -128,7 +128,7 @@ type RouterConfig struct {
 	TokenVerifier     domain.TokenVerifier
 	FirebaseProjectID string
 	UserRepo          domain.UserRepository
-	Store             repository.Store
+	Store             domain.Store
 	Provisioner       TenantProvisioner
 	Logger            *slog.Logger
 	RESTTimeout       time.Duration
@@ -138,7 +138,7 @@ type RouterConfig struct {
 }
 
 type defaultTenantProvisioner struct {
-	store        repository.Store
+	store        domain.Store
 	profileRepo  domain.ProfileRepository
 	branchRepo   domain.BranchRepository
 	templateRepo domain.TemplateRepository
@@ -152,9 +152,9 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	}
 	var err error
 	if p.store != nil {
-		err = repository.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
+		err = memory.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
 	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = repository.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+		err = memory.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)

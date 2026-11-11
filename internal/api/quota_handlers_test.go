@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/api"
-	"resumeee/internal/domain"
-	"resumeee/internal/llm"
-	"resumeee/internal/profile"
-	"resumeee/internal/repository/memory"
+	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/memory"
 )
 
 func TestGetQuota_DefaultsAndRemaining(t *testing.T) {

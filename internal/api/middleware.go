@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"resumeee/internal/auth"
-	"resumeee/internal/domain"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 type responseWriterRecorder struct {

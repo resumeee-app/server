@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/auth"
-	"resumeee/internal/domain"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 func TestTimeoutMiddleware(t *testing.T) {

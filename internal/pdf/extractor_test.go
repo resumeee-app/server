@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"resumeee/internal/domain"
-	"resumeee/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-api/internal/pdf"
 )
 
 // buildMinimalPDF returns a valid binary PDF with the given text embedded in a content stream.

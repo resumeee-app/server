@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // Standard OpenAPI error codes.

@@ -16,10 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/config"
-	"resumeee/internal/domain"
-	"resumeee/internal/repository"
-	"resumeee/internal/repository/memory"
+	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/memory"
 )
 
 func freePort(t *testing.T) string {
@@ -38,7 +37,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
 		return memStore, nil
 	}
 	t.Setenv("PORT", freePort(t))
@@ -105,7 +104,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	// Force status to processing
 	_ = memStore.Branch().UpdateVersionStatus(context.Background(), ver.ID, domain.VersionStatusProcessing, "")
 
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
 		return memStore, nil
 	}
 
@@ -475,7 +474,7 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
 		return memStore, nil
 	}
 
@@ -498,7 +497,7 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
 		return memStore, nil
 	}
 

@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"resumeee/internal/domain"
-	"resumeee/internal/llm"
-	"resumeee/internal/worker"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 type profileHandler struct {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 type presetHandler struct {

@@ -17,14 +17,14 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"resumeee/internal/branch"
-	"resumeee/internal/domain"
-	resumeeeMCP "resumeee/internal/mcp"
-	"resumeee/internal/profile"
-	"resumeee/internal/renderer"
-	"resumeee/internal/repository/memory"
-	"resumeee/internal/validator"
-	"resumeee/internal/worker"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/domain"
+	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 type dummyJobEnqueuer struct {

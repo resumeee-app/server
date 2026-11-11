@@ -9,7 +9,7 @@ import (
 
 	"github.com/ledongthuc/pdf"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // PDFTextExtractor abstracts extracting textual content from PDF binary streams.

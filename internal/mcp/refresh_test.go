@@ -11,9 +11,9 @@ import (
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 
-	"resumeee/internal/domain"
-	resumeeeMCP "resumeee/internal/mcp"
-	"resumeee/internal/repository/memory"
+	"github.com/resumeee-app/resumeee-core/domain"
+	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core/memory"
 )
 
 func toolReq(name string, args map[string]any) mcpSDK.CallToolRequest {

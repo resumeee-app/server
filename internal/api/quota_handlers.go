@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 // QuotaResponse describes the tenant's current quota status, usage, limits, and reset window timestamps.

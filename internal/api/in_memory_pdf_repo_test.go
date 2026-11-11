@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"resumeee/internal/domain"
+	"github.com/resumeee-app/resumeee-core/domain"
 )
 
 func TestInMemoryPDFJobRepository_Lifecycle(t *testing.T) {

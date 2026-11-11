@@ -17,16 +17,16 @@ import (
 	"testing"
 	"time"
 
-	"resumeee/internal/api"
-	"resumeee/internal/config"
-	"resumeee/internal/domain"
-	"resumeee/internal/llm"
-	"resumeee/internal/pdf"
-	"resumeee/internal/profile"
-	"resumeee/internal/renderer"
-	"resumeee/internal/repository/memory"
-	"resumeee/internal/validator"
-	"resumeee/internal/worker"
+	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/services/worker"
+	llmproviders "github.com/resumeee-app/resumeee-llm"
 )
 
 type testEnv struct {
@@ -1976,13 +1976,11 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		defer upstreamServer.Close()
 
 		// Configure LLM registry with prompt debugging enabled targeting debugDir
-		cfg := &config.Config{
-			OpenAICompatBaseURL: upstreamServer.URL + "/v1",
-			OpenAICompatAPIKey:  "test-key",
-			LLMDebugPrompts:     true,
-			LLMDebugDir:         debugDir,
-		}
-		registry := llm.NewRegistry(cfg)
+		registry := llm.NewRegistry(llm.WithDebugPrompts(true, debugDir))
+		llmproviders.RegisterClients(registry, llmproviders.ProviderConfig{
+			CompatBaseURL: upstreamServer.URL + "/v1",
+			CompatAPIKey:  "test-key",
+		})
 		extractor := llm.NewDefaultResumeExtractor(registry)
 
 		env := setupTestServerWithExtractor(t, extractor)

@@ -16,19 +16,20 @@ import (
 	"syscall"
 	"time"
 
-	"resumeee/internal/api"
-	"resumeee/internal/auth"
-	"resumeee/internal/branch"
-	"resumeee/internal/config"
-	"resumeee/internal/llm"
-	resumeeeMCP "resumeee/internal/mcp"
-	"resumeee/internal/pdf"
-	"resumeee/internal/profile"
-	"resumeee/internal/renderer"
-	"resumeee/internal/repository"
-	"resumeee/internal/storage"
-	"resumeee/internal/validator"
-	"resumeee/internal/worker"
+	"github.com/resumeee-app/resumeee-api/internal/api"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/resumeee-core/llm"
+	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
+	repository "github.com/resumeee-app/resumeee-core/domain"
+	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
+	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/services/worker"
+	llmproviders "github.com/resumeee-app/resumeee-llm"
 )
 
 // StoreInitializer initializes a storage backend and provides a repository.Store implementation.
@@ -151,7 +152,12 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	provValidator := validator.New()
 
 	// 3. Initialize authentication registry and resolve active auth provider
-	authRegistry, err := auth.NewRegistryFromConfig(cfg)
+	authRegistry, err := auth.NewRegistryFromConfig(auth.Config{
+		DefaultUserID:     cfg.DefaultUserID,
+		FirebaseProjectID: cfg.FirebaseProjectID,
+		AuthProvider:      cfg.AuthProvider,
+		Admin:             cfg.Admin,
+	})
 	if err != nil {
 		logger.Error("failed to initialize auth registry", "err", err)
 		return fmt.Errorf("initializing auth registry: %w", err)
@@ -172,7 +178,17 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	}
 
 	// 4. Initialize LLM registry and service adapter
-	llmRegistry := llm.NewRegistry(cfg, llm.WithLogger(logger))
+	llmRegistry := llm.NewRegistry(
+		llm.WithLogger(logger),
+		llm.WithDebugPrompts(cfg.LLMDebugPrompts, cfg.LLMDebugDir),
+	)
+	llmproviders.RegisterClients(llmRegistry, llmproviders.ProviderConfig{
+		GeminiAPIKey:    cfg.GeminiAPIKey,
+		OpenAIAPIKey:    cfg.OpenAIAPIKey,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		CompatBaseURL:   cfg.OpenAICompatBaseURL,
+		CompatAPIKey:    cfg.OpenAICompatAPIKey,
+	}, llmproviders.WithTimeout(cfg.LLMTimeout))
 	llmAdapter := llm.NewServiceAdapter(llmRegistry)
 	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
 
