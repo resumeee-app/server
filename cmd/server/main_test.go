@@ -421,7 +421,8 @@ func TestRun_WithLLMDebugFlags(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "debug_test.db")
 	debugDir := filepath.Join(tmpDir, "llm_dumps")
 	t.Setenv("DB_PATH", dbPath)
-	t.Setenv("PORT", freePort(t))
+	port := freePort(t)
+	t.Setenv("PORT", port)
 	t.Setenv("ADMIN_MODE", "true")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -431,7 +432,24 @@ func TestRun_WithLLMDebugFlags(t *testing.T) {
 		errCh <- run(ctx, "-debug-llm-prompts", "-llm-debug-dir", debugDir)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to come up before cancelling
+	deadline := time.Now().Add(5 * time.Second)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%s/api/v1/health", port)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for {
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for server to become healthy")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
 	cancel()
 
 	select {

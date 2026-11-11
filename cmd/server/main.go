@@ -211,6 +211,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		Validator:         provValidator,
 		Renderer:          templateRenderer,
 		LLMService:        llmAdapter,
+		PromptCompiler:    llm.NewPromptCompiler(),
 		DailyRequestLimit: cfg.LLMDailyRequestLimit,
 		MonthlyTokenLimit: cfg.LLMMonthlyTokenLimit,
 		Logger:            logger,

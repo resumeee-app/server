@@ -120,6 +120,7 @@ type RouterConfig struct {
 	Renderer        domain.TemplateRenderer
 	Validator       validator.ProvenanceValidator
 	JobEnqueuer     JobEnqueuer
+	PromptCompiler  domain.PromptCompiler
 	ModelEnumerator ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
@@ -204,6 +205,10 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		}
 	}
 
+	if cfg.PromptCompiler == nil {
+		cfg.PromptCompiler = llm.NewPromptCompiler()
+	}
+
 	if cfg.BranchService == nil && cfg.BranchRepo != nil {
 		cfg.BranchService = branch.NewService(branch.Config{
 			BranchRepo:        cfg.BranchRepo,
@@ -214,6 +219,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 			JobEnqueuer:       cfg.JobEnqueuer,
 			Validator:         cfg.Validator,
 			Renderer:          cfg.Renderer,
+			PromptCompiler:    cfg.PromptCompiler,
 			DailyRequestLimit: cfg.DailyRequestLimit,
 			MonthlyTokenLimit: cfg.MonthlyTokenLimit,
 			Logger:            cfg.Logger,

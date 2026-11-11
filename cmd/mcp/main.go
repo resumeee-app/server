@@ -187,11 +187,12 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		PresetRepo:   presetRepo,
 		TemplateRepo: templateRepo,
 		QuotaRepo:    store.Quota(),
-		JobEnqueuer:  workerPool,
-		Validator:    provValidator,
-		Renderer:     templateRenderer,
-		LLMService:   llmAdapter,
-		Logger:       logger,
+		JobEnqueuer:    workerPool,
+		Validator:      provValidator,
+		Renderer:       templateRenderer,
+		LLMService:     llmAdapter,
+		PromptCompiler: llm.NewPromptCompiler(),
+		Logger:         logger,
 	})
 
 	mcpCfg := resumeeeMCP.ServerConfig{
