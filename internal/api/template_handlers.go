@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
@@ -68,7 +68,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if templates == nil {
-		templates = []domain.TemplateSet{}
+		templates = []core.TemplateSet{}
 	}
 	writeJSON(w, http.StatusOK, templates)
 }
@@ -88,7 +88,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	tmpl := domain.TemplateSet{
+	tmpl := core.TemplateSet{
 		ID:               "tmpl-" + uuid.New().String(),
 		UserID:           userID,
 		Name:             req.Name,
@@ -105,7 +105,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.cfg.TemplateRepo.CreateTemplate(ctx, &tmpl); err != nil {
-		if errors.Is(err, domain.ErrTemplateSyntax) {
+		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
@@ -183,7 +183,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.cfg.TemplateRepo.UpdateTemplate(ctx, tmpl); err != nil {
-		if errors.Is(err, domain.ErrTemplateSyntax) {
+		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
@@ -225,12 +225,12 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 }
 
 // getRenderContext constructs a comprehensive execution context for template rendering.
-func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *domain.TemplateSet) *renderer.RenderContext {
+func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
 	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileRepo, userID, tmpl)
 }
 
 // renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
-func (h *templateHandler) renderAllFormats(tmpl *domain.TemplateSet, renderCtx *renderer.RenderContext) (domain.RenderOutput, error) {
+func (h *templateHandler) renderAllFormats(tmpl *core.TemplateSet, renderCtx *renderer.RenderContext) (core.RenderOutput, error) {
 	return renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 }
 
@@ -249,7 +249,7 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 	renderCtx := h.getRenderContext(ctx, userID, tmpl)
 	out, err := h.renderAllFormats(tmpl, renderCtx)
 	if err != nil {
-		if errors.Is(err, domain.ErrTemplateSyntax) {
+		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}
@@ -284,7 +284,7 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	tmpl := &domain.TemplateSet{
+	tmpl := &core.TemplateSet{
 		HTMLTemplate:     htmlTmpl,
 		CSSStyles:        cssStyles,
 		MarkdownTemplate: mdTmpl,
@@ -298,7 +298,7 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 
 	out, err := h.renderAllFormats(tmpl, renderCtx)
 	if err != nil {
-		if errors.Is(err, domain.ErrTemplateSyntax) {
+		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}

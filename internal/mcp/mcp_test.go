@@ -18,7 +18,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
@@ -41,22 +41,22 @@ func (d *dummyJobEnqueuer) Enqueue(job worker.GenerationJob) error {
 
 type dummyLLMService struct{}
 
-func (d *dummyLLMService) GenerateTailoredResume(ctx context.Context, req domain.GenerationRequest) (*domain.GenerationResponse, error) {
-	return &domain.GenerationResponse{
-		TailoredContent: domain.TailoredContent{
+func (d *dummyLLMService) GenerateTailoredResume(ctx context.Context, req core.GenerationRequest) (*core.GenerationResponse, error) {
+	return &core.GenerationResponse{
+		TailoredContent: core.TailoredContent{
 			Summary: "Tailored summary for " + req.BranchContext.TargetRole,
 		},
-		GapReport: domain.GapReport{
+		GapReport: core.GapReport{
 			OverallMatchSummary: "Great match",
 		},
 	}, nil
 }
 
-func (d *dummyLLMService) GenerateGapAnalysis(ctx context.Context, req domain.GenerationRequest) (*domain.GapReport, error) {
-	return &domain.GapReport{
+func (d *dummyLLMService) GenerateGapAnalysis(ctx context.Context, req core.GenerationRequest) (*core.GapReport, error) {
+	return &core.GapReport{
 		OverallMatchSummary: "Decoupled gap analysis match for " + req.BranchContext.TargetRole,
-		MissingRequirements: []domain.GapItem{
-			{Requirement: "Kubernetes experience", Importance: domain.GapImportanceCritical},
+		MissingRequirements: []core.GapItem{
+			{Requirement: "Kubernetes experience", Importance: core.GapImportanceCritical},
 		},
 	}, nil
 }
@@ -79,13 +79,13 @@ type jsonRPCResponse struct {
 
 type testEnv struct {
 	db               any
-	profileRepo      domain.ProfileRepository
-	branchRepo       domain.BranchRepository
-	presetRepo       domain.PresetRepository
-	templateRepo     domain.TemplateRepository
+	profileRepo      core.ProfileRepository
+	branchRepo       core.BranchRepository
+	presetRepo       core.PresetRepository
+	templateRepo     core.TemplateRepository
 	profileSvc       profile.Service
 	branchSvc        branch.Service
-	templateRenderer domain.TemplateRenderer
+	templateRenderer core.TemplateRenderer
 	jobEnqueuer      *dummyJobEnqueuer
 	logger           *slog.Logger
 	cfg              resumeeeMCP.ServerConfig
@@ -223,7 +223,7 @@ func TestTool_GetMainProfile(t *testing.T) {
 	}
 
 	text := result.Content[0].(mcpSDK.TextContent).Text
-	var snapshot domain.MainProfileSnapshot
+	var snapshot core.MainProfileSnapshot
 	if err := json.Unmarshal([]byte(text), &snapshot); err != nil {
 		t.Fatalf("failed to unmarshal snapshot JSON: %v, raw: %s", err, text)
 	}
@@ -250,7 +250,7 @@ func TestTool_ListBranches(t *testing.T) {
 	}
 
 	text := result.Content[0].(mcpSDK.TextContent).Text
-	var branches []domain.Branch
+	var branches []core.Branch
 	if err := json.Unmarshal([]byte(text), &branches); err != nil {
 		t.Fatalf("failed to unmarshal branches JSON: %v, raw: %s", err, text)
 	}
@@ -329,12 +329,12 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 	}
 
 	// Create an experience for user-1
-	exp := &domain.WorkExperience{
+	exp := &core.WorkExperience{
 		ID:        "exp-123",
 		UserID:    "user-1",
 		Company:   "Stripe",
 		RoleTitle: "Backend Engineer",
-		StartDate: domain.NewDate(2021, 1, 1),
+		StartDate: core.NewDate(2021, 1, 1),
 	}
 	if err := env.profileRepo.CreateExperience(ctx, exp); err != nil {
 		t.Fatalf("failed to create seed experience: %v", err)
@@ -360,12 +360,12 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 
 	t.Run("foreign owner entity rejected", func(t *testing.T) {
 		// Create experience for user-2
-		foreignExp := &domain.WorkExperience{
+		foreignExp := &core.WorkExperience{
 			ID:        "exp-foreign",
 			UserID:    "user-2",
 			Company:   "Other",
 			RoleTitle: "Dev",
-			StartDate: domain.NewDate(2020, 1, 1),
+			StartDate: core.NewDate(2020, 1, 1),
 		}
 		if err := env.profileRepo.CreateExperience(context.Background(), foreignExp); err != nil {
 			t.Fatalf("failed to create foreign experience: %v", err)
@@ -446,7 +446,7 @@ func TestTool_CreateBranch(t *testing.T) {
 
 	t.Run("foreign template set rejected", func(t *testing.T) {
 		// Create template owned by user-2
-		foreignTmpl := &domain.TemplateSet{
+		foreignTmpl := &core.TemplateSet{
 			ID:               "tmpl-foreign",
 			UserID:           "user-2",
 			Name:             "Secret Theme",
@@ -501,7 +501,7 @@ func TestTool_CreateBranch(t *testing.T) {
 			t.Fatal("expected content in result")
 		}
 		text := result.Content[0].(mcpSDK.TextContent).Text
-		var created domain.Branch
+		var created core.Branch
 		if err := json.Unmarshal([]byte(text), &created); err != nil {
 			t.Fatalf("failed to unmarshal created branch JSON: %v, raw: %s", err, text)
 		}
@@ -541,7 +541,7 @@ func TestTool_CreateBranch(t *testing.T) {
 		}
 	})
 
-	adminCtx := domain.WithIsAdmin(ctx, true)
+	adminCtx := core.WithIsAdmin(ctx, true)
 
 	t.Run("non-admin branch creation with model selection is rejected", func(t *testing.T) {
 		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
@@ -590,7 +590,7 @@ func TestTool_CreateBranch(t *testing.T) {
 		}
 
 		text := result.Content[0].(mcpSDK.TextContent).Text
-		var created domain.Branch
+		var created core.Branch
 		if err := json.Unmarshal([]byte(text), &created); err != nil {
 			t.Fatalf("failed to unmarshal created branch JSON: %v", err)
 		}
@@ -643,7 +643,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
 	// Pre-create branch for testing update
-	initBranch := &domain.Branch{
+	initBranch := &core.Branch{
 		ID:            "br-update-1",
 		UserID:        "user-1",
 		Name:          "Initial Branch",
@@ -693,7 +693,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 		}
 	})
 
-	adminCtx := domain.WithIsAdmin(ctx, true)
+	adminCtx := core.WithIsAdmin(ctx, true)
 
 	t.Run("non-admin update with model selection is rejected", func(t *testing.T) {
 		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
@@ -761,7 +761,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 		}
 
 		text := result.Content[0].(mcpSDK.TextContent).Text
-		var updated domain.Branch
+		var updated core.Branch
 		if err := json.Unmarshal([]byte(text), &updated); err != nil {
 			t.Fatalf("failed to unmarshal updated branch: %v", err)
 		}
@@ -794,7 +794,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
 	// Create a branch for user-1
-	b := &domain.Branch{
+	b := &core.Branch{
 		ID:            "br-tailor-1",
 		UserID:        "user-1",
 		Name:          "Stripe Backend",
@@ -871,7 +871,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 	})
 
 	t.Run("tailor resume accepts model selection overrides for admin", func(t *testing.T) {
-		adminCtx := domain.WithIsAdmin(ctx, true)
+		adminCtx := core.WithIsAdmin(ctx, true)
 		res, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
 				Arguments: map[string]any{
@@ -925,7 +925,7 @@ func TestTool_RunGapAnalysis(t *testing.T) {
 	}
 
 	text := result.Content[0].(mcpSDK.TextContent).Text
-	var report domain.GapReport
+	var report core.GapReport
 	if err := json.Unmarshal([]byte(text), &report); err != nil {
 		t.Fatalf("failed to unmarshal gap report JSON: %v, raw: %s", err, text)
 	}
@@ -938,7 +938,7 @@ func TestTool_RunGapAnalysis(t *testing.T) {
 	if report.MissingRequirements[0].Requirement != "Kubernetes experience" {
 		t.Errorf("unexpected missing requirement: %s", report.MissingRequirements[0].Requirement)
 	}
-	if report.MissingRequirements[0].Importance != domain.GapImportanceCritical {
+	if report.MissingRequirements[0].Importance != core.GapImportanceCritical {
 		t.Errorf("unexpected gap importance: %v", report.MissingRequirements[0].Importance)
 	}
 }
@@ -948,7 +948,7 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
 	// Create a branch with a completed version containing HTML with malicious script tags
-	b := &domain.Branch{
+	b := &core.Branch{
 		ID:            "br-render-1",
 		UserID:        "user-1",
 		Name:          "Render Branch",
@@ -960,11 +960,11 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 
 	now := time.Now().UTC()
 	rawHTMLWithScript := `<div class="resume"><h1>John Doe</h1><script>alert("xss")</script><script src="evil.js"></script><p>Engineer</p></div>`
-	ver := &domain.BranchVersion{
+	ver := &core.BranchVersion{
 		ID:                 "ver-render-1",
 		BranchID:           b.ID,
 		VersionNumber:      1,
-		Status:             domain.VersionStatusCompleted,
+		Status:             core.VersionStatusCompleted,
 		MainRevisionUsed:   1,
 		TemplateSetIDUsed:  "builtin-standard-clean",
 		HTMLOutput:         rawHTMLWithScript,
@@ -1413,7 +1413,7 @@ func TestResources_BranchDetails(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
-	b := &domain.Branch{
+	b := &core.Branch{
 		ID:            "br-res-1",
 		UserID:        "user-1",
 		Name:          "Resource Branch",
@@ -1445,7 +1445,7 @@ func TestResources_BranchDetails(t *testing.T) {
 		}
 
 		var payload struct {
-			Branch domain.Branch `json:"branch"`
+			Branch core.Branch `json:"branch"`
 		}
 		if err := json.Unmarshal([]byte(rpcResp.Result.Contents[0].Text), &payload); err != nil {
 			t.Fatalf("failed to unmarshal branch resource contents: %v", err)
@@ -1507,7 +1507,7 @@ func TestResources_TemplateSet(t *testing.T) {
 			t.Fatalf("expected result contents, got: %+v", rpcResp.Result)
 		}
 
-		var tmpl domain.TemplateSet
+		var tmpl core.TemplateSet
 		if err := json.Unmarshal([]byte(rpcResp.Result.Contents[0].Text), &tmpl); err != nil {
 			t.Fatalf("failed to unmarshal template set: %v", err)
 		}
@@ -1729,7 +1729,7 @@ func TestTools_SimulateATS(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := resumeeeMCP.WithUserID(context.Background(), "user-1")
 
-	b := &domain.Branch{
+	b := &core.Branch{
 		ID:                 "branch-mcp-ats-1",
 		UserID:             "user-1",
 		Name:               "MCP Cloud Engineer",
@@ -1740,11 +1740,11 @@ func TestTools_SimulateATS(t *testing.T) {
 	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
-	v1 := &domain.BranchVersion{
+	v1 := &core.BranchVersion{
 		ID:               "ver-mcp-ats-1",
 		BranchID:         b.ID,
 		MainRevisionUsed: 1,
-		Status:           domain.VersionStatusCompleted,
+		Status:           core.VersionStatusCompleted,
 		MarkdownOutput:   "# Candidate\n## Summary\nCloud Engineer experienced in Go, Kubernetes, and AWS.",
 	}
 	if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
@@ -1775,7 +1775,7 @@ func TestTools_SimulateATS(t *testing.T) {
 	}
 
 	text := res.Content[0].(mcpSDK.TextContent).Text
-	var score domain.ATSScore
+	var score core.ATSScore
 	if err := json.Unmarshal([]byte(text), &score); err != nil {
 		t.Fatalf("failed to unmarshal ATSScore from tool output: %v (raw: %s)", err, text)
 	}

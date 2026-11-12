@@ -10,7 +10,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
@@ -40,13 +40,13 @@ func NewChannelQueue[T any](capacity int) *ChannelQueue[T] {
 	}
 }
 
-// Push sends an item to the buffered channel or returns domain.ErrQueueFull if saturated.
+// Push sends an item to the buffered channel or returns core.ErrQueueFull if saturated.
 func (q *ChannelQueue[T]) Push(item T) error {
 	select {
 	case q.ch <- item:
 		return nil
 	default:
-		return domain.ErrQueueFull
+		return core.ErrQueueFull
 	}
 }
 
@@ -67,7 +67,7 @@ func NewChannelJobEnqueuer(capacity int) *ChannelJobEnqueuer {
 	}
 }
 
-// Enqueue sends a GenerationJob to the buffered channel or returns domain.ErrQueueFull if saturated.
+// Enqueue sends a GenerationJob to the buffered channel or returns core.ErrQueueFull if saturated.
 func (e *ChannelJobEnqueuer) Enqueue(job worker.GenerationJob) error {
 	return e.queue.Push(job)
 }
@@ -89,7 +89,7 @@ func NewChannelPDFJobEnqueuer(capacity int) *ChannelPDFJobEnqueuer {
 	}
 }
 
-// EnqueuePDFJob sends a PDFParseJobTask to the buffered channel or returns domain.ErrQueueFull if saturated.
+// EnqueuePDFJob sends a PDFParseJobTask to the buffered channel or returns core.ErrQueueFull if saturated.
 func (e *ChannelPDFJobEnqueuer) EnqueuePDFJob(task worker.PDFParseJobTask) error {
 	return e.queue.Push(task)
 }
@@ -101,29 +101,29 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan worker.PDFParseJobTask {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileRepo     domain.ProfileRepository
-	PresetRepo      domain.PresetRepository
-	TemplateRepo    domain.TemplateRepository
-	BranchRepo      domain.BranchRepository
-	PDFJobRepo      domain.PDFParseJobRepository
+	ProfileRepo     core.ProfileRepository
+	PresetRepo      core.PresetRepository
+	TemplateRepo    core.TemplateRepository
+	BranchRepo      core.BranchRepository
+	PDFJobRepo      core.PDFParseJobRepository
 	PDFJobEnqueuer  PDFJobEnqueuer
-	QuotaRepo       domain.QuotaRepository
+	QuotaRepo       core.QuotaRepository
 	BranchService   branch.Service
 	ProfileService  profile.Service
-	PDFExtractor    domain.PDFTextExtractor
+	PDFExtractor    core.PDFTextExtractor
 	ResumeExtractor llm.ResumeExtractor
-	Renderer        domain.TemplateRenderer
+	Renderer        core.TemplateRenderer
 	Validator       validator.ProvenanceValidator
 	JobEnqueuer     JobEnqueuer
-	PromptCompiler  domain.PromptCompiler
-	ModelEnumerator domain.ModelEnumerator
+	PromptCompiler  core.PromptCompiler
+	ModelEnumerator core.ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
 	AuthProvider      auth.Provider
-	TokenVerifier     domain.TokenVerifier
+	TokenVerifier     core.TokenVerifier
 	FirebaseProjectID string
-	UserRepo          domain.UserRepository
-	Store             domain.Store
+	UserRepo          core.UserRepository
+	Store             core.Store
 	Provisioner       TenantProvisioner
 	Logger            *slog.Logger
 	RESTTimeout       time.Duration
@@ -133,23 +133,23 @@ type RouterConfig struct {
 }
 
 type defaultTenantProvisioner struct {
-	store        domain.Store
-	profileRepo  domain.ProfileRepository
-	branchRepo   domain.BranchRepository
-	templateRepo domain.TemplateRepository
-	userRepo     domain.UserRepository
+	store        core.Store
+	profileRepo  core.ProfileRepository
+	branchRepo   core.BranchRepository
+	templateRepo core.TemplateRepository
+	userRepo     core.UserRepository
 	provisioned  sync.Map
 }
 
-func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *domain.User) error {
+func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error {
 	if _, ok := p.provisioned.Load(userID); ok {
 		return nil
 	}
 	var err error
 	if p.store != nil {
-		err = domain.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
+		err = core.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
 	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = domain.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+		err = core.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)
@@ -195,7 +195,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
 	}
 	if cfg.ModelEnumerator == nil {
-		if me, ok := cfg.ResumeExtractor.(domain.ModelEnumerator); ok {
+		if me, ok := cfg.ResumeExtractor.(core.ModelEnumerator); ok {
 			cfg.ModelEnumerator = me
 		}
 	}
@@ -278,12 +278,12 @@ func registerHealthRoutes(mux *http.ServeMux) {
 // registerModelRoutes registers endpoints exposing configured LLM provider and model options.
 func registerModelRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	modelsHandler := func(w http.ResponseWriter, _ *http.Request) {
-		var models []domain.ModelOption
+		var models []core.ModelOption
 		if cfg.ModelEnumerator != nil {
 			models = cfg.ModelEnumerator.AvailableModels()
 		}
 		if models == nil {
-			models = []domain.ModelOption{}
+			models = []core.ModelOption{}
 		}
 		writeJSON(w, http.StatusOK, models)
 	}

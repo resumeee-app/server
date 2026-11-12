@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
@@ -65,8 +65,8 @@ func (m *mockLLMClient) DefaultModel() string {
 	return m.defaultModel
 }
 
-func (m *mockLLMClient) Models() []domain.ModelOption {
-	return []domain.ModelOption{
+func (m *mockLLMClient) Models() []core.ModelOption {
+	return []core.ModelOption{
 		{
 			Provider:    m.name,
 			Model:       m.defaultModel,
@@ -76,11 +76,11 @@ func (m *mockLLMClient) Models() []domain.ModelOption {
 	}
 }
 
-func (m *mockLLMClient) Complete(_ context.Context, _ domain.LLMCompletionRequest) (*domain.LLMCompletionResponse, error) {
-	return &domain.LLMCompletionResponse{
+func (m *mockLLMClient) Complete(_ context.Context, _ core.LLMCompletionRequest) (*core.LLMCompletionResponse, error) {
+	return &core.LLMCompletionResponse{
 		Text:       `{"tailored_content":{}}`,
 		StatusCode: http.StatusOK,
-		Usage: domain.TokenUsage{
+		Usage: core.TokenUsage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -97,9 +97,9 @@ func (m *mockAuthProvider) Name() string {
 	return "custom-auth"
 }
 
-func (m *mockAuthProvider) VerifyIDToken(_ context.Context, idToken string) (*domain.TokenInfo, error) {
+func (m *mockAuthProvider) VerifyIDToken(_ context.Context, idToken string) (*core.TokenInfo, error) {
 	if idToken == m.expectedToken {
-		return &domain.TokenInfo{
+		return &core.TokenInfo{
 			UID:   m.userID,
 			Email: "custom@example.com",
 		}, nil
@@ -125,7 +125,7 @@ func TestServer_RunWithInjectedDependencies(t *testing.T) {
 	}
 
 	customUser := "custom-tenant"
-	if err := memStore.Profile().UpsertProfile(ctx, &domain.Profile{
+	if err := memStore.Profile().UpsertProfile(ctx, &core.Profile{
 		UserID:   customUser,
 		FullName: "Ada Lovelace",
 		Headline: "Analytical Engine Architect",
@@ -174,7 +174,7 @@ func TestServer_RunWithInjectedDependencies(t *testing.T) {
 		_ = resp.Body.Close()
 		t.Fatalf("expected 200 OK for profile, got %d", resp.StatusCode)
 	}
-	var prof domain.Profile
+	var prof core.Profile
 	if err := json.NewDecoder(resp.Body).Decode(&prof); err != nil {
 		_ = resp.Body.Close()
 		t.Fatalf("failed to decode profile: %v", err)

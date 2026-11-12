@@ -26,14 +26,14 @@ import (
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	repository "github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
-// StoreInitializer initializes a storage backend and provides a repository.Store implementation.
-type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error)
+// StoreInitializer initializes a storage backend and provides a core.Store implementation.
+type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
 // defaultSQLiteInitializer establishes the default SQLite persistence backend, executing migrations and default seeding.
 //
@@ -43,9 +43,9 @@ type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog
 //   - logger: System logger for recording initialization milestones.
 //
 // Returns:
-//   - repository.Store: Initialized SQLite store bundle.
+//   - core.Store: Initialized SQLite store bundle.
 //   - error: Non-nil if database connection, schema migration, or default seeding fails.
-func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error) {
 	store, err := storage.Open(ctx, storage.Config{
 		Driver:        storage.DriverSQLite,
 		DSN:           cfg.DBPath,

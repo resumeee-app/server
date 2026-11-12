@@ -11,7 +11,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/privacy"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
@@ -64,14 +64,14 @@ func jsonToolResult(v any) (*mcpSDK.CallToolResult, error) {
 	return mcpSDK.NewToolResultText(string(bytes)), nil
 }
 
-// extractFormatOutput maps canonical domain.OutputFormat constants to the appropriate output string.
-func extractFormatOutput(format domain.OutputFormat, html, md, text string) string {
+// extractFormatOutput maps canonical core.OutputFormat constants to the appropriate output string.
+func extractFormatOutput(format core.OutputFormat, html, md, text string) string {
 	switch format {
-	case domain.OutputFormatHTML:
+	case core.OutputFormatHTML:
 		return html
-	case domain.OutputFormatMarkdown:
+	case core.OutputFormatMarkdown:
 		return md
-	case domain.OutputFormatPlainText:
+	case core.OutputFormatPlainText:
 		return text
 	default:
 		return ""
@@ -258,7 +258,7 @@ func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *domain.MainProfileSnapshot
+		var snapshot *core.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
 			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
@@ -322,14 +322,14 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		formatRaw, _ := args["format"].(string)
-		var outputFormat domain.OutputFormat
+		var outputFormat core.OutputFormat
 		switch strings.ToLower(strings.TrimSpace(formatRaw)) {
 		case "html":
-			outputFormat = domain.OutputFormatHTML
+			outputFormat = core.OutputFormatHTML
 		case "markdown":
-			outputFormat = domain.OutputFormatMarkdown
+			outputFormat = core.OutputFormatMarkdown
 		case "text", "plain_text":
-			outputFormat = domain.OutputFormatPlainText
+			outputFormat = core.OutputFormatPlainText
 		default:
 			return mcpSDK.NewToolResultError("format must be 'html', 'markdown', or 'text'"), nil
 		}
@@ -352,7 +352,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			}
 		}
 
-		var ver *domain.BranchVersion
+		var ver *core.BranchVersion
 		if versionNum > 0 {
 			v, vErr := cfg.BranchRepo.GetVersionByNumber(ctx, branchID, versionNum)
 			if vErr != nil || v == nil {
@@ -385,7 +385,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -402,7 +402,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			output = extractFormatOutput(outputFormat, ver.HTMLOutput, ver.MarkdownOutput, ver.PlainTextOutput)
 		}
 
-		if outputFormat == domain.OutputFormatHTML {
+		if outputFormat == core.OutputFormatHTML {
 			output = stripScriptTags(output)
 		}
 
@@ -432,14 +432,14 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("company, role_title, and start_date are required fields"), nil
 		}
 
-		startDate, err := domain.ParseDate(startDateStr)
+		startDate, err := core.ParseDate(startDateStr)
 		if err != nil || startDate.IsZero() {
 			return mcpSDK.NewToolResultError("valid start_date is required (format: YYYY-MM-DD)"), nil
 		}
 
-		var endDate *domain.Date
+		var endDate *core.Date
 		if ed, ok := args["end_date"].(string); ok && strings.TrimSpace(ed) != "" {
-			if parsed, err := domain.ParseDate(ed); err == nil && !parsed.IsZero() {
+			if parsed, err := core.ParseDate(ed); err == nil && !parsed.IsZero() {
 				endDate = &parsed
 			}
 		}
@@ -449,7 +449,7 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			isCurrent = ic
 		}
 
-		var loc domain.Location
+		var loc core.Location
 		if l, ok := args["location"].(string); ok && l != "" {
 			loc.Address = l
 		}
@@ -459,7 +459,7 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			summary = s
 		}
 
-		exp := &domain.WorkExperience{
+		exp := &core.WorkExperience{
 			ID:            "exp-" + uuid.New().String(),
 			UserID:        userID,
 			Company:       company,
@@ -498,10 +498,10 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		rawOwnerType, _ := args["owner_type"].(string)
 		rawOwnerType = strings.TrimSpace(strings.ToLower(rawOwnerType))
-		ownerType := domain.OwnerType(rawOwnerType)
-		if ownerType != domain.OwnerTypeWorkExperience &&
-			ownerType != domain.OwnerTypeProject &&
-			ownerType != domain.OwnerTypeEducation {
+		ownerType := core.OwnerType(rawOwnerType)
+		if ownerType != core.OwnerTypeWorkExperience &&
+			ownerType != core.OwnerTypeProject &&
+			ownerType != core.OwnerTypeEducation {
 			return mcpSDK.NewToolResultError("invalid owner_type: must be 'work_experience', 'project', or 'education'"), nil
 		}
 
@@ -514,13 +514,13 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		// Verify target owner entity exists and belongs to the authenticated user
 		var exists bool
 		switch ownerType {
-		case domain.OwnerTypeWorkExperience:
+		case core.OwnerTypeWorkExperience:
 			exp, err := cfg.ProfileRepo.GetExperience(ctx, userID, ownerID)
 			exists = err == nil && exp != nil && exp.UserID == userID
-		case domain.OwnerTypeProject:
+		case core.OwnerTypeProject:
 			proj, err := cfg.ProfileRepo.GetProject(ctx, userID, ownerID)
 			exists = err == nil && proj != nil && proj.UserID == userID
-		case domain.OwnerTypeEducation:
+		case core.OwnerTypeEducation:
 			edu, err := cfg.ProfileRepo.GetEducation(ctx, userID, ownerID)
 			exists = err == nil && edu != nil && edu.UserID == userID
 		}
@@ -529,7 +529,7 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("%s with ID %q not found or access denied", ownerType, ownerID)), nil
 		}
 
-		fact := &domain.Fact{
+		fact := &core.Fact{
 			ID:        "fact-" + uuid.New().String(),
 			UserID:    userID,
 			OwnerID:   ownerID,
@@ -574,11 +574,11 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		providerOverride = strings.TrimSpace(providerOverride)
 		modelOverride = strings.TrimSpace(modelOverride)
 		reasoningLevel = strings.TrimSpace(strings.ToLower(reasoningLevel))
-		if err := domain.ValidateReasoningLevel(reasoningLevel); err != nil {
+		if err := core.ValidateReasoningLevel(reasoningLevel); err != nil {
 			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 		}
 
-		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		isAdmin := cfg.Admin || core.IsAdminFromContext(ctx)
 		if !isAdmin && (providerOverride != "" || modelOverride != "" || reasoningLevel != "") {
 			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
 		}
@@ -597,7 +597,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 					err = nil
 				}
 			}
-			if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+			if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strategyID)), nil
 			}
 			stratPtr = &strategyID
@@ -608,7 +608,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			templateSetID = "builtin-standard-clean"
 		}
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -618,7 +618,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			fencedRequirements = sanitizeXMLFence(targetRequirements, "target_job_description")
 		}
 
-		branch := &domain.Branch{
+		branch := &core.Branch{
 			ID:                  "branch-" + uuid.New().String(),
 			UserID:              userID,
 			Name:                name,
@@ -709,7 +709,7 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 						err = nil
 					}
 				}
-				if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+				if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strat)), nil
 				}
 				branch.TailoringStrategyID = &strat
@@ -723,13 +723,13 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			tmplID = strings.TrimSpace(tmplID)
 			if tmplID != "" {
 				tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, tmplID)
-				if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+				if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", tmplID)), nil
 				}
 				branch.TemplateSetID = tmplID
 			}
 		}
-		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		isAdmin := cfg.Admin || core.IsAdminFromContext(ctx)
 		if !isAdmin && (args["provider_override"] != nil || args["model_override"] != nil || args["reasoning_level"] != nil) {
 			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
 		}
@@ -742,7 +742,7 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		if rLvl, ok := args["reasoning_level"].(string); ok {
 			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
-			if err := domain.ValidateReasoningLevel(rLvl); err != nil {
+			if err := core.ValidateReasoningLevel(rLvl); err != nil {
 				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 			}
 			branch.ReasoningLevel = rLvl
@@ -793,7 +793,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			branch.BranchInstructions = branch.CustomDirectives
 		}
 
-		isAdmin := cfg.Admin || domain.IsAdminFromContext(ctx)
+		isAdmin := cfg.Admin || core.IsAdminFromContext(ctx)
 		if !isAdmin && (args["provider_override"] != nil || args["model_override"] != nil || args["reasoning_level"] != nil) {
 			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
 		}
@@ -806,7 +806,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		if rLvl, ok := args["reasoning_level"].(string); ok && strings.TrimSpace(rLvl) != "" {
 			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
-			if err := domain.ValidateReasoningLevel(rLvl); err != nil {
+			if err := core.ValidateReasoningLevel(rLvl); err != nil {
 				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 			}
 			branch.ReasoningLevel = rLvl
@@ -921,7 +921,7 @@ func handleSimulateATS(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("branch_id is required"), nil
 		}
 
-		score, err := cfg.BranchService.SimulateATS(ctx, userID, branchID, &domain.ATSSimulationOptions{
+		score, err := cfg.BranchService.SimulateATS(ctx, userID, branchID, &core.ATSSimulationOptions{
 			VersionID: strings.TrimSpace(versionID),
 			Format:    strings.TrimSpace(format),
 		})
@@ -957,13 +957,13 @@ func handleListPresets(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("failed to list presets due to an internal repository error"), nil
 		}
 		if presets == nil {
-			presets = []domain.Preset{}
+			presets = []core.Preset{}
 		}
 
 		args := parseArguments(req)
 		if langRaw, ok := args["language"].(string); ok && strings.TrimSpace(langRaw) != "" {
 			targetLang := strings.TrimSpace(langRaw)
-			filtered := make([]domain.Preset, 0, len(presets))
+			filtered := make([]core.Preset, 0, len(presets))
 			for _, p := range presets {
 				if strings.EqualFold(p.EffectiveLanguage(), targetLang) {
 					filtered = append(filtered, p)
@@ -997,7 +997,7 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
 
@@ -1036,13 +1036,13 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if templateSetID != "" && cfg.TemplateRepo != nil {
 			tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
-			if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+			if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
 			}
 		}
 
 		langRaw, _ := args["language"].(string)
-		validatedLang, err := domain.ValidateLanguage(langRaw)
+		validatedLang, err := core.ValidateLanguage(langRaw)
 		if err != nil {
 			return mcpSDK.NewToolResultError(err.Error()), nil
 		}
@@ -1052,7 +1052,7 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			suggestedTheme = &templateSetID
 		}
 
-		preset := domain.Preset{
+		preset := core.Preset{
 			ID:                 "preset-" + uuid.New().String(),
 			UserID:             userID,
 			Name:               name,
@@ -1093,11 +1093,11 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
 
-		if preset.IsBuiltIn() || strings.HasPrefix(preset.ID, "builtin-") || preset.UserID == domain.SystemUserID {
+		if preset.IsBuiltIn() || strings.HasPrefix(preset.ID, "builtin-") || preset.UserID == core.SystemUserID {
 			return mcpSDK.NewToolResultError("built-in presets cannot be modified (immutable)"), nil
 		}
 
@@ -1119,7 +1119,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if rawTemplateID != "" {
 			if cfg.TemplateRepo != nil {
 				tmpl, tErr := cfg.TemplateRepo.GetTemplate(ctx, userID, rawTemplateID)
-				if tErr != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+				if tErr != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)), nil
 				}
 			}
@@ -1127,7 +1127,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			preset.SuggestedThemeID = &rawTemplateID
 		}
 		if langRaw, ok := args["language"].(string); ok {
-			validatedLang, err := domain.ValidateLanguage(langRaw)
+			validatedLang, err := core.ValidateLanguage(langRaw)
 			if err != nil {
 				return mcpSDK.NewToolResultError(err.Error()), nil
 			}
@@ -1147,8 +1147,8 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 func handleListSupportedLanguages(_ ServerConfig) serverSDK.ToolHandlerFunc {
 	return func(_ context.Context, _ mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
 		return jsonToolResult(map[string]any{
-			"default_language":    domain.DefaultLanguage,
-			"supported_languages": domain.SupportedLanguages,
+			"default_language":    core.DefaultLanguage,
+			"supported_languages": core.SupportedLanguages,
 		})
 	}
 }
@@ -1170,7 +1170,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		skillType, _ := args["type"].(string)
 		skillType = strings.ToLower(strings.TrimSpace(skillType))
 
-		var skills []domain.Skill
+		var skills []core.Skill
 		var err error
 		switch skillType {
 		case "global":
@@ -1178,7 +1178,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		case "custom":
 			all, lErr := cfg.ProfileRepo.ListSkills(ctx, userID)
 			if lErr == nil {
-				skills = make([]domain.Skill, 0, len(all))
+				skills = make([]core.Skill, 0, len(all))
 				for _, s := range all {
 					if !s.IsGlobal && s.UserID == userID {
 						skills = append(skills, s)
@@ -1195,7 +1195,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("failed to list skills due to an internal repository error"), nil
 		}
 		if skills == nil {
-			skills = []domain.Skill{}
+			skills = []core.Skill{}
 		}
 
 		return jsonToolResult(skills)
@@ -1291,9 +1291,9 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			keywords = kw
 		}
 
-		skill := domain.Skill{
-			ID:              domain.GenerateID("skill"),
-			ShortID:         domain.GenerateShortID("skill"),
+		skill := core.Skill{
+			ID:              core.GenerateID("skill"),
+			ShortID:         core.GenerateShortID("skill"),
 			UserID:          userID,
 			Name:            name,
 			Category:        strings.TrimSpace(category),

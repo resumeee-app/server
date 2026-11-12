@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
@@ -89,8 +89,8 @@ type UpdateProfileRequest struct {
 	Headline           *string             `json:"headline"`
 	Email              *string             `json:"email"`
 	Phone              *string             `json:"phone"`
-	Location           *domain.Location    `json:"location"`
-	Profiles           []domain.SocialLink `json:"profiles"`
+	Location           *core.Location    `json:"location"`
+	Profiles           []core.SocialLink `json:"profiles"`
 	Summary            *string             `json:"summary"`
 	GlobalWritingRules *string             `json:"global_writing_rules"`
 	Metadata           map[string]any      `json:"metadata"`
@@ -120,13 +120,13 @@ type CreateExperienceRequest struct {
 	ShortID           string                `json:"short_id,omitempty"`
 	Company           string                `json:"company"`
 	RoleTitle         string                `json:"role_title"`
-	EmploymentType    domain.EmploymentType `json:"employment_type"`
-	StartDate         domain.Date           `json:"start_date"`
-	EndDate           *domain.Date          `json:"end_date"`
+	EmploymentType    core.EmploymentType `json:"employment_type"`
+	StartDate         core.Date           `json:"start_date"`
+	EndDate           *core.Date          `json:"end_date"`
 	IsCurrent         bool                  `json:"is_current"`
-	Location          domain.Location       `json:"location"`
-	CompanyLocation   *domain.Location      `json:"company_location"`
-	CompanyContact    *domain.ContactDetail `json:"company_contact"`
+	Location          core.Location       `json:"location"`
+	CompanyLocation   *core.Location      `json:"company_location"`
+	CompanyContact    *core.ContactDetail `json:"company_contact"`
 	HoursPerWeek      *int                  `json:"hours_per_week"`
 	SupervisorName    string                `json:"supervisor_name"`
 	SupervisorContact string                `json:"supervisor_contact"`
@@ -139,13 +139,13 @@ type UpdateExperienceRequest struct {
 	ShortID           *string                `json:"short_id,omitempty"`
 	Company           *string                `json:"company"`
 	RoleTitle         *string                `json:"role_title"`
-	EmploymentType    *domain.EmploymentType `json:"employment_type"`
-	StartDate         *domain.Date           `json:"start_date"`
-	EndDate           *domain.Date           `json:"end_date"`
+	EmploymentType    *core.EmploymentType `json:"employment_type"`
+	StartDate         *core.Date           `json:"start_date"`
+	EndDate           *core.Date           `json:"end_date"`
 	IsCurrent         *bool                  `json:"is_current"`
-	Location          *domain.Location       `json:"location"`
-	CompanyLocation   *domain.Location       `json:"company_location"`
-	CompanyContact    *domain.ContactDetail  `json:"company_contact"`
+	Location          *core.Location       `json:"location"`
+	CompanyLocation   *core.Location       `json:"company_location"`
+	CompanyContact    *core.ContactDetail  `json:"company_contact"`
 	HoursPerWeek      *int                   `json:"hours_per_week"`
 	SupervisorName    *string                `json:"supervisor_name"`
 	SupervisorContact *string                `json:"supervisor_contact"`
@@ -159,8 +159,8 @@ type CreateProjectRequest struct {
 	Name      string         `json:"name"`
 	Role      string         `json:"role"`
 	URL       string         `json:"url"`
-	StartDate *domain.Date   `json:"start_date"`
-	EndDate   *domain.Date   `json:"end_date"`
+	StartDate *core.Date   `json:"start_date"`
+	EndDate   *core.Date   `json:"end_date"`
 	Summary   string         `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
@@ -171,8 +171,8 @@ type UpdateProjectRequest struct {
 	Name      *string        `json:"name"`
 	Role      *string        `json:"role"`
 	URL       *string        `json:"url"`
-	StartDate *domain.Date   `json:"start_date"`
-	EndDate   *domain.Date   `json:"end_date"`
+	StartDate *core.Date   `json:"start_date"`
+	EndDate   *core.Date   `json:"end_date"`
 	Summary   *string        `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
@@ -183,10 +183,10 @@ type CreateEducationRequest struct {
 	Institution string          `json:"institution"`
 	Degree      string          `json:"degree"`
 	Field       string          `json:"field"`
-	StartDate   *domain.Date    `json:"start_date"`
-	EndDate     *domain.Date    `json:"end_date"`
+	StartDate   *core.Date    `json:"start_date"`
+	EndDate     *core.Date    `json:"end_date"`
 	Score       string          `json:"score"`
-	Location    domain.Location `json:"location"`
+	Location    core.Location `json:"location"`
 	Metadata    map[string]any  `json:"metadata"`
 }
 
@@ -195,10 +195,10 @@ type UpdateEducationRequest struct {
 	Institution *string          `json:"institution"`
 	Degree      *string          `json:"degree"`
 	Field       *string          `json:"field"`
-	StartDate   *domain.Date     `json:"start_date"`
-	EndDate     *domain.Date     `json:"end_date"`
+	StartDate   *core.Date     `json:"start_date"`
+	EndDate     *core.Date     `json:"end_date"`
 	Score       *string          `json:"score"`
-	Location    *domain.Location `json:"location"`
+	Location    *core.Location `json:"location"`
 	Metadata    map[string]any   `json:"metadata"`
 }
 
@@ -206,7 +206,7 @@ type CreateCertificationRequest struct {
 	ShortID  string         `json:"short_id,omitempty"`
 	Name     string         `json:"name"`
 	Issuer   string         `json:"issuer"`
-	Date     *domain.Date   `json:"date"`
+	Date     *core.Date   `json:"date"`
 	URL      string         `json:"url"`
 	Summary  string         `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
@@ -216,7 +216,7 @@ type UpdateCertificationRequest struct {
 	ShortID  *string        `json:"short_id,omitempty"`
 	Name     *string        `json:"name"`
 	Issuer   *string        `json:"issuer"`
-	Date     *domain.Date   `json:"date"`
+	Date     *core.Date   `json:"date"`
 	URL      *string        `json:"url"`
 	Summary  *string        `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
@@ -225,7 +225,7 @@ type UpdateCertificationRequest struct {
 type CreateFactRequest struct {
 	ShortID   string           `json:"short_id,omitempty"`
 	OwnerID   string           `json:"owner_id"`
-	OwnerType domain.OwnerType `json:"owner_type"`
+	OwnerType core.OwnerType `json:"owner_type"`
 	Statement string           `json:"statement"`
 	Impact    string           `json:"impact"`
 	SkillIDs  []string         `json:"skill_ids"`
@@ -238,9 +238,9 @@ type UpdateFactRequest struct {
 	SkillIDs  []string `json:"skill_ids"`
 }
 
-// parseSkillsInput converts raw skill identifier/name strings from user payloads into domain.Skill instances.
-func parseSkillsInput(skillIDs []string) []domain.Skill {
-	return domain.ParseSkillsInput(skillIDs)
+// parseSkillsInput converts raw skill identifier/name strings from user payloads into core.Skill instances.
+func parseSkillsInput(skillIDs []string) []core.Skill {
+	return core.ParseSkillsInput(skillIDs)
 }
 
 // --- Main Profile Handlers ---
@@ -271,8 +271,8 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 
 	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			prof = &domain.Profile{
+		if errors.Is(err, core.ErrNotFound) {
+			prof = &core.Profile{
 				ID:           "profile-" + userID,
 				UserID:       userID,
 				MainRevision: 0,
@@ -364,7 +364,7 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 
 	snap, err := h.cfg.ProfileService.ImportJSONResume(ctx, userID, payload)
 	if err != nil {
-		if errors.Is(err, domain.ErrValidation) {
+		if errors.Is(err, core.ErrValidation) {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid JSON Resume payload", err.Error())
 			return
 		}
@@ -400,18 +400,18 @@ const DefaultPDFParseTimeout = 10 * time.Minute
 // AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
 type AsyncPDFJobResponse struct {
 	JobID   string                   `json:"job_id"`
-	Status  domain.PDFParseJobStatus `json:"status"`
+	Status  core.PDFParseJobStatus `json:"status"`
 	Message string                   `json:"message"`
 }
 
 // reserveQuota reserves quota for an LLM operation, writing error responses directly and returning (reservationID, ok).
-func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter, userID string, op domain.LLMOperationType, estimatedTokens, dailyLimit, monthlyLimit int) (string, bool) {
+func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter, userID string, op core.LLMOperationType, estimatedTokens, dailyLimit, monthlyLimit int) (string, bool) {
 	if h.cfg.QuotaRepo == nil {
 		return "", true
 	}
 	rec, qErr := h.cfg.QuotaRepo.ReserveQuota(ctx, userID, op, estimatedTokens, dailyLimit, monthlyLimit)
 	if qErr != nil {
-		if errors.Is(qErr, domain.ErrQuotaExceeded) {
+		if errors.Is(qErr, core.ErrQuotaExceeded) {
 			writeQuotaError(w, 3600, "llm operation quota exceeded", qErr.Error())
 			return "", false
 		}
@@ -495,7 +495,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	readerAt := bytes.NewReader(data)
 	text, err := h.cfg.PDFExtractor.ExtractText(ctx, readerAt, int64(len(data)))
 	if err != nil {
-		if errors.Is(err, domain.ErrValidation) {
+		if errors.Is(err, core.ErrValidation) {
 			if h.cfg.Logger != nil {
 				h.cfg.Logger.WarnContext(ctx, "pdf text extraction validation failed", "filename", fileHeader.Filename, "error", err)
 			}
@@ -532,7 +532,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 
 	// Synchronous execution path
 	if !runAsync {
-		reservationID, ok := h.reserveQuota(ctx, w, userID, domain.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
+		reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
 		if !ok {
 			return
 		}
@@ -590,7 +590,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 				statusCode = http.StatusGatewayTimeout
 				errorCode = CodeUpstreamError
 				respMsg = "upstream LLM parsing timed out after 10 minutes"
-			case errors.Is(err, domain.ErrValidation):
+			case errors.Is(err, core.ErrValidation):
 				logLevel = slog.LevelWarn
 				logMsg = "failed to extract structured resume validation error"
 				statusCode = http.StatusBadRequest
@@ -641,17 +641,17 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	reservationID, ok := h.reserveQuota(ctx, w, userID, domain.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
+	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
 	if !ok {
 		return
 	}
 
 	jobID := "pdf-job-" + uuid.New().String()
 	now := time.Now().UTC()
-	job := &domain.PDFParseJob{
+	job := &core.PDFParseJob{
 		ID:        jobID,
 		UserID:    userID,
-		Status:    domain.PDFParseJobStatusPending,
+		Status:    core.PDFParseJobStatusPending,
 		Filename:  fileHeader.Filename,
 		Provider:  provider,
 		Model:     model,
@@ -680,7 +680,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		if h.cfg.QuotaRepo != nil && reservationID != "" {
 			_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
 		}
-		if errors.Is(err, domain.ErrQueueFull) {
+		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
@@ -694,7 +694,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusAccepted, AsyncPDFJobResponse{
 		JobID:   jobID,
-		Status:  domain.PDFParseJobStatusPending,
+		Status:  core.PDFParseJobStatusPending,
 		Message: "PDF parsing job queued",
 	})
 }
@@ -716,7 +716,7 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 
 	job, err := h.cfg.PDFJobRepo.GetJob(ctx, userID, jobID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, core.ErrNotFound) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
 			return
 		}
@@ -752,7 +752,7 @@ func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request)
 
 	snap, err := h.cfg.ProfileService.ImportJSONResume(ctx, userID, payload)
 	if err != nil {
-		if errors.Is(err, domain.ErrValidation) {
+		if errors.Is(err, core.ErrValidation) {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid JSON Resume payload", err.Error())
 			return
 		}
@@ -771,7 +771,7 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
 	var (
-		skills []domain.Skill
+		skills []core.Skill
 		err    error
 	)
 
@@ -782,10 +782,10 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	case "global":
 		skills, err = h.cfg.ProfileRepo.ListGlobalSkills(ctx)
 	case "custom":
-		var allSkills []domain.Skill
+		var allSkills []core.Skill
 		allSkills, err = h.cfg.ProfileRepo.ListSkills(ctx, userID)
 		if err == nil {
-			skills = make([]domain.Skill, 0, len(allSkills))
+			skills = make([]core.Skill, 0, len(allSkills))
 			for _, s := range allSkills {
 				if !s.IsGlobal && s.UserID == userID {
 					skills = append(skills, s)
@@ -802,7 +802,7 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if skills == nil {
-		skills = []domain.Skill{}
+		skills = []core.Skill{}
 	}
 	writeJSON(w, http.StatusOK, skills)
 }
@@ -825,11 +825,11 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("skill")
+		shortID = core.GenerateShortID("skill")
 	}
 
-	skill := domain.Skill{
-		ID:              domain.GenerateID("skill"),
+	skill := core.Skill{
+		ID:              core.GenerateID("skill"),
 		ShortID:         shortID,
 		UserID:          userID,
 		Name:            req.Name,
@@ -938,7 +938,7 @@ func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if exps == nil {
-		exps = []domain.WorkExperience{}
+		exps = []core.WorkExperience{}
 	}
 	writeJSON(w, http.StatusOK, exps)
 }
@@ -959,23 +959,23 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var skills []domain.Skill
+	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
 		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("exp")
+		shortID = core.GenerateShortID("exp")
 	}
 
-	var endDate *domain.Date
+	var endDate *core.Date
 	if req.EndDate != nil && !req.EndDate.IsZero() {
 		endDate = req.EndDate
 	}
 
-	exp := domain.WorkExperience{
-		ID:                domain.GenerateID("exp"),
+	exp := core.WorkExperience{
+		ID:                core.GenerateID("exp"),
 		ShortID:           shortID,
 		UserID:            userID,
 		Company:           req.Company,
@@ -1136,7 +1136,7 @@ func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if projs == nil {
-		projs = []domain.Project{}
+		projs = []core.Project{}
 	}
 	writeJSON(w, http.StatusOK, projs)
 }
@@ -1157,27 +1157,27 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var skills []domain.Skill
+	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
 		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("proj")
+		shortID = core.GenerateShortID("proj")
 	}
 
-	var startDate *domain.Date
+	var startDate *core.Date
 	if req.StartDate != nil && !req.StartDate.IsZero() {
 		startDate = req.StartDate
 	}
-	var endDate *domain.Date
+	var endDate *core.Date
 	if req.EndDate != nil && !req.EndDate.IsZero() {
 		endDate = req.EndDate
 	}
 
-	proj := domain.Project{
-		ID:        domain.GenerateID("proj"),
+	proj := core.Project{
+		ID:        core.GenerateID("proj"),
 		ShortID:   shortID,
 		UserID:    userID,
 		Name:      req.Name,
@@ -1302,7 +1302,7 @@ func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if edus == nil {
-		edus = []domain.Education{}
+		edus = []core.Education{}
 	}
 	writeJSON(w, http.StatusOK, edus)
 }
@@ -1325,20 +1325,20 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("edu")
+		shortID = core.GenerateShortID("edu")
 	}
 
-	var startDate *domain.Date
+	var startDate *core.Date
 	if req.StartDate != nil && !req.StartDate.IsZero() {
 		startDate = req.StartDate
 	}
-	var endDate *domain.Date
+	var endDate *core.Date
 	if req.EndDate != nil && !req.EndDate.IsZero() {
 		endDate = req.EndDate
 	}
 
-	edu := domain.Education{
-		ID:          domain.GenerateID("edu"),
+	edu := core.Education{
+		ID:          core.GenerateID("edu"),
 		ShortID:     shortID,
 		UserID:      userID,
 		Institution: req.Institution,
@@ -1463,7 +1463,7 @@ func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if certs == nil {
-		certs = []domain.Certification{}
+		certs = []core.Certification{}
 	}
 	writeJSON(w, http.StatusOK, certs)
 }
@@ -1486,16 +1486,16 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("cert")
+		shortID = core.GenerateShortID("cert")
 	}
 
-	var certDate *domain.Date
+	var certDate *core.Date
 	if req.Date != nil && !req.Date.IsZero() {
 		certDate = req.Date
 	}
 
-	cert := domain.Certification{
-		ID:       domain.GenerateID("cert"),
+	cert := core.Certification{
+		ID:       core.GenerateID("cert"),
 		ShortID:  shortID,
 		UserID:   userID,
 		Name:     req.Name,
@@ -1616,7 +1616,7 @@ func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if facts == nil {
-		facts = []domain.Fact{}
+		facts = []core.Fact{}
 	}
 	writeJSON(w, http.StatusOK, facts)
 }
@@ -1639,21 +1639,21 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 
 	var canonicalOwnerID string
 	switch req.OwnerType {
-	case domain.OwnerTypeWorkExperience:
+	case core.OwnerTypeWorkExperience:
 		exp, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
 			return
 		}
 		canonicalOwnerID = exp.ID
-	case domain.OwnerTypeProject:
+	case core.OwnerTypeProject:
 		proj, err := h.cfg.ProfileRepo.GetProject(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
 			return
 		}
 		canonicalOwnerID = proj.ID
-	case domain.OwnerTypeEducation:
+	case core.OwnerTypeEducation:
 		edu, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
@@ -1665,18 +1665,18 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var skills []domain.Skill
+	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
 		skills = parseSkillsInput(req.SkillIDs)
 	}
 
 	shortID := strings.TrimSpace(req.ShortID)
 	if shortID == "" {
-		shortID = domain.GenerateShortID("fact")
+		shortID = core.GenerateShortID("fact")
 	}
 
-	fact := domain.Fact{
-		ID:        domain.GenerateID("fact"),
+	fact := core.Fact{
+		ID:        core.GenerateID("fact"),
 		ShortID:   shortID,
 		UserID:    userID,
 		OwnerID:   canonicalOwnerID,

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	repository "github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
@@ -97,7 +97,7 @@ func TestCLI_RunWithStore_MemoryBackend(t *testing.T) {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
 
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (repository.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
 	}
 
@@ -210,7 +210,7 @@ func TestCLI_Run_AdminFlags(t *testing.T) {
 			defer cancel()
 
 			var capturedAdmin bool
-			storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (repository.Store, error) {
+			storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (core.Store, error) {
 				capturedAdmin = cfg.Admin
 				cancel()
 				return memory.NewSeeded(context.Background())

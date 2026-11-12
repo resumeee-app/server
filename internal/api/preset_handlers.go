@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 type presetHandler struct {
@@ -48,13 +48,13 @@ type UpdatePresetRequest struct {
 // validateReasoningLevel verifies that the given reasoning effort level is empty or
 // matches one of the accepted enum values ("none", "low", "medium", "high").
 func validateReasoningLevel(level string) error {
-	return domain.ValidateReasoningLevel(level)
+	return core.ValidateReasoningLevel(level)
 }
 
 // validateModelOverride verifies that the specified model override and optional provider override
 // correspond to an available LLM model option registered in the enumerator catalog.
-func validateModelOverride(enumerator domain.ModelEnumerator, providerOverride, modelOverride string) error {
-	return domain.ValidateModelOverride(enumerator, providerOverride, modelOverride)
+func validateModelOverride(enumerator core.ModelEnumerator, providerOverride, modelOverride string) error {
+	return core.ValidateModelOverride(enumerator, providerOverride, modelOverride)
 }
 
 // validateTemplateAccess verifies that the target template exists and is accessible by the user.
@@ -64,7 +64,7 @@ func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID s
 	}
 	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
 	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
-		return domain.ErrForbidden
+		return core.ErrForbidden
 	}
 	return nil
 }
@@ -80,7 +80,7 @@ func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if presets == nil {
-		presets = []domain.Preset{}
+		presets = []core.Preset{}
 	}
 	writeJSON(w, http.StatusOK, presets)
 }
@@ -118,13 +118,13 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lang, err := domain.ValidateLanguage(req.Language)
+	lang, err := core.ValidateLanguage(req.Language)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 		return
 	}
 
-	preset := domain.Preset{
+	preset := core.Preset{
 		ID:                 "preset-" + uuid.New().String(),
 		UserID:             userID,
 		Name:               req.Name,
@@ -220,7 +220,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Language != nil {
-		lang, err := domain.ValidateLanguage(*req.Language)
+		lang, err := core.ValidateLanguage(*req.Language)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 			return

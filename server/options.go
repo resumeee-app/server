@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/validator"
 )
@@ -145,8 +145,8 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithStore injects a configured domain.Store implementation (e.g., from resumeee-storage-sql or resumeee-core/memory).
-func WithStore(store domain.Store) Option {
+// WithStore injects a configured core.Store implementation (e.g., from resumeee-storage-sql or resumeee-core/memory).
+func WithStore(store core.Store) Option {
 	return func(s *Server) error {
 		if store == nil {
 			return errors.New("server: Store cannot be nil")
@@ -156,8 +156,8 @@ func WithStore(store domain.Store) Option {
 	}
 }
 
-// WithAuthProvider injects a configured domain.AuthProvider implementation (e.g., from resumeee-auth-firebase).
-func WithAuthProvider(provider domain.AuthProvider) Option {
+// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase).
+func WithAuthProvider(provider core.AuthProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: AuthProvider cannot be nil")
@@ -167,8 +167,8 @@ func WithAuthProvider(provider domain.AuthProvider) Option {
 	}
 }
 
-// WithTokenVerifier injects a configured domain.TokenVerifier wrapped as an AuthProvider with the given name.
-func WithTokenVerifier(name string, verifier domain.TokenVerifier) Option {
+// WithTokenVerifier injects a configured core.TokenVerifier wrapped as an AuthProvider with the given name.
+func WithTokenVerifier(name string, verifier core.TokenVerifier) Option {
 	return func(s *Server) error {
 		if verifier == nil {
 			return errors.New("server: TokenVerifier cannot be nil")
@@ -189,8 +189,8 @@ func WithLLMRegistry(reg *llm.Registry) Option {
 	}
 }
 
-// WithLLMClient registers a configured domain.LLMClient (wrapped via llm.NewClientProvider) into the server's LLM registry.
-func WithLLMClient(client domain.LLMClient, opts ...llm.Option) Option {
+// WithLLMClient registers a configured core.LLMClient (wrapped via llm.NewClientProvider) into the server's LLM registry.
+func WithLLMClient(client core.LLMClient, opts ...llm.Option) Option {
 	return func(s *Server) error {
 		if client == nil {
 			return errors.New("server: LLMClient cannot be nil")
@@ -203,8 +203,8 @@ func WithLLMClient(client domain.LLMClient, opts ...llm.Option) Option {
 	}
 }
 
-// WithLLMProvider registers a configured domain.LLMProvider implementation into the server's LLM registry.
-func WithLLMProvider(provider domain.LLMProvider) Option {
+// WithLLMProvider registers a configured core.LLMProvider implementation into the server's LLM registry.
+func WithLLMProvider(provider core.LLMProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: LLMProvider cannot be nil")
@@ -214,8 +214,8 @@ func WithLLMProvider(provider domain.LLMProvider) Option {
 	}
 }
 
-// WithTemplateRenderer injects a custom domain.TemplateRenderer implementation.
-func WithTemplateRenderer(r domain.TemplateRenderer) Option {
+// WithTemplateRenderer injects a custom core.TemplateRenderer implementation.
+func WithTemplateRenderer(r core.TemplateRenderer) Option {
 	return func(s *Server) error {
 		if r == nil {
 			return errors.New("server: TemplateRenderer cannot be nil")
@@ -236,8 +236,8 @@ func WithValidator(v validator.ProvenanceValidator) Option {
 	}
 }
 
-// WithPDFExtractor injects a custom domain.PDFTextExtractor implementation.
-func WithPDFExtractor(extractor domain.PDFTextExtractor) Option {
+// WithPDFExtractor injects a custom core.PDFTextExtractor implementation.
+func WithPDFExtractor(extractor core.PDFTextExtractor) Option {
 	return func(s *Server) error {
 		if extractor == nil {
 			return errors.New("server: PDFTextExtractor cannot be nil")
@@ -258,8 +258,8 @@ func WithResumeExtractor(extractor llm.ResumeExtractor) Option {
 	}
 }
 
-// WithPromptCompiler injects a custom domain.PromptCompiler implementation.
-func WithPromptCompiler(compiler domain.PromptCompiler) Option {
+// WithPromptCompiler injects a custom core.PromptCompiler implementation.
+func WithPromptCompiler(compiler core.PromptCompiler) Option {
 	return func(s *Server) error {
 		if compiler == nil {
 			return errors.New("server: PromptCompiler cannot be nil")

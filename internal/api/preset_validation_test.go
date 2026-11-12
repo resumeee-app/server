@@ -10,12 +10,12 @@ import (
 	"testing"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
-func setupPresetTestServer(t *testing.T) (*httptest.Server, domain.PresetRepository) {
+func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepository) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
 		}
 
-		var created domain.Preset
+		var created core.Preset
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode created preset: %v", err)
 		}
@@ -183,7 +183,7 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", upResp.StatusCode)
 		}
 
-		var updated domain.Preset
+		var updated core.Preset
 		if err := json.NewDecoder(upResp.Body).Decode(&updated); err != nil {
 			t.Fatalf("failed to decode updated preset: %v", err)
 		}

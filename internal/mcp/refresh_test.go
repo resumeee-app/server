@@ -11,7 +11,7 @@ import (
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
@@ -133,7 +133,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Fatalf("expected successful creation, got: %+v", validRes)
 	}
 
-	var createdPreset domain.Preset
+	var createdPreset core.Preset
 	createdText := validRes.Content[0].(mcpSDK.TextContent).Text
 	if err := json.Unmarshal([]byte(createdText), &createdPreset); err != nil {
 		t.Fatalf("failed to unmarshal created preset: %v, raw: %s", err, createdText)
@@ -168,21 +168,21 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	if err != nil || emptyLangRes.IsError {
 		t.Fatalf("expected successful default language preset creation, res: %+v, err: %v", emptyLangRes, err)
 	}
-	var defaultLangPreset domain.Preset
+	var defaultLangPreset core.Preset
 	defaultText := emptyLangRes.Content[0].(mcpSDK.TextContent).Text
 	if err := json.Unmarshal([]byte(defaultText), &defaultLangPreset); err != nil {
 		t.Fatalf("failed to unmarshal preset: %v", err)
 	}
-	if defaultLangPreset.Language != domain.DefaultLanguage {
-		t.Errorf("expected default language %q, got %q", domain.DefaultLanguage, defaultLangPreset.Language)
+	if defaultLangPreset.Language != core.DefaultLanguage {
+		t.Errorf("expected default language %q, got %q", core.DefaultLanguage, defaultLangPreset.Language)
 	}
 
 	persistedDefaultPreset, err := store.GetPreset(ctx, "user-1", defaultLangPreset.ID)
 	if err != nil || persistedDefaultPreset == nil {
 		t.Fatalf("expected default preset %q to be in store: %v", defaultLangPreset.ID, err)
 	}
-	if persistedDefaultPreset.Language != domain.DefaultLanguage {
-		t.Errorf("expected persisted default language %q, got %q", domain.DefaultLanguage, persistedDefaultPreset.Language)
+	if persistedDefaultPreset.Language != core.DefaultLanguage {
+		t.Errorf("expected persisted default language %q, got %q", core.DefaultLanguage, persistedDefaultPreset.Language)
 	}
 
 	// 4. create_preset with RTL language rejected
@@ -231,7 +231,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	if err != nil || updateRes.IsError {
 		t.Fatalf("expected update to succeed, got: %+v, err: %v", updateRes, err)
 	}
-	var updatedPreset domain.Preset
+	var updatedPreset core.Preset
 	updText := updateRes.Content[0].(mcpSDK.TextContent).Text
 	if err := json.Unmarshal([]byte(updText), &updatedPreset); err != nil {
 		t.Fatalf("failed to unmarshal updated preset: %v", err)
@@ -250,7 +250,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 
 	// 7. update_preset rejecting built-in preset
 	builtInUpdateReq := toolReq("update_preset", map[string]any{
-		"id":       domain.Preset1PageTechResumeID,
+		"id":       core.Preset1PageTechResumeID,
 		"language": "German",
 	})
 	builtInRes, err := updateTool.Handler(userCtx, builtInUpdateReq)
@@ -274,7 +274,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	if err != nil || listRes.IsError {
 		t.Fatalf("expected list_presets success, got: %+v, err: %v", listRes, err)
 	}
-	var presetList []domain.Preset
+	var presetList []core.Preset
 	if err := json.Unmarshal([]byte(listRes.Content[0].(mcpSDK.TextContent).Text), &presetList); err != nil {
 		t.Fatalf("failed to unmarshal preset list: %v", err)
 	}
@@ -311,11 +311,11 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	if err := json.Unmarshal([]byte(langRes.Content[0].(mcpSDK.TextContent).Text), &langPayload); err != nil {
 		t.Fatalf("failed to unmarshal language list: %v", err)
 	}
-	if langPayload.DefaultLanguage != domain.DefaultLanguage {
-		t.Errorf("expected default language %q, got %q", domain.DefaultLanguage, langPayload.DefaultLanguage)
+	if langPayload.DefaultLanguage != core.DefaultLanguage {
+		t.Errorf("expected default language %q, got %q", core.DefaultLanguage, langPayload.DefaultLanguage)
 	}
-	if len(langPayload.SupportedLanguages) != len(domain.SupportedLanguages) {
-		t.Errorf("expected %d supported languages, got %d", len(domain.SupportedLanguages), len(langPayload.SupportedLanguages))
+	if len(langPayload.SupportedLanguages) != len(core.SupportedLanguages) {
+		t.Errorf("expected %d supported languages, got %d", len(core.SupportedLanguages), len(langPayload.SupportedLanguages))
 	}
 }
 
@@ -362,7 +362,7 @@ func TestMCP_Resources_LanguagesAndPresets(t *testing.T) {
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "resources/read",
-		"params":  map[string]any{"uri": "resumeee://presets/" + domain.Preset1PageTechResumeID},
+		"params":  map[string]any{"uri": "resumeee://presets/" + core.Preset1PageTechResumeID},
 	})
 	resp := server.HandleMessage(userCtx, reqBytes)
 	respBytes, _ := json.Marshal(resp)
@@ -389,7 +389,7 @@ func TestMCP_Resources_LanguagesAndPresets(t *testing.T) {
 		t.Fatalf("expected result contents in response, got: %+v", rpcResp.Result)
 	}
 	pText := rpcResp.Result.Contents[0].Text
-	if !strings.Contains(pText, domain.Preset1PageTechResumeID) {
+	if !strings.Contains(pText, core.Preset1PageTechResumeID) {
 		t.Errorf("expected preset resource to contain ID, got: %s", pText)
 	}
 }
@@ -433,7 +433,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 		t.Fatalf("expected add_skill success, got: %+v, err: %v", addRes, err)
 	}
 
-	var addedSkill domain.Skill
+	var addedSkill core.Skill
 	addText := addRes.Content[0].(mcpSDK.TextContent).Text
 	if err := json.Unmarshal([]byte(addText), &addedSkill); err != nil {
 		t.Fatalf("failed to unmarshal added skill: %v, raw: %s", err, addText)
@@ -476,7 +476,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 	if err != nil || listCustomRes.IsError {
 		t.Fatalf("expected list_skills success, got: %+v, err: %v", listCustomRes, err)
 	}
-	var customSkills []domain.Skill
+	var customSkills []core.Skill
 	if err := json.Unmarshal([]byte(listCustomRes.Content[0].(mcpSDK.TextContent).Text), &customSkills); err != nil {
 		t.Fatalf("failed to unmarshal custom skills: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 	if err != nil || updRes.IsError {
 		t.Fatalf("expected update_skill success, got: %+v, err: %v", updRes, err)
 	}
-	var updatedSkill domain.Skill
+	var updatedSkill core.Skill
 	if err := json.Unmarshal([]byte(updRes.Content[0].(mcpSDK.TextContent).Text), &updatedSkill); err != nil {
 		t.Fatalf("failed to unmarshal updated skill: %v", err)
 	}

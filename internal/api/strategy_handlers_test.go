@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
@@ -49,8 +49,8 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 
 type strategyTestRepos struct {
 	db           any
-	presetRepo   domain.PresetRepository
-	templateRepo domain.TemplateRepository
+	presetRepo   core.PresetRepository
+	templateRepo core.TemplateRepository
 }
 
 func TestStrategyCRUD_RFC005(t *testing.T) {
@@ -61,7 +61,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed another tenant's private template
-	foreignTemplate := &domain.TemplateSet{
+	foreignTemplate := &core.TemplateSet{
 		ID:               "tmpl-private-foreign",
 		UserID:           "other-tenant-999",
 		Name:             "Foreign Private Template",
@@ -99,7 +99,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
 		}
 
-		var created domain.TailoringStrategy
+		var created core.TailoringStrategy
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -247,7 +247,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 
 	// 4. Update custom strategy with foreign template returns 403 Forbidden
 	t.Run("UpdateStrategy_ForeignTemplate_Returns403", func(t *testing.T) {
-		customPreset := &domain.Preset{
+		customPreset := &core.Preset{
 			ID:                 "preset-custom-update-test",
 			UserID:             "user-1",
 			Name:               "Custom Strategy For Update Test",
@@ -294,7 +294,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 
 	// 5. Direct repository-level immutability defense-in-depth
 	t.Run("RepositoryLevel_BuiltInImmutability_Guards", func(t *testing.T) {
-		builtInPreset := &domain.Preset{
+		builtInPreset := &core.Preset{
 			ID:                 "builtin-immutability-test",
 			UserID:             "system",
 			Name:               "Builtin Repo Immutability Test",
@@ -303,12 +303,12 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 
 		errUpdate := repos.presetRepo.UpdatePreset(ctx, builtInPreset)
-		if errUpdate != domain.ErrStrategyImmutable {
+		if errUpdate != core.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from UpdatePreset, got %v", errUpdate)
 		}
 
 		errDelete := repos.presetRepo.DeletePreset(ctx, "system", "builtin-immutability-test")
-		if errDelete != domain.ErrStrategyImmutable {
+		if errDelete != core.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from DeletePreset, got %v", errDelete)
 		}
 	})
@@ -336,7 +336,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
 		}
 
-		var created domain.TailoringStrategy
+		var created core.TailoringStrategy
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -433,7 +433,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		var created domain.TailoringStrategy
+		var created core.TailoringStrategy
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode created strategy: %v", err)
 		}
@@ -457,7 +457,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", putResp.StatusCode)
 		}
 
-		var updated domain.TailoringStrategy
+		var updated core.TailoringStrategy
 		if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -486,7 +486,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		var created domain.TailoringStrategy
+		var created core.TailoringStrategy
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode created strategy: %v", err)
 		}

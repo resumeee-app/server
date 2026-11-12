@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 func TestTemplatePreview_SanitizesBuiltinTemplates(t *testing.T) {
@@ -30,7 +30,7 @@ func TestTemplatePreview_SanitizesBuiltinTemplates(t *testing.T) {
 				t.Fatalf("expected 200 from GET /templates/%s/preview, got %d: %s", id, resp.StatusCode, string(body))
 			}
 
-			var out domain.RenderOutput
+			var out core.RenderOutput
 			if err := json.Unmarshal(body, &out); err != nil {
 				t.Fatalf("failed to decode preview JSON: %v", err)
 			}
@@ -80,7 +80,7 @@ func TestTemplatePreview_SanitizesCustomTemplateWithScripts(t *testing.T) {
 		t.Fatalf("failed to create custom template, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var created domain.TemplateSet
+	var created core.TemplateSet
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("failed to decode created template: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestTemplatePreview_SanitizesCustomTemplateWithScripts(t *testing.T) {
 		t.Fatalf("expected 200 from GET /templates/{id}/preview, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var previewOut domain.RenderOutput
+	var previewOut core.RenderOutput
 	if err := json.Unmarshal(body, &previewOut); err != nil {
 		t.Fatalf("failed to parse preview JSON: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestRenderDraftPreview_SanitizesScripts(t *testing.T) {
 		t.Fatalf("expected 200 from POST /templates/preview, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var draftOut domain.RenderOutput
+	var draftOut core.RenderOutput
 	if err := json.Unmarshal(body, &draftOut); err != nil {
 		t.Fatalf("failed to decode draft preview: %v", err)
 	}

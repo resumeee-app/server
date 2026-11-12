@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 // Standard OpenAPI error codes.
@@ -93,51 +93,51 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		return
 	}
 
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, core.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrUnauthorized) {
+	if errors.Is(err, core.ErrUnauthorized) {
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrQuotaExceeded) {
+	if errors.Is(err, core.ErrQuotaExceeded) {
 		writeQuotaError(w, 3600, "llm operation quota exceeded", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrGlobalSkillImmutable) {
+	if errors.Is(err, core.ErrGlobalSkillImmutable) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "global skill cannot be modified or deleted", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrTemplateSyntax) {
+	if errors.Is(err, core.ErrTemplateSyntax) {
 		writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrProvenance) {
+	if errors.Is(err, core.ErrProvenance) {
 		writeError(w, http.StatusUnprocessableEntity, CodeProvenanceError, "provenance validation failed", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrQueueFull) {
+	if errors.Is(err, core.ErrQueueFull) {
 		writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrValidation) {
+	if errors.Is(err, core.ErrValidation) {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request data", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrDefaultBranchImmutable) {
+	if errors.Is(err, core.ErrDefaultBranchImmutable) {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "default branch is immutable", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrStrategyImmutable) {
+	if errors.Is(err, core.ErrStrategyImmutable) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in strategy cannot be modified", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrForbidden) {
+	if errors.Is(err, core.ErrForbidden) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "access forbidden", err.Error())
 		return
 	}
-	if errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, core.ErrConflict) {
 		writeError(w, http.StatusConflict, CodeConflict, "resource conflict", err.Error())
 		return
 	}
@@ -147,7 +147,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 }
 
 // writeRenderOutput writes rendered resume output according to the format query parameter (html, markdown, text, or default json).
-func writeRenderOutput(w http.ResponseWriter, r *http.Request, out domain.RenderOutput) {
+func writeRenderOutput(w http.ResponseWriter, r *http.Request, out core.RenderOutput) {
 	format := strings.ToLower(r.URL.Query().Get("format"))
 	switch format {
 	case "html":

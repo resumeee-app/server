@@ -22,14 +22,14 @@ import (
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	repository "github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 // StoreInitializer is a factory function initializing domain repositories and storage resources for the MCP server.
-type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error)
+type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
 // defaultSQLiteInitializer creates a SQLite persistence backend and seeds default records.
 //
@@ -39,9 +39,9 @@ type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog
 //   - logger: System logger for recording operational messages.
 //
 // Returns:
-//   - repository.Store: Initialized SQLite store.
+//   - core.Store: Initialized SQLite store.
 //   - error: Non-nil if SQLite connection or seeding fails.
-func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (repository.Store, error) {
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error) {
 	return storage.Open(ctx, storage.Config{
 		Driver:        storage.DriverSQLite,
 		DSN:           cfg.DBPath,

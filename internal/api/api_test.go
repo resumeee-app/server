@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
@@ -31,13 +31,13 @@ import (
 type testEnv struct {
 	server       *httptest.Server
 	db           any
-	profileRepo  domain.ProfileRepository
-	presetRepo   domain.PresetRepository
-	templateRepo domain.TemplateRepository
-	branchRepo   domain.BranchRepository
+	profileRepo  core.ProfileRepository
+	presetRepo   core.PresetRepository
+	templateRepo core.TemplateRepository
+	branchRepo   core.BranchRepository
 	profileSvc   profile.Service
 	enqueuer     *api.ChannelJobEnqueuer
-	pdfJobRepo   domain.PDFParseJobRepository
+	pdfJobRepo   core.PDFParseJobRepository
 	pdfEnqueuer  *api.ChannelPDFJobEnqueuer
 }
 
@@ -165,7 +165,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /profile failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	prof := decodeJSON[domain.Profile](t, body)
+	prof := decodeJSON[core.Profile](t, body)
 	if prof.MainRevision != 1 {
 		t.Fatalf("expected initial main_revision: 1, got: %d", prof.MainRevision)
 	}
@@ -182,7 +182,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /skills failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	skillGo := decodeJSON[domain.Skill](t, body)
+	skillGo := decodeJSON[core.Skill](t, body)
 	if skillGo.Name != "Go" || skillGo.ID == "" {
 		t.Fatalf("invalid skill created: %+v", skillGo)
 	}
@@ -192,7 +192,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /skills failed: %d", resp.StatusCode)
 	}
-	skills := decodeJSON[[]domain.Skill](t, body)
+	skills := decodeJSON[[]core.Skill](t, body)
 	if len(skills) < 1 {
 		t.Fatalf("expected at least 1 skill, got %d", len(skills))
 	}
@@ -212,7 +212,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT /skills/{id} failed: %d", resp.StatusCode)
 	}
-	skillGo = decodeJSON[domain.Skill](t, body)
+	skillGo = decodeJSON[core.Skill](t, body)
 	if skillGo.Proficiency != "Expert" {
 		t.Fatalf("expected proficiency Expert, got %s", skillGo.Proficiency)
 	}
@@ -221,16 +221,16 @@ func TestFullUserJourney(t *testing.T) {
 	expReq := api.CreateExperienceRequest{
 		Company:        "Acme Corp",
 		RoleTitle:      "Senior Backend Engineer",
-		EmploymentType: domain.EmploymentTypeFullTime,
-		StartDate:      domain.NewDate(2021, 1, 1),
-		Location:       domain.Location{City: "San Francisco", Region: "CA", CountryCode: "US"},
+		EmploymentType: core.EmploymentTypeFullTime,
+		StartDate:      core.NewDate(2021, 1, 1),
+		Location:       core.Location{City: "San Francisco", Region: "CA", CountryCode: "US"},
 		SkillIDs:       []string{skillGo.ID},
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", expReq, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /experiences failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	exp := decodeJSON[domain.WorkExperience](t, body)
+	exp := decodeJSON[core.WorkExperience](t, body)
 	if exp.Company != "Acme Corp" || exp.ID == "" {
 		t.Fatalf("invalid experience created: %+v", exp)
 	}
@@ -260,7 +260,7 @@ func TestFullUserJourney(t *testing.T) {
 	// 10. POST /api/v1/facts -> Create quantifiable achievement fact
 	factReq := api.CreateFactRequest{
 		OwnerID:   exp.ID,
-		OwnerType: domain.OwnerTypeWorkExperience,
+		OwnerType: core.OwnerTypeWorkExperience,
 		Statement: "Architected distributed queue processing 50k events/sec.",
 		Impact:    "Reduced latency by 40%",
 		SkillIDs:  []string{skillGo.ID},
@@ -269,7 +269,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /facts failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	fact := decodeJSON[domain.Fact](t, body)
+	fact := decodeJSON[core.Fact](t, body)
 	if fact.ID == "" || fact.OwnerID != exp.ID {
 		t.Fatalf("invalid fact created: %+v", fact)
 	}
@@ -279,7 +279,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /facts failed: %d", resp.StatusCode)
 	}
-	facts := decodeJSON[[]domain.Fact](t, body)
+	facts := decodeJSON[[]core.Fact](t, body)
 	if len(facts) != 1 {
 		t.Fatalf("expected 1 fact, got %d", len(facts))
 	}
@@ -301,7 +301,7 @@ func TestFullUserJourney(t *testing.T) {
 	projReq := api.CreateProjectRequest{
 		Name:      "Distributed Store",
 		Role:      "Author",
-		StartDate: domain.DatePtr(domain.NewDate(2022, 1, 1)),
+		StartDate: core.DatePtr(core.NewDate(2022, 1, 1)),
 		Summary:   "Raft-based key-value store in Go.",
 		SkillIDs:  []string{skillGo.ID},
 	}
@@ -309,7 +309,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /projects failed: %d", resp.StatusCode)
 	}
-	proj := decodeJSON[domain.Project](t, body)
+	proj := decodeJSON[core.Project](t, body)
 
 	// 15. GET /api/v1/projects and GET /api/v1/projects/{id} and PUT /api/v1/projects/{id}
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/projects", nil, nil)
@@ -331,13 +331,13 @@ func TestFullUserJourney(t *testing.T) {
 		Institution: "MIT",
 		Degree:      "B.S.",
 		Field:       "Computer Science",
-		StartDate:   domain.DatePtr(domain.NewDate(2016, 9, 1)),
+		StartDate:   core.DatePtr(core.NewDate(2016, 9, 1)),
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/education", eduReq, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /education failed: %d", resp.StatusCode)
 	}
-	edu := decodeJSON[domain.Education](t, body)
+	edu := decodeJSON[core.Education](t, body)
 
 	// 17. GET /api/v1/education and GET /api/v1/education/{id} and PUT /api/v1/education/{id}
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/education", nil, nil)
@@ -358,13 +358,13 @@ func TestFullUserJourney(t *testing.T) {
 	certReq := api.CreateCertificationRequest{
 		Name:   "CKA",
 		Issuer: "CNCF",
-		Date:   domain.DatePtr(domain.NewDate(2023, 1, 1)),
+		Date:   core.DatePtr(core.NewDate(2023, 1, 1)),
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/certifications", certReq, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /certifications failed: %d", resp.StatusCode)
 	}
-	cert := decodeJSON[domain.Certification](t, body)
+	cert := decodeJSON[core.Certification](t, body)
 
 	// 19. GET /api/v1/certifications and GET /api/v1/certifications/{id} and PUT /api/v1/certifications/{id}
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/certifications", nil, nil)
@@ -386,7 +386,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /profile/full failed: %d", resp.StatusCode)
 	}
-	snapshot := decodeJSON[domain.MainProfileSnapshot](t, body)
+	snapshot := decodeJSON[core.MainProfileSnapshot](t, body)
 	if len(snapshot.Skills) < 1 || len(snapshot.Experiences) < 1 || len(snapshot.Facts) < 1 {
 		t.Fatalf("snapshot missing entities: %+v", snapshot)
 	}
@@ -401,7 +401,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /presets failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	preset := decodeJSON[domain.Preset](t, body)
+	preset := decodeJSON[core.Preset](t, body)
 
 	// 22. GET /api/v1/presets and GET /api/v1/presets/{id} and PUT /api/v1/presets/{id}
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/presets", nil, nil)
@@ -429,7 +429,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /templates failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	tmpl := decodeJSON[domain.TemplateSet](t, body)
+	tmpl := decodeJSON[core.TemplateSet](t, body)
 
 	// 24. GET /api/v1/templates and GET /api/v1/templates/{id} and PUT /api/v1/templates/{id}
 	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates", nil, nil)
@@ -458,7 +458,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /branches failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	branch := decodeJSON[domain.Branch](t, body)
+	branch := decodeJSON[core.Branch](t, body)
 	if branch.IsStale {
 		t.Fatalf("expected new branch to have is_stale=false, got true")
 	}
@@ -484,7 +484,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /branches?stale=true failed: %d", resp.StatusCode)
 	}
-	staleBranches := decodeJSON[[]domain.Branch](t, body)
+	staleBranches := decodeJSON[[]core.Branch](t, body)
 	if len(staleBranches) == 0 {
 		t.Fatalf("expected branch %s to be stale after profile update, got none", branch.ID)
 	}
@@ -498,28 +498,28 @@ func TestFullUserJourney(t *testing.T) {
 		t.Fatalf("POST /generate failed: %d, body: %s", resp.StatusCode, string(body))
 	}
 	jobEnqueued := decodeJSON[api.AsyncJobEnqueued](t, body)
-	if jobEnqueued.VersionID == "" || jobEnqueued.Status != domain.VersionStatusPending {
+	if jobEnqueued.VersionID == "" || jobEnqueued.Status != core.VersionStatusPending {
 		t.Fatalf("invalid AsyncJobEnqueued response: %+v", jobEnqueued)
 	}
 
 	// Simulate completed generation of version 1 for testing version endpoints
-	tailoredContent := &domain.TailoredContent{
+	tailoredContent := &core.TailoredContent{
 		Summary: newSummary,
-		SkillGroups: []domain.TailoredSkillGroup{
+		SkillGroups: []core.TailoredSkillGroup{
 			{
 				Category:       "Languages",
 				Skills:         []string{"Go"},
 				SourceSkillIDs: []string{skillGo.ID},
 			},
 		},
-		Experiences: []domain.TailoredExperience{
+		Experiences: []core.TailoredExperience{
 			{
 				SourceEntityID: exp.ID,
 				Company:        exp.Company,
 				RoleTitle:      exp.RoleTitle,
 				StartDate:      exp.StartDate,
 				Location:       exp.Location,
-				Bullets: []domain.TailoredBullet{
+				Bullets: []core.TailoredBullet{
 					{
 						Text:          "Architected distributed queue processing 50k events/sec with Go.",
 						SourceFactIDs: []string{fact.ID},
@@ -536,7 +536,7 @@ func TestFullUserJourney(t *testing.T) {
 	v1.HTMLOutput = "<h1>Default User</h1><p>" + newSummary + "</p>"
 	v1.MarkdownOutput = "# Default User\n" + newSummary
 	v1.PlainTextOutput = "Default User\n" + newSummary
-	v1.Status = domain.VersionStatusCompleted
+	v1.Status = core.VersionStatusCompleted
 	if err := env.branchRepo.CompleteVersion(context.Background(), v1); err != nil {
 		t.Fatalf("failed to complete version 1: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /branches/{id}/versions failed: %d", resp.StatusCode)
 	}
-	versions := decodeJSON[[]domain.BranchVersion](t, body)
+	versions := decodeJSON[[]core.BranchVersion](t, body)
 	if len(versions) != 1 {
 		t.Fatalf("expected 1 version, got %d", len(versions))
 	}
@@ -556,7 +556,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /versions/1 failed: %d", resp.StatusCode)
 	}
-	verNum := decodeJSON[domain.BranchVersion](t, body)
+	verNum := decodeJSON[core.BranchVersion](t, body)
 	if verNum.VersionNumber != 1 {
 		t.Fatalf("expected version_number 1, got %d", verNum.VersionNumber)
 	}
@@ -618,7 +618,7 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /templates for export override failed: %d", resp.StatusCode)
 	}
-	customTmpl := decodeJSON[domain.TemplateSet](t, body)
+	customTmpl := decodeJSON[core.TemplateSet](t, body)
 
 	// Export HTML with template_set_id
 	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/versions/1/export?format=html&template_set_id="+customTmpl.ID, nil, nil)
@@ -677,7 +677,7 @@ func TestFullUserJourney(t *testing.T) {
 
 	// Re-fetch snapshot to get new IDs after import
 	_, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile/full", nil, nil)
-	freshSnap := decodeJSON[domain.MainProfileSnapshot](t, body)
+	freshSnap := decodeJSON[core.MainProfileSnapshot](t, body)
 
 	// 36. POST /api/v1/branches/{id}/versions/1/edit -> Manual edit creating v2 with 201 Created
 	var validSkillID, validExpID, validFactID string
@@ -691,11 +691,11 @@ func TestFullUserJourney(t *testing.T) {
 		}
 	}
 
-	manualTailored := &domain.TailoredContent{
+	manualTailored := &core.TailoredContent{
 		Summary: "Edited summary for Staff Role",
 	}
 	if validSkillID != "" {
-		manualTailored.SkillGroups = []domain.TailoredSkillGroup{
+		manualTailored.SkillGroups = []core.TailoredSkillGroup{
 			{
 				Category:       "Core Skills",
 				Skills:         []string{freshSnap.Skills[0].Name},
@@ -704,14 +704,14 @@ func TestFullUserJourney(t *testing.T) {
 		}
 	}
 	if validExpID != "" && validFactID != "" {
-		manualTailored.Experiences = []domain.TailoredExperience{
+		manualTailored.Experiences = []core.TailoredExperience{
 			{
 				SourceEntityID: validExpID,
 				Company:        freshSnap.Experiences[0].Company,
 				RoleTitle:      freshSnap.Experiences[0].RoleTitle,
 				StartDate:      freshSnap.Experiences[0].StartDate,
 				Location:       freshSnap.Experiences[0].Location,
-				Bullets: []domain.TailoredBullet{
+				Bullets: []core.TailoredBullet{
 					{
 						Text:          "Refactored memory allocator.",
 						SourceFactIDs: []string{validFactID},
@@ -728,8 +728,8 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /edit failed: %d, body: %s", resp.StatusCode, string(body))
 	}
-	v2 := decodeJSON[domain.BranchVersion](t, body)
-	if v2.VersionNumber != 2 || v2.SourceType != domain.SourceTypeManualEdit {
+	v2 := decodeJSON[core.BranchVersion](t, body)
+	if v2.VersionNumber != 2 || v2.SourceType != core.SourceTypeManualEdit {
 		t.Fatalf("invalid v2 version from manual edit: %+v", v2)
 	}
 
@@ -865,16 +865,16 @@ func TestErrorEnvelopes(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("create branch failed: %d", resp.StatusCode)
 		}
-		branch := decodeJSON[domain.Branch](t, body)
+		branch := decodeJSON[core.Branch](t, body)
 
 		// Create dummy version 1 in DB
-		v1 := &domain.BranchVersion{
+		v1 := &core.BranchVersion{
 			ID:                 "ver-prov-test",
 			BranchID:           branch.ID,
-			Status:             domain.VersionStatusCompleted,
+			Status:             core.VersionStatusCompleted,
 			MainRevisionUsed:   1,
 			TemplateSetIDUsed:  renderer.TemplateStandardCleanID,
-			SourceType:         domain.SourceTypeLLMGeneration,
+			SourceType:         core.SourceTypeLLMGeneration,
 		}
 		if err := env.branchRepo.CreateVersion(context.Background(), v1); err != nil {
 			t.Fatalf("failed to create v1: %v", err)
@@ -882,14 +882,14 @@ func TestErrorEnvelopes(t *testing.T) {
 
 		// Attempt manual edit with fabricated source fact ID
 		fabricatedEdit := api.EditVersionRequest{
-			TailoredContent: &domain.TailoredContent{
-				Experiences: []domain.TailoredExperience{
+			TailoredContent: &core.TailoredContent{
+				Experiences: []core.TailoredExperience{
 					{
 						SourceEntityID: "exp-fabricated",
 						Company:        "Fake Corp",
 						RoleTitle:      "Hacker",
-						StartDate:      domain.NewDate(2020, 1, 1),
-						Bullets: []domain.TailoredBullet{
+						StartDate:      core.NewDate(2020, 1, 1),
+						Bullets: []core.TailoredBullet{
 							{
 								Text:          "Fabricated bullet.",
 								SourceFactIDs: []string{"fact-fabricated-999"},
@@ -919,7 +919,7 @@ func TestErrorEnvelopes(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("create branch failed: %d", resp.StatusCode)
 		}
-		branch := decodeJSON[domain.Branch](t, body)
+		branch := decodeJSON[core.Branch](t, body)
 
 		// First generate should succeed (queue capacity 1)
 		resp, _ = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch.ID+"/generate", nil, nil)
@@ -1038,7 +1038,7 @@ func TestFactHandlers_OwnerValidation(t *testing.T) {
 	// 1. Invalid OwnerType
 	badTypeReq := api.CreateFactRequest{
 		OwnerID:   "exp-123",
-		OwnerType: domain.OwnerType("department"),
+		OwnerType: core.OwnerType("department"),
 		Statement: "Led quarterly OKR reviews.",
 	}
 	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/facts", badTypeReq, nil)
@@ -1049,7 +1049,7 @@ func TestFactHandlers_OwnerValidation(t *testing.T) {
 	// 2. Non-existent OwnerID
 	nonExistentOwnerReq := api.CreateFactRequest{
 		OwnerID:   "exp-non-existent-999",
-		OwnerType: domain.OwnerTypeWorkExperience,
+		OwnerType: core.OwnerTypeWorkExperience,
 		Statement: "Led quarterly OKR reviews.",
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/facts", nonExistentOwnerReq, nil)
@@ -1388,7 +1388,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		if accepted.JobID == "" {
 			t.Fatalf("expected non-empty job ID")
 		}
-		if accepted.Status != domain.PDFParseJobStatusPending {
+		if accepted.Status != core.PDFParseJobStatusPending {
 			t.Errorf("expected pending status, got %s", accepted.Status)
 		}
 
@@ -1413,11 +1413,11 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
 		}
-		var job domain.PDFParseJob
+		var job core.PDFParseJob
 		if err := json.NewDecoder(getResp.Body).Decode(&job); err != nil {
 			t.Fatalf("failed to decode job: %v", err)
 		}
-		if job.ID != accepted.JobID || job.Status != domain.PDFParseJobStatusPending {
+		if job.ID != accepted.JobID || job.Status != core.PDFParseJobStatusPending {
 			t.Errorf("expected pending job %s, got %+v", accepted.JobID, job)
 		}
 
@@ -1437,7 +1437,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		extractedResume := &profile.JSONResume{
 			Basics: profile.JSONResumeBasics{Name: "Morgan BrandNew"},
 		}
-		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, domain.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
+		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
 			t.Fatalf("failed to update job status: %v", err)
 		}
 
@@ -1449,11 +1449,11 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		}
 		defer func() { _ = pollResp.Body.Close() }()
 
-		var completedJob domain.PDFParseJob
+		var completedJob core.PDFParseJob
 		if err := json.NewDecoder(pollResp.Body).Decode(&completedJob); err != nil {
 			t.Fatalf("failed to decode completed job: %v", err)
 		}
-		if completedJob.Status != domain.PDFParseJobStatusCompleted {
+		if completedJob.Status != core.PDFParseJobStatusCompleted {
 			t.Errorf("expected completed status, got %s", completedJob.Status)
 		}
 		if completedJob.Result == nil {
@@ -1620,8 +1620,8 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 			expectedCode:   api.CodeUpstreamError,
 		},
 		{
-			name:           "domain.ErrValidation returns 400 INVALID_REQUEST",
-			extractorErr:   domain.ErrValidation,
+			name:           "core.ErrValidation returns 400 INVALID_REQUEST",
+			extractorErr:   core.ErrValidation,
 			expectedStatus: http.StatusBadRequest,
 			expectedCode:   api.CodeInvalidRequest,
 		},
@@ -1971,7 +1971,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var snap domain.MainProfileSnapshot
+		var snap core.MainProfileSnapshot
 		if err := json.Unmarshal(body, &snap); err != nil {
 			t.Fatalf("failed to decode snapshot: %v", err)
 		}
@@ -2002,7 +2002,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 			t.Fatalf("expected status 200 for new user commit, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var snap domain.MainProfileSnapshot
+		var snap core.MainProfileSnapshot
 		if err := json.Unmarshal(body, &snap); err != nil {
 			t.Fatalf("failed to decode snapshot: %v", err)
 		}
@@ -2034,7 +2034,7 @@ func TestProfilePDF_Commit(t *testing.T) {
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK for GET /profile on new user, got %d (body: %s)", getResp.StatusCode, string(getBody))
 		}
-		var prof domain.Profile
+		var prof core.Profile
 		if err := json.Unmarshal(getBody, &prof); err != nil {
 			t.Fatalf("failed to decode profile: %v", err)
 		}
@@ -2048,15 +2048,15 @@ func TestProfilePDF_Commit(t *testing.T) {
 }
 
 type mockModelEnumerator struct {
-	models []domain.ModelOption
+	models []core.ModelOption
 }
 
-func (m *mockModelEnumerator) AvailableModels() []domain.ModelOption {
+func (m *mockModelEnumerator) AvailableModels() []core.ModelOption {
 	return m.models
 }
 
 func TestModelsHandler_ListAvailableModels(t *testing.T) {
-	mockModels := []domain.ModelOption{
+	mockModels := []core.ModelOption{
 		{
 			Provider:    "gemini",
 			Model:       "gemini-2.5-pro",
@@ -2082,7 +2082,7 @@ func TestModelsHandler_ListAvailableModels(t *testing.T) {
 		t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var models []domain.ModelOption
+	var models []core.ModelOption
 	if err := json.Unmarshal(body, &models); err != nil {
 		t.Fatalf("failed to decode models: %v", err)
 	}
@@ -2107,7 +2107,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 	env := setupTestServer(t, 10)
 	client := env.server.Client()
 	baseURL := env.server.URL
-	defaultBranchID := domain.DefaultBranchID("default")
+	defaultBranchID := core.DefaultBranchID("default")
 
 	t.Run("DELETE /api/v1/branches/{id} on default branch returns 400 Bad Request", func(t *testing.T) {
 		resp, body := doRequest(t, client, http.MethodDelete, baseURL+"/api/v1/branches/"+defaultBranchID, nil, nil)
@@ -2142,7 +2142,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
 		}
-		updated := decodeJSON[domain.Branch](t, body)
+		updated := decodeJSON[core.Branch](t, body)
 		if updated.TemplateSetID != newTmpl {
 			t.Errorf("expected template %s, got %s", newTmpl, updated.TemplateSetID)
 		}
@@ -2154,7 +2154,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
 		}
 		jobResp := decodeJSON[api.AsyncJobEnqueued](t, body)
-		if jobResp.Status != domain.VersionStatusCompleted {
+		if jobResp.Status != core.VersionStatusCompleted {
 			t.Errorf("expected status completed, got %s", jobResp.Status)
 		}
 	})
@@ -2183,7 +2183,7 @@ func TestBranch_GapAnalysisEndpoint(t *testing.T) {
 	if createResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created, got %d: %s", createResp.StatusCode, string(createBody))
 	}
-	branch := decodeJSON[domain.Branch](t, createBody)
+	branch := decodeJSON[core.Branch](t, createBody)
 
 	// 3. Request decoupled fast gap analysis
 	gapResp, gapBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch.ID+"/gap-analysis", nil, nil)
@@ -2191,7 +2191,7 @@ func TestBranch_GapAnalysisEndpoint(t *testing.T) {
 		t.Fatalf("expected 200 OK from gap analysis endpoint, got %d: %s", gapResp.StatusCode, string(gapBody))
 	}
 
-	report := decodeJSON[domain.GapReport](t, gapBody)
+	report := decodeJSON[core.GapReport](t, gapBody)
 	if report.MatchScore == nil {
 		t.Errorf("expected non-nil MatchScore from gap analysis endpoint")
 	}
@@ -2218,7 +2218,7 @@ func TestEntityCreation_ShortID(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 		}
-		var exp domain.WorkExperience
+		var exp core.WorkExperience
 		if err := json.Unmarshal(body, &exp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -2241,7 +2241,7 @@ func TestEntityCreation_ShortID(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 		}
-		var exp domain.WorkExperience
+		var exp core.WorkExperience
 		if err := json.Unmarshal(body, &exp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -2262,7 +2262,7 @@ func TestEntityCreation_ShortID(t *testing.T) {
 		if respExp.StatusCode != http.StatusCreated {
 			t.Fatalf("failed to create experience: %d: %s", respExp.StatusCode, string(bodyExp))
 		}
-		var exp domain.WorkExperience
+		var exp core.WorkExperience
 		_ = json.Unmarshal(bodyExp, &exp)
 
 		// Create fact referencing the experience by short_id "exp-stripe"
@@ -2275,7 +2275,7 @@ func TestEntityCreation_ShortID(t *testing.T) {
 		if respFact.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201 Created, got %d: %s", respFact.StatusCode, string(bodyFact))
 		}
-		var fact domain.Fact
+		var fact core.Fact
 		if err := json.Unmarshal(bodyFact, &fact); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -2300,7 +2300,7 @@ func TestEntityCreation_ShortID(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 		}
-		var skill domain.Skill
+		var skill core.Skill
 		if err := json.Unmarshal(body, &skill); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -2328,20 +2328,20 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("failed to create skill: %d: %s", resp.StatusCode, string(body))
 	}
-	var skill domain.Skill
+	var skill core.Skill
 	_ = json.Unmarshal(body, &skill)
 
 	// 2. Create work experience with full extended details
 	hours := 40
-	empType := domain.EmploymentTypeFullTime
+	empType := core.EmploymentTypeFullTime
 	createReq := api.CreateExperienceRequest{
 		Company:        "Initial Corp",
 		RoleTitle:      "Architect",
 		EmploymentType: empType,
-		StartDate:      domain.NewDate(2022, 1, 1),
+		StartDate:      core.NewDate(2022, 1, 1),
 		HoursPerWeek:   &hours,
-		CompanyContact: &domain.ContactDetail{
-			Type:  domain.ContactTypeEmail,
+		CompanyContact: &core.ContactDetail{
+			Type:  core.ContactTypeEmail,
 			Value: "hr@initial.corp",
 		},
 		SupervisorName: "Sarah Connor",
@@ -2351,7 +2351,7 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("failed to create experience: %d: %s", resp.StatusCode, string(body))
 	}
-	var exp domain.WorkExperience
+	var exp core.WorkExperience
 	_ = json.Unmarshal(body, &exp)
 	if exp.CompanyContact == nil || exp.HoursPerWeek == nil || len(exp.Skills) == 0 {
 		t.Fatalf("expected initial experience to have contact, hours, and skills: %+v", exp)
@@ -2361,8 +2361,8 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	zeroHours := 0
 	emptySupervisor := ""
 	updateReq := api.UpdateExperienceRequest{
-		CompanyContact: &domain.ContactDetail{
-			Type:  domain.ContactTypeEmail,
+		CompanyContact: &core.ContactDetail{
+			Type:  core.ContactTypeEmail,
 			Value: "",
 		},
 		HoursPerWeek:   &zeroHours,
@@ -2373,7 +2373,7 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to update experience: %d: %s", resp.StatusCode, string(body))
 	}
-	var updatedExp domain.WorkExperience
+	var updatedExp core.WorkExperience
 	_ = json.Unmarshal(body, &updatedExp)
 
 	if updatedExp.CompanyContact != nil {
@@ -2394,7 +2394,7 @@ func TestUpdateExperience_ClearingExtendedFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to get experience: %d: %s", resp.StatusCode, string(body))
 	}
-	var fetchedExp domain.WorkExperience
+	var fetchedExp core.WorkExperience
 	_ = json.Unmarshal(body, &fetchedExp)
 	if fetchedExp.CompanyContact != nil {
 		t.Errorf("expected fetched CompanyContact to be nil, got %+v", fetchedExp.CompanyContact)
@@ -2418,7 +2418,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	expReq := api.CreateExperienceRequest{
 		Company:   "Stripe",
 		RoleTitle: "Software Engineer",
-		StartDate: domain.NewDate(2023, 1, 1),
+		StartDate: core.NewDate(2023, 1, 1),
 		SkillIDs:  []string{"Golang", "Kubernetes"},
 	}
 	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/experiences", expReq, nil)
@@ -2426,7 +2426,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 		t.Fatalf("failed to create experience: %d: %s", resp.StatusCode, string(body))
 	}
 
-	var createdExp domain.WorkExperience
+	var createdExp core.WorkExperience
 	if err := json.Unmarshal(body, &createdExp); err != nil {
 		t.Fatalf("failed to unmarshal experience: %v", err)
 	}
@@ -2447,11 +2447,11 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to list skills: %d: %s", resp.StatusCode, string(body))
 	}
-	var skills []domain.Skill
+	var skills []core.Skill
 	if err := json.Unmarshal(body, &skills); err != nil {
 		t.Fatalf("failed to unmarshal skills: %v", err)
 	}
-	skillNameMap := make(map[string]domain.Skill)
+	skillNameMap := make(map[string]core.Skill)
 	for _, s := range skills {
 		skillNameMap[s.Name] = s
 	}
@@ -2471,7 +2471,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("failed to create project: %d: %s", resp.StatusCode, string(body))
 	}
-	var createdProj domain.Project
+	var createdProj core.Project
 	if err := json.Unmarshal(body, &createdProj); err != nil {
 		t.Fatalf("failed to unmarshal project: %v", err)
 	}
@@ -2484,7 +2484,7 @@ func TestAPI_Skills_CreationAndConsolidationViaExperienceAndProject(t *testing.T
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to get full profile: %d: %s", resp.StatusCode, string(body))
 	}
-	var snapshot domain.MainProfileSnapshot
+	var snapshot core.MainProfileSnapshot
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatalf("failed to unmarshal profile snapshot: %v", err)
 	}
@@ -2517,14 +2517,14 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("failed to create template: %d: %s", resp.StatusCode, string(body))
 	}
-	tmpl := decodeJSON[domain.TemplateSet](t, body)
+	tmpl := decodeJSON[core.TemplateSet](t, body)
 
 	// 2. Test GET /api/v1/templates/{id}/preview (default JSON)
 	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/templates/"+tmpl.ID+"/preview", nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from GET /templates/{id}/preview, got %d: %s", resp.StatusCode, string(body))
 	}
-	var previewOut domain.RenderOutput
+	var previewOut core.RenderOutput
 	if err := json.Unmarshal(body, &previewOut); err != nil {
 		t.Fatalf("failed to parse preview JSON: %v, body: %s", err, string(body))
 	}
@@ -2589,7 +2589,7 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from POST /templates/preview, got %d: %s", resp.StatusCode, string(body))
 	}
-	var draftOut domain.RenderOutput
+	var draftOut core.RenderOutput
 	if err := json.Unmarshal(body, &draftOut); err != nil {
 		t.Fatalf("failed to decode draft preview: %v", err)
 	}
@@ -2625,14 +2625,14 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("failed to create branch: %d: %s", resp.StatusCode, string(body))
 	}
-	createdBranch := decodeJSON[domain.Branch](t, body)
+	createdBranch := decodeJSON[core.Branch](t, body)
 
 	// Fetch versions
 	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+createdBranch.ID+"/versions", nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("failed to list branch versions: %d", resp.StatusCode)
 	}
-	var versions []domain.BranchVersion
+	var versions []core.BranchVersion
 	_ = json.Unmarshal(body, &versions)
 	if len(versions) == 0 {
 		// Generate default version
@@ -2657,7 +2657,7 @@ func TestTemplateAndBranchPreview_GoServerRendering(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for branch version preview JSON, got %d: %s", resp.StatusCode, string(body))
 	}
-	var branchOut domain.RenderOutput
+	var branchOut core.RenderOutput
 	if err := json.Unmarshal(body, &branchOut); err != nil {
 		t.Fatalf("failed to decode branch preview JSON: %v", err)
 	}
@@ -2741,7 +2741,7 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 	})
 
 	t.Run("global skill delete rejected with 403 Forbidden", func(t *testing.T) {
-		globalSkill := &domain.Skill{
+		globalSkill := &core.Skill{
 			ID:       "global-test-lang",
 			UserID:   "system",
 			Name:     "Rust",
@@ -2773,7 +2773,7 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 
 		// Exhaust user daily quota (50 requests limit)
 		for i := 0; i < 50; i++ {
-			_, err := pdfMem.ReserveQuota(ctx, "default", domain.OperationResumeTailoring, 100, 50, 1000000)
+			_, err := pdfMem.ReserveQuota(ctx, "default", core.OperationResumeTailoring, 100, 50, 1000000)
 			if err != nil {
 				t.Fatalf("failed to seed reservations: %v", err)
 			}
@@ -2862,13 +2862,13 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	baseURL := server.URL
 
 	// Seed tenant custom skills for "default"
-	customSkill1 := &domain.Skill{
+	customSkill1 := &core.Skill{
 		ID:       "custom-skill-go",
 		UserID:   "default",
 		Name:     "Go",
 		IsGlobal: false,
 	}
-	customSkill2 := &domain.Skill{
+	customSkill2 := &core.Skill{
 		ID:       "custom-skill-k8s",
 		UserID:   "default",
 		Name:     "Kubernetes",
@@ -2882,7 +2882,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	}
 
 	// Seed global skill (system-owned)
-	globalSkill := &domain.Skill{
+	globalSkill := &core.Skill{
 		ID:       "global-skill-rust",
 		UserID:   "system",
 		Name:     "Rust",
@@ -2893,7 +2893,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	}
 
 	// Seed custom skill for another tenant to verify isolation
-	otherTenantSkill := &domain.Skill{
+	otherTenantSkill := &core.Skill{
 		ID:       "other-tenant-skill-python",
 		UserID:   "tenant-other",
 		Name:     "Python",
@@ -2903,7 +2903,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 		t.Fatalf("failed to create other tenant skill: %v", err)
 	}
 
-	assertSkillNamesAndIDs := func(t *testing.T, skills []domain.Skill, expectedMap map[string]string) {
+	assertSkillNamesAndIDs := func(t *testing.T, skills []core.Skill, expectedMap map[string]string) {
 		t.Helper()
 		if len(skills) != len(expectedMap) {
 			t.Fatalf("expected %d skills, got %d: %+v", len(expectedMap), len(skills), skills)
@@ -2936,7 +2936,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			query:          "",
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, resp *http.Response, body []byte) {
-				skills := decodeJSON[[]domain.Skill](t, body)
+				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
 					"custom-skill-k8s":  "Kubernetes",
@@ -2949,7 +2949,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			query:          "?type=all",
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, resp *http.Response, body []byte) {
-				skills := decodeJSON[[]domain.Skill](t, body)
+				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
 					"custom-skill-k8s":  "Kubernetes",
@@ -2962,7 +2962,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			query:          "?type=ALL",
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, resp *http.Response, body []byte) {
-				skills := decodeJSON[[]domain.Skill](t, body)
+				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
 					"custom-skill-k8s":  "Kubernetes",
@@ -2975,7 +2975,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			query:          "?type=global",
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, resp *http.Response, body []byte) {
-				skills := decodeJSON[[]domain.Skill](t, body)
+				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"global-skill-rust": "Rust",
 				})
@@ -2994,7 +2994,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			query:          "?type=custom",
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, resp *http.Response, body []byte) {
-				skills := decodeJSON[[]domain.Skill](t, body)
+				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":  "Go",
 					"custom-skill-k8s": "Kubernetes",
@@ -3040,14 +3040,14 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 }
 
 type testMockTokenVerifier struct {
-	tokens map[string]*domain.TokenInfo
+	tokens map[string]*core.TokenInfo
 }
 
-func (m *testMockTokenVerifier) VerifyIDToken(_ context.Context, token string) (*domain.TokenInfo, error) {
+func (m *testMockTokenVerifier) VerifyIDToken(_ context.Context, token string) (*core.TokenInfo, error) {
 	if info, ok := m.tokens[token]; ok {
 		return info, nil
 	}
-	return nil, domain.ErrUnauthorized
+	return nil, core.ErrUnauthorized
 }
 
 func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
@@ -3058,7 +3058,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	}
 
 	verifier := &testMockTokenVerifier{
-		tokens: map[string]*domain.TokenInfo{
+		tokens: map[string]*core.TokenInfo{
 			"token-firebase-new-123": {
 				UID:   "firebase-new-user-123",
 				Email: "newuser@example.com",
@@ -3098,7 +3098,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for GET /profile on first login, got %d: %s", resp.StatusCode, string(body))
 	}
-	var prof domain.Profile
+	var prof core.Profile
 	if err := json.Unmarshal(body, &prof); err != nil {
 		t.Fatalf("decode profile: %v", err)
 	}
@@ -3117,7 +3117,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	if branchResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for GET /branches, got %d: %s", branchResp.StatusCode, string(branchBody))
 	}
-	var branches []domain.Branch
+	var branches []core.Branch
 	if err := json.Unmarshal(branchBody, &branches); err != nil {
 		t.Fatalf("decode branches: %v", err)
 	}

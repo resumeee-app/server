@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 func TestTimeoutMiddleware(t *testing.T) {
@@ -111,10 +111,10 @@ func TestTimeoutMiddleware(t *testing.T) {
 }
 
 type mockTokenVerifier struct {
-	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+	verifyFunc func(ctx context.Context, token string) (*core.TokenInfo, error)
 }
 
-func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*core.TokenInfo, error) {
 	return m.verifyFunc(ctx, token)
 }
 
@@ -165,11 +165,11 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode with valid bearer token injects UID", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 				if token == "valid-firebase-jwt" {
-					return &domain.TokenInfo{UID: "firebase-uid-42", Email: "alex@example.com"}, nil
+					return &core.TokenInfo{UID: "firebase-uid-42", Email: "alex@example.com"}, nil
 				}
-				return nil, domain.ErrUnauthorized
+				return nil, core.ErrUnauthorized
 			},
 		}
 
@@ -194,16 +194,16 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode injects admin status from token info", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 				switch token {
 				case "admin-token-flag":
-					return &domain.TokenInfo{UID: "admin-1", Email: "admin@example.com", Admin: true}, nil
+					return &core.TokenInfo{UID: "admin-1", Email: "admin@example.com", Admin: true}, nil
 				case "admin-token-role":
-					return &domain.TokenInfo{UID: "admin-2", Email: "admin2@example.com", Role: "admin"}, nil
+					return &core.TokenInfo{UID: "admin-2", Email: "admin2@example.com", Role: "admin"}, nil
 				case "normal-user-token":
-					return &domain.TokenInfo{UID: "user-1", Email: "user@example.com", Role: "user", Admin: false}, nil
+					return &core.TokenInfo{UID: "user-1", Email: "user@example.com", Role: "user", Admin: false}, nil
 				default:
-					return nil, domain.ErrUnauthorized
+					return nil, core.ErrUnauthorized
 				}
 			},
 		}
@@ -270,8 +270,8 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode rejects invalid token with 401", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
-				return nil, domain.ErrUnauthorized
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+				return nil, core.ErrUnauthorized
 			},
 		}
 		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

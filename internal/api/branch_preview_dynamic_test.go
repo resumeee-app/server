@@ -12,7 +12,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/validator"
@@ -59,7 +59,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 
 	// 1. Create two distinct custom templates
 	now := time.Now().UTC()
-	classicTemplate := &domain.TemplateSet{
+	classicTemplate := &core.TemplateSet{
 		ID:               "tmpl-classic-theme",
 		UserID:           defaultUserID,
 		Name:             "Classic Theme",
@@ -74,7 +74,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		t.Fatalf("failed to create classic template: %v", err)
 	}
 
-	modernTemplate := &domain.TemplateSet{
+	modernTemplate := &core.TemplateSet{
 		ID:               "tmpl-modern-theme",
 		UserID:           defaultUserID,
 		Name:             "Modern Theme",
@@ -90,7 +90,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 2. Create branch with classic template
-	targetBranch := &domain.TargetResume{
+	targetBranch := &core.TargetResume{
 		ID:            "branch-test-dyn",
 		UserID:        defaultUserID,
 		Name:          "Frontend Architect",
@@ -101,18 +101,18 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 3. Create completed version with classic template cached output
-	v1 := &domain.ResumeVersion{
+	v1 := &core.ResumeVersion{
 		ID:                 "ver-dyn-1",
 		ResumeID:           targetBranch.ID,
 		BranchID:           targetBranch.ID,
 		VersionNumber:      1,
-		Status:             domain.VersionStatusCompleted,
+		Status:             core.VersionStatusCompleted,
 		TemplateSetIDUsed:  "tmpl-classic-theme",
-		SourceType:         domain.SourceTypeLLMGeneration,
+		SourceType:         core.SourceTypeLLMGeneration,
 		HTMLOutput:         `<div class="classic-theme">Taylor Candidate - Classic</div>`,
 		MarkdownOutput:     `# Taylor Candidate - Classic`,
 		PlainTextOutput:    `Taylor Candidate - Classic`,
-		TailoredContent:    &domain.TailoredContent{Summary: "Lead developer"},
+		TailoredContent:    &core.TailoredContent{Summary: "Lead developer"},
 		CreatedAt:          now,
 	}
 	if err := branchRepo.CreateVersion(ctx, v1); err != nil {
@@ -129,7 +129,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var previewRes domain.RenderOutput
+	var previewRes core.RenderOutput
 	if err := json.NewDecoder(resp.Body).Decode(&previewRes); err != nil {
 		t.Fatalf("failed to decode preview: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 	defer func() { _ = getResp.Body.Close() }()
 
-	var dynPreview domain.RenderOutput
+	var dynPreview core.RenderOutput
 	if err := json.NewDecoder(getResp.Body).Decode(&dynPreview); err != nil {
 		t.Fatalf("failed to decode dynamic preview: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 	defer func() { _ = queryResp.Body.Close() }()
 
-	var queryPreview domain.RenderOutput
+	var queryPreview core.RenderOutput
 	if err := json.NewDecoder(queryResp.Body).Decode(&queryPreview); err != nil {
 		t.Fatalf("failed to decode query preview: %v", err)
 	}

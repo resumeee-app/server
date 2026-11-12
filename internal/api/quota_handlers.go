@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 // QuotaResponse describes the tenant's current quota status, usage, limits, and reset window timestamps.
 type QuotaResponse struct {
-	domain.TenantQuota
+	core.TenantQuota
 	DailyRequestsRemaining int       `json:"daily_requests_remaining"`
 	MonthlyTokensRemaining int       `json:"monthly_tokens_remaining"`
 	DailyResetAt           time.Time `json:"daily_reset_at"`
@@ -42,10 +42,10 @@ func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 		monthlyLimit = 1000000
 	}
 
-	var quota *domain.TenantQuota
+	var quota *core.TenantQuota
 	if h.cfg.QuotaRepo != nil {
 		q, err := h.cfg.QuotaRepo.GetQuota(ctx, userID)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			writeDomainError(w, err)
 			return
 		}
@@ -54,7 +54,7 @@ func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	if quota == nil {
-		quota = &domain.TenantQuota{
+		quota = &core.TenantQuota{
 			UserID:             userID,
 			DailyRequestsUsed:  0,
 			DailyRequestLimit:  dailyLimit,

@@ -9,7 +9,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 // jsonResourceContents serializes any data structure into indented JSON text resource contents.
@@ -102,7 +102,7 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *domain.MainProfileSnapshot
+		var snapshot *core.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
 			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
@@ -131,8 +131,8 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerFunc {
 	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
 		payload := map[string]any{
-			"default_language":    domain.DefaultLanguage,
-			"supported_languages": domain.SupportedLanguages,
+			"default_language":    core.DefaultLanguage,
+			"supported_languages": core.SupportedLanguages,
 		}
 		return jsonResourceContents("resumeee://languages", payload)
 	}
@@ -211,7 +211,7 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 		}
 
 		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != domain.SystemUserID) {
+		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
 			return nil, errors.New("template not found or access denied")
 		}
@@ -246,7 +246,7 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 		}
 
 		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != domain.SystemUserID) {
+		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)
 			return nil, errors.New("preset not found or access denied")
 		}

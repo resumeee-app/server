@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 type responseWriterRecorder struct {
@@ -156,7 +156,7 @@ func isPublicRoute(p string) bool {
 
 // TenantProvisioner defines an interface for lazy onboarding of newly authenticated tenants.
 type TenantProvisioner interface {
-	EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *domain.User) error
+	EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error
 }
 
 // AuthMiddlewareWithProvider inspects incoming requests using the provided auth.Provider
@@ -196,11 +196,11 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 			ctx := WithUserID(r.Context(), tokenInfo.UID)
 			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
 			if provisioner != nil && provider.Name() != auth.ProviderAdmin {
-				role := domain.UserRoleUser
+				role := core.UserRoleUser
 				if tokenInfo.IsAdmin() {
-					role = domain.UserRoleAdmin
+					role = core.UserRoleAdmin
 				}
-				if err := provisioner.EnsureTenantProvisioned(r.Context(), tokenInfo.UID, &domain.User{
+				if err := provisioner.EnsureTenantProvisioned(r.Context(), tokenInfo.UID, &core.User{
 					ID:       tokenInfo.UID,
 					Email:    tokenInfo.Email,
 					Role:     role,
@@ -218,7 +218,7 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 
 // AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
 // Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
-func AuthMiddleware(admin bool, defaultUserID string, verifier domain.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
+func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
 	if defaultUserID == "" {
 		defaultUserID = "default"
 	}

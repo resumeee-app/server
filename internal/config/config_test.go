@@ -95,7 +95,7 @@ func TestLoadOverrides(t *testing.T) {
 		"OPENAI_COMPAT_API_KEY":  "ollama-secret",
 		"FIREBASE_PROJECT_ID":   "custom-project",
 		"FIREBASE_API_KEY":      "custom-api-key",
-		"FIREBASE_AUTH_DOMAIN":  "custom-domain.firebaseapp.com",
+		"FIREBASE_AUTH_DOMAIN":  "custom-core.firebaseapp.com",
 		"AUTH_PROVIDER":         "firebase",
 		"ENV":                    "production",
 		"LOG_LEVEL":              "DEBUG",
@@ -155,8 +155,8 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.FirebaseAPIKey != "custom-api-key" {
 		t.Errorf("expected FirebaseAPIKey 'custom-api-key', got %q", cfg.FirebaseAPIKey)
 	}
-	if cfg.FirebaseAuthDomain != "custom-domain.firebaseapp.com" {
-		t.Errorf("expected FirebaseAuthDomain 'custom-domain.firebaseapp.com', got %q", cfg.FirebaseAuthDomain)
+	if cfg.FirebaseAuthDomain != "custom-core.firebaseapp.com" {
+		t.Errorf("expected FirebaseAuthDomain 'custom-core.firebaseapp.com', got %q", cfg.FirebaseAuthDomain)
 	}
 	if cfg.AuthProvider != "firebase" {
 		t.Errorf("expected AuthProvider 'firebase', got %q", cfg.AuthProvider)

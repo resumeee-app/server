@@ -12,7 +12,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/validator"
@@ -23,18 +23,18 @@ type mockLLMProvider struct {
 }
 
 func (m *mockLLMProvider) Name() string { return "mock" }
-func (m *mockLLMProvider) GenerateTailoredResume(_ context.Context, _ domain.GenerationRequest) (*domain.GenerationResponse, error) {
+func (m *mockLLMProvider) GenerateTailoredResume(_ context.Context, _ core.GenerationRequest) (*core.GenerationResponse, error) {
 	m.CallCount++
-	return &domain.GenerationResponse{}, nil
+	return &core.GenerationResponse{}, nil
 }
 
 type resumeTestEnv struct {
 	server       *httptest.Server
 	db           any
-	branchRepo   domain.BranchRepository
-	profileRepo  domain.ProfileRepository
-	presetRepo   domain.PresetRepository
-	templateRepo domain.TemplateRepository
+	branchRepo   core.BranchRepository
+	profileRepo  core.ProfileRepository
+	presetRepo   core.PresetRepository
+	templateRepo core.TemplateRepository
 	mockProvider *mockLLMProvider
 }
 
@@ -99,7 +99,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	userID := "user-resume-1"
 
 	// Create test target resume (branch)
-	targetResume := &domain.TargetResume{
+	targetResume := &core.TargetResume{
 		ID:            "resume-test-1",
 		UserID:        userID,
 		Name:          "Stripe - Staff Backend",
@@ -110,14 +110,14 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	}
 
 	// Create a completed version with tailored content
-	tailoredContent := &domain.TailoredContent{
+	tailoredContent := &core.TailoredContent{
 		Summary: "Experienced distributed systems engineer with 10+ years building high-throughput payment rails.",
-		Experiences: []domain.TailoredExperience{
+		Experiences: []core.TailoredExperience{
 			{
 				SourceEntityID: "exp-1",
 				Company:        "Acme Payments",
 				RoleTitle:      "Senior Systems Engineer",
-				Bullets: []domain.TailoredBullet{
+				Bullets: []core.TailoredBullet{
 					{
 						Text:           "Architected distributed ledger processing 50k transactions/second.",
 						SourceFactIDs:  []string{"fact-ledger-1"},
@@ -129,15 +129,15 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	vCompleted := &domain.ResumeVersion{
+	vCompleted := &core.ResumeVersion{
 		ID:                 "ver-completed-1",
 		ResumeID:           targetResume.ID,
 		BranchID:           targetResume.ID,
 		VersionNumber:      1,
-		Status:             domain.VersionStatusCompleted,
+		Status:             core.VersionStatusCompleted,
 		MainRevisionUsed: 1,
 		TemplateSetIDUsed:  "builtin-standard-clean",
-		SourceType:         domain.SourceTypeLLMGeneration,
+		SourceType:         core.SourceTypeLLMGeneration,
 		TailoredContent:    tailoredContent,
 		HTMLOutput:         "<html>Old Standard Template</html>",
 		MarkdownOutput:     "# Old Standard Markdown",
@@ -151,7 +151,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	_ = env.branchRepo.CompleteVersion(ctx, vCompleted)
 
 	// Create alternative custom template for user
-	userTemplate := &domain.TemplateSet{
+	userTemplate := &core.TemplateSet{
 		ID:               "tmpl-user-custom",
 		UserID:           userID,
 		Name:             "User Custom Layout",
@@ -168,7 +168,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	}
 
 	// Create a foreign tenant's private template
-	foreignTemplate := &domain.TemplateSet{
+	foreignTemplate := &core.TemplateSet{
 		ID:               "tmpl-foreign-private",
 		UserID:           "other-tenant-random-456",
 		Name:             "Foreign Private Template",
@@ -252,15 +252,15 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 4. Assert 409 Conflict when version status is pending or processing
 	t.Run("RenderPreview_PendingStatus_Returns409", func(t *testing.T) {
-		vPending := &domain.ResumeVersion{
+		vPending := &core.ResumeVersion{
 			ID:                 "ver-pending-1",
 			ResumeID:           targetResume.ID,
 			BranchID:           targetResume.ID,
 			VersionNumber:      2,
-			Status:             domain.VersionStatusPending,
+			Status:             core.VersionStatusPending,
 			MainRevisionUsed: 1,
 			TemplateSetIDUsed:  "builtin-standard-clean",
-			SourceType:         domain.SourceTypeLLMGeneration,
+			SourceType:         core.SourceTypeLLMGeneration,
 			TailoredContent:    tailoredContent,
 			CreatedAt:          time.Now().UTC(),
 		}
@@ -288,15 +288,15 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 5. Assert 422 Unprocessable Entity when TailoredContent is nil
 	t.Run("RenderPreview_NilTailoredContent_Returns422", func(t *testing.T) {
-		vFailed := &domain.ResumeVersion{
+		vFailed := &core.ResumeVersion{
 			ID:                 "ver-failed-1",
 			ResumeID:           targetResume.ID,
 			BranchID:           targetResume.ID,
 			VersionNumber:      3,
-			Status:             domain.VersionStatusFailed,
+			Status:             core.VersionStatusFailed,
 			MainRevisionUsed: 1,
 			TemplateSetIDUsed:  "builtin-standard-clean",
-			SourceType:         domain.SourceTypeLLMGeneration,
+			SourceType:         core.SourceTypeLLMGeneration,
 			TailoredContent:    nil,
 			ErrorMessage:       "LLM failed to respond",
 			CreatedAt:          time.Now().UTC(),
@@ -353,7 +353,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	attackerID := "user-attacker"
 
 	// Seed private template owned by attacker
-	foreignTmpl := &domain.TemplateSet{
+	foreignTmpl := &core.TemplateSet{
 		ID:               "tmpl-foreign-attacker",
 		UserID:           attackerID,
 		Name:             "Secret Attacker Template",
@@ -367,7 +367,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	}
 
 	// Seed private strategy owned by attacker
-	foreignStrat := &domain.TailoringStrategy{
+	foreignStrat := &core.TailoringStrategy{
 		ID:                 "strat-foreign-attacker",
 		UserID:             attackerID,
 		Name:               "Secret Attacker Strategy",
@@ -451,7 +451,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	})
 
 	// Seed legitimate user branch
-	legitBranch := &domain.TargetResume{
+	legitBranch := &core.TargetResume{
 		ID:            "branch-legit-user",
 		UserID:        userID,
 		Name:          "Legitimate Branch",
@@ -523,7 +523,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 	score89 := 89.0
 
 	// Create a tailored branch
-	b := &domain.Branch{
+	b := &core.Branch{
 		ID:            "branch-api-gap-test",
 		UserID:        userID,
 		Name:          "Site Reliability Lead",
@@ -534,16 +534,16 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 	}
 
 	// Create and complete a version with GapReport
-	v := &domain.BranchVersion{
+	v := &core.BranchVersion{
 		ID:               "ver-api-gap-1",
 		BranchID:         b.ID,
-		Status:           domain.VersionStatusCompleted,
+		Status:           core.VersionStatusCompleted,
 		MainRevisionUsed: 1,
-		GapReport: &domain.GapReport{
+		GapReport: &core.GapReport{
 			OverallMatchSummary: "High match for SRE lead position",
 			MatchScore:          &score89,
-			MissingRequirements: []domain.GapItem{
-				{Requirement: "Terraform CDKTF", Importance: domain.GapImportancePreferred},
+			MissingRequirements: []core.GapItem{
+				{Requirement: "Terraform CDKTF", Importance: core.GapImportancePreferred},
 			},
 		},
 	}
@@ -569,12 +569,12 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 		}
 
-		var branches []domain.Branch
+		var branches []core.Branch
 		if err := json.NewDecoder(resp.Body).Decode(&branches); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		var found *domain.Branch
+		var found *core.Branch
 		for i := range branches {
 			if branches[i].ID == b.ID {
 				found = &branches[i]
@@ -599,7 +599,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 		if found.GapReport.MissingRequirements[0].Requirement != "Terraform CDKTF" {
 			t.Errorf("expected missing requirement 'Terraform CDKTF', got %q", found.GapReport.MissingRequirements[0].Requirement)
 		}
-		if found.GapReport.MissingRequirements[0].Importance != domain.GapImportancePreferred {
+		if found.GapReport.MissingRequirements[0].Importance != core.GapImportancePreferred {
 			t.Errorf("expected importance 'preferred', got %q", found.GapReport.MissingRequirements[0].Importance)
 		}
 	})
@@ -619,7 +619,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 		}
 
-		var fetched domain.Branch
+		var fetched core.Branch
 		if err := json.NewDecoder(resp.Body).Decode(&fetched); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -644,16 +644,16 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 	// 3. Test PUT /api/v1/branches/{id} version switch
 	t.Run("PUT /api/v1/branches/{id} active version switch syncs gap_report match_score", func(t *testing.T) {
 		score96 := 96.0
-		v2 := &domain.BranchVersion{
+		v2 := &core.BranchVersion{
 			ID:               "ver-api-gap-2",
 			BranchID:         b.ID,
-			Status:           domain.VersionStatusCompleted,
+			Status:           core.VersionStatusCompleted,
 			MainRevisionUsed: 1,
-			GapReport: &domain.GapReport{
+			GapReport: &core.GapReport{
 				OverallMatchSummary: "Exceptional candidate match after tailoring",
 				MatchScore:          &score96,
-				MissingRequirements: []domain.GapItem{
-					{Requirement: "Minor documentation polish", Importance: domain.GapImportanceNiceToHave},
+				MissingRequirements: []core.GapItem{
+					{Requirement: "Minor documentation polish", Importance: core.GapImportanceNiceToHave},
 				},
 			},
 		}
@@ -683,7 +683,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", putResp.StatusCode)
 		}
 
-		var updated domain.Branch
+		var updated core.Branch
 		if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
 			t.Fatalf("failed to decode PUT response: %v", err)
 		}
@@ -714,7 +714,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", putResp2.StatusCode)
 		}
 
-		var updated2 domain.Branch
+		var updated2 core.Branch
 		if err := json.NewDecoder(putResp2.Body).Decode(&updated2); err != nil {
 			t.Fatalf("failed to decode second PUT response: %v", err)
 		}
@@ -730,7 +730,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 	// 4. Test HTTP fallback resolution for legacy branches where gap_report in store is null
 	t.Run("HTTP endpoints fallback-resolve gap_report for legacy branch with null gap_report in store", func(t *testing.T) {
 		score91 := 91.0
-		bLegacy := &domain.Branch{
+		bLegacy := &core.Branch{
 			ID:            "branch-api-legacy-fallback",
 			UserID:        userID,
 			Name:          "Legacy Infrastructure Engineer",
@@ -740,16 +740,16 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("failed to create legacy branch: %v", err)
 		}
 
-		vLegacy := &domain.BranchVersion{
+		vLegacy := &core.BranchVersion{
 			ID:               "ver-api-legacy-1",
 			BranchID:         bLegacy.ID,
-			Status:           domain.VersionStatusCompleted,
+			Status:           core.VersionStatusCompleted,
 			MainRevisionUsed: 1,
-			GapReport: &domain.GapReport{
+			GapReport: &core.GapReport{
 				OverallMatchSummary: "Legacy version match summary",
 				MatchScore:          &score91,
-				MissingRequirements: []domain.GapItem{
-					{Requirement: "Ansible automation", Importance: domain.GapImportancePreferred},
+				MissingRequirements: []core.GapItem{
+					{Requirement: "Ansible automation", Importance: core.GapImportancePreferred},
 				},
 			},
 		}
@@ -777,7 +777,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
 		}
 
-		var fetchedLegacy domain.Branch
+		var fetchedLegacy core.Branch
 		if err := json.NewDecoder(getResp.Body).Decode(&fetchedLegacy); err != nil {
 			t.Fatalf("decode failed: %v", err)
 		}
@@ -801,12 +801,12 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 		}
 		defer func() { _ = listResp.Body.Close() }()
 
-		var branchList []domain.Branch
+		var branchList []core.Branch
 		if err := json.NewDecoder(listResp.Body).Decode(&branchList); err != nil {
 			t.Fatalf("decode list failed: %v", err)
 		}
 
-		var foundLegacy *domain.Branch
+		var foundLegacy *core.Branch
 		for i := range branchList {
 			if branchList[i].ID == bLegacy.ID {
 				foundLegacy = &branchList[i]
@@ -861,7 +861,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 
 	// 2. Tailored branch without job description must be rejected
 	t.Run("POST /api/v1/branches/{id}/ats-score rejects missing job description with 400 Bad Request", func(t *testing.T) {
-		bNoJD := &domain.Branch{
+		bNoJD := &core.Branch{
 			ID:                 "branch-api-ats-no-jd",
 			UserID:             userID,
 			Name:               "No JD Variant",
@@ -888,7 +888,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 
 	// 3. Successful on-demand ATS score calculation, single-trigger conflict enforcement, and persistence
 	t.Run("POST /api/v1/branches/{id}/ats-score calculates once and persists across active version switches", func(t *testing.T) {
-		b := &domain.Branch{
+		b := &core.Branch{
 			ID:                 "branch-api-ats-1",
 			UserID:             userID,
 			Name:               "Distributed Systems Engineer",
@@ -900,11 +900,11 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			t.Fatalf("CreateBranch failed: %v", err)
 		}
 
-		v1 := &domain.BranchVersion{
+		v1 := &core.BranchVersion{
 			ID:               "ver-api-ats-1",
 			BranchID:         b.ID,
 			MainRevisionUsed: 1,
-			Status:           domain.VersionStatusCompleted,
+			Status:           core.VersionStatusCompleted,
 			MarkdownOutput:   "# Jane Doe\n## Summary\nDistributed systems engineer skilled in Go and Kubernetes.\n## Experience\n- Built high-availability services.",
 		}
 		if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
@@ -927,7 +927,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 		}
 
-		var score domain.ATSScore
+		var score core.ATSScore
 		if err := json.NewDecoder(resp.Body).Decode(&score); err != nil {
 			t.Fatalf("failed to decode ATSScore: %v", err)
 		}
@@ -960,7 +960,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 		}
 		defer func() { _ = getResp.Body.Close() }()
 
-		var fetchedBranch domain.Branch
+		var fetchedBranch core.Branch
 		if err := json.NewDecoder(getResp.Body).Decode(&fetchedBranch); err != nil {
 			t.Fatalf("failed to decode branch: %v", err)
 		}

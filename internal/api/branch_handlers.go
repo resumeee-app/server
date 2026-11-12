@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
@@ -90,7 +90,7 @@ type RenderPreviewRequest struct {
 
 type AsyncJobEnqueued struct {
 	VersionID string               `json:"version_id"`
-	Status    domain.VersionStatus `json:"status"`
+	Status    core.VersionStatus `json:"status"`
 	Message   string               `json:"message"`
 }
 
@@ -104,7 +104,7 @@ type SyncBranchesResponse struct {
 }
 
 type EditVersionRequest struct {
-	TailoredContent *domain.TailoredContent `json:"tailored_content"`
+	TailoredContent *core.TailoredContent `json:"tailored_content"`
 }
 
 type PromptPreviewRequest struct {
@@ -192,7 +192,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		directives = req.BranchInstructions
 	}
 
-	b := &domain.Branch{
+	b := &core.Branch{
 		UserID:                   userID,
 		Name:                     req.Name,
 		TargetRole:               req.TargetRole,
@@ -379,7 +379,7 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 
 	ver, err := h.svc.GenerateVersion(ctx, userID, id)
 	if err != nil {
-		if errors.Is(err, domain.ErrQueueFull) {
+		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
@@ -387,7 +387,7 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if ver.Status == domain.VersionStatusCompleted {
+	if ver.Status == core.VersionStatusCompleted {
 		writeJSON(w, http.StatusOK, AsyncJobEnqueued{
 			VersionID: ver.ID,
 			Status:    ver.Status,
@@ -417,7 +417,7 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 
 	enqueuedIDs, err := h.svc.SyncBranches(ctx, userID, req.BranchIDs)
 	if err != nil {
-		if errors.Is(err, domain.ErrQueueFull) {
+		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
@@ -472,7 +472,7 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 }
 
 // getOrRenderVersionOutputs resolves or dynamically re-renders resume outputs incorporating targetTemplateID.
-func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, _, _ string, b *domain.Branch, ver *domain.BranchVersion, targetTemplateID string) domain.RenderOutput {
+func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, _, _ string, b *core.Branch, ver *core.BranchVersion, targetTemplateID string) core.RenderOutput {
 	return renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateRepo, h.cfg.ProfileRepo, userID, b, ver, targetTemplateID)
 }
 
@@ -576,11 +576,11 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 
 	newVer, err := h.svc.EditVersion(ctx, userID, branchID, v, *req.TailoredContent)
 	if err != nil {
-		if errors.Is(err, domain.ErrProvenance) {
+		if errors.Is(err, core.ErrProvenance) {
 			writeError(w, http.StatusUnprocessableEntity, CodeProvenanceError, "provenance validation failed", err.Error())
 			return
 		}
-		if errors.Is(err, domain.ErrTemplateSyntax) {
+		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template rendering failed", err.Error())
 			return
 		}
@@ -620,7 +620,7 @@ func (h *branchHandler) simulateBranchATSScore(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var opts domain.ATSSimulationOptions
+	var opts core.ATSSimulationOptions
 	if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
 		if !decodeJSON(w, r, &opts) {
 			return
@@ -685,13 +685,13 @@ func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var opts *domain.PromptPreviewOptions
+	var opts *core.PromptPreviewOptions
 	if r.Body != nil && r.Body != http.NoBody {
 		var req PromptPreviewRequest
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		opts = &domain.PromptPreviewOptions{
+		opts = &core.PromptPreviewOptions{
 			TargetRole:         req.TargetRole,
 			TargetCompany:      req.TargetCompany,
 			TargetRequirements: req.TargetRequirements,
@@ -752,7 +752,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. State Preconditions
-	if ver.Status == domain.VersionStatusPending || ver.Status == domain.VersionStatusProcessing {
+	if ver.Status == core.VersionStatusPending || ver.Status == core.VersionStatusProcessing {
 		writeError(w, http.StatusConflict, CodeConflict, "resume version generation is currently in progress", "")
 		return
 	}
@@ -792,7 +792,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var prof *domain.Profile
+	var prof *core.Profile
 	if h.cfg.ProfileRepo != nil {
 		prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
 	}

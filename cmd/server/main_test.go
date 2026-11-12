@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
@@ -37,7 +37,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
 	}
 	t.Setenv("PORT", freePort(t))
@@ -83,7 +83,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	t.Setenv("PORT", freePort(t))
 	t.Setenv("ADMIN_MODE", "true")
 
-	branch := &domain.Branch{
+	branch := &core.Branch{
 		ID:            "br-recover",
 		UserID:        "default",
 		Name:          "Pending Branch",
@@ -93,18 +93,18 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
-	ver := &domain.BranchVersion{
+	ver := &core.BranchVersion{
 		ID:       "ver-interrupted",
 		BranchID: branch.ID,
-		Status:   domain.VersionStatusProcessing,
+		Status:   core.VersionStatusProcessing,
 	}
 	if err := memStore.Branch().CreateVersion(context.Background(), ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 	// Force status to processing
-	_ = memStore.Branch().UpdateVersionStatus(context.Background(), ver.ID, domain.VersionStatusProcessing, "")
+	_ = memStore.Branch().UpdateVersionStatus(context.Background(), ver.ID, core.VersionStatusProcessing, "")
 
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
 	}
 
@@ -132,7 +132,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get version: %v", err)
 	}
-	if recoveredVer.Status != domain.VersionStatusFailed {
+	if recoveredVer.Status != core.VersionStatusFailed {
 		t.Errorf("expected version to be transitioned to failed on boot, got: %s", recoveredVer.Status)
 	}
 }
@@ -331,7 +331,7 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed reading response body: %v", err)
 		}
-		var prof domain.Profile
+		var prof core.Profile
 		if err := json.Unmarshal(body, &prof); err != nil {
 			t.Fatalf("failed to decode seeded profile json: %v; raw body: %s", err, string(body))
 		}
@@ -474,7 +474,7 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
 	}
 
@@ -497,7 +497,7 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (domain.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
 	}
 

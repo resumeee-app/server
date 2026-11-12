@@ -12,7 +12,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 // connectionLimiter manages active SSE stream concurrency limits per user and across the system.
@@ -109,7 +109,7 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 			if cfg.AuthProvider.Name() != auth.ProviderAdmin && err != nil && (errors.Is(err, auth.ErrMissingBearerHeader) || errors.Is(err, auth.ErrEmptyBearerToken)) {
 				return "", errors.New("missing or malformed Authorization Bearer header")
 			}
-			return "", domain.ErrUnauthorized
+			return "", core.ErrUnauthorized
 		}
 		return tokenInfo.UID, nil
 	}
@@ -117,14 +117,14 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 	// 3. Multi-tenant mode (not Admin): strictly require token verification
 	if !cfg.Admin {
 		if cfg.TokenVerifier == nil {
-			return "", domain.ErrUnauthorized
+			return "", core.ErrUnauthorized
 		}
 		if bearerToken == "" {
 			return "", errors.New("missing or malformed Authorization Bearer header")
 		}
 		tokenInfo, err := cfg.TokenVerifier.VerifyIDToken(r.Context(), bearerToken)
 		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
-			return "", domain.ErrUnauthorized
+			return "", core.ErrUnauthorized
 		}
 		return tokenInfo.UID, nil
 	}

@@ -9,35 +9,35 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
 type mockBranchModelEnumerator struct {
-	models []domain.ModelOption
+	models []core.ModelOption
 }
 
-func (m *mockBranchModelEnumerator) AvailableModels() []domain.ModelOption {
+func (m *mockBranchModelEnumerator) AvailableModels() []core.ModelOption {
 	return m.models
 }
 
 type mockVerifierForBranchModel struct {
-	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+	verifyFunc func(ctx context.Context, token string) (*core.TokenInfo, error)
 }
 
-func (m *mockVerifierForBranchModel) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+func (m *mockVerifierForBranchModel) VerifyIDToken(ctx context.Context, token string) (*core.TokenInfo, error) {
 	if m.verifyFunc != nil {
 		return m.verifyFunc(ctx, token)
 	}
-	return nil, domain.ErrUnauthorized
+	return nil, core.ErrUnauthorized
 }
 
-func setupBranchModelTestServer(t *testing.T, enumerator domain.ModelEnumerator) (*httptest.Server, *domain.Branch) {
+func setupBranchModelTestServer(t *testing.T, enumerator core.ModelEnumerator) (*httptest.Server, *core.Branch) {
 	return setupBranchModelTestServerWithAdmin(t, enumerator, true)
 }
 
-func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator domain.ModelEnumerator, admin bool) (*httptest.Server, *domain.Branch) {
+func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnumerator, admin bool) (*httptest.Server, *core.Branch) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -47,14 +47,14 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator domain.ModelEn
 		t.Fatalf("failed to seed memory store: %v", err)
 	}
 
-	var verifier domain.TokenVerifier
+	var verifier core.TokenVerifier
 	if !admin {
 		verifier = &mockVerifierForBranchModel{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 				if token == "token-regular-user" {
-					return &domain.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
+					return &core.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
 				}
-				return nil, domain.ErrUnauthorized
+				return nil, core.ErrUnauthorized
 			},
 		}
 	}
@@ -86,7 +86,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator domain.ModelEn
 		QuotaRepo:    store,
 	})
 
-	testBranch := &domain.Branch{
+	testBranch := &core.Branch{
 		UserID:             defaultUser,
 		Name:               "Targeted Staff Backend Role",
 		TemplateSetID:      renderer.TemplateStandardCleanID,
@@ -101,7 +101,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator domain.ModelEn
 }
 
 func TestBranchModelSelection_UpdateReasoningAndModel(t *testing.T) {
-	mockModels := []domain.ModelOption{
+	mockModels := []core.ModelOption{
 		{Provider: "gemini", Model: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash"},
 		{Provider: "gemini", Model: "gemini-4-argon", DisplayName: "Gemini 4 Argon"},
 		{Provider: "anthropic", Model: "claude-3-7-sonnet", DisplayName: "Claude 3.7 Sonnet"},
@@ -135,7 +135,7 @@ func TestBranchModelSelection_UpdateReasoningAndModel(t *testing.T) {
 				}
 
 				if tc.expectStatus == http.StatusOK {
-					updated := decodeJSON[domain.Branch](t, body)
+					updated := decodeJSON[core.Branch](t, body)
 					if updated.ReasoningLevel != tc.reasoningLevel {
 						t.Errorf("expected ReasoningLevel %q, got %q", tc.reasoningLevel, updated.ReasoningLevel)
 					}
@@ -164,7 +164,7 @@ func TestBranchModelSelection_UpdateReasoningAndModel(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(body))
 		}
 
-		updated := decodeJSON[domain.Branch](t, body)
+		updated := decodeJSON[core.Branch](t, body)
 		if updated.ProviderOverride != prov {
 			t.Errorf("expected ProviderOverride %q, got %q", prov, updated.ProviderOverride)
 		}
@@ -230,7 +230,7 @@ func TestBranchModelSelection_UpdateReasoningAndModel(t *testing.T) {
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK retrieving branch, got %d", getResp.StatusCode)
 		}
-		current := decodeJSON[domain.Branch](t, getBody)
+		current := decodeJSON[core.Branch](t, getBody)
 		if current.ProviderOverride != "gemini" || current.ModelOverride != "gemini-4-argon" {
 			t.Errorf("branch state was unexpectedly mutated: provider=%q model=%q", current.ProviderOverride, current.ModelOverride)
 		}
@@ -238,7 +238,7 @@ func TestBranchModelSelection_UpdateReasoningAndModel(t *testing.T) {
 }
 
 func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
-	mockModels := []domain.ModelOption{
+	mockModels := []core.ModelOption{
 		{Provider: "gemini", Model: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash"},
 	}
 	enumerator := &mockBranchModelEnumerator{models: mockModels}
@@ -339,7 +339,7 @@ func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
 }
 
 func TestBranchModelSelection_CreateBranchWithReasoning(t *testing.T) {
-	mockModels := []domain.ModelOption{
+	mockModels := []core.ModelOption{
 		{Provider: "gemini", Model: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash"},
 	}
 	enumerator := &mockBranchModelEnumerator{models: mockModels}
@@ -358,7 +358,7 @@ func TestBranchModelSelection_CreateBranchWithReasoning(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 		}
-		created := decodeJSON[domain.Branch](t, body)
+		created := decodeJSON[core.Branch](t, body)
 		if created.ReasoningLevel != "high" {
 			t.Errorf("expected ReasoningLevel %q, got %q", "high", created.ReasoningLevel)
 		}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
@@ -26,17 +26,17 @@ type ServerConfig struct {
 	// BranchService coordinates targeted resume branch lifecycles, version generation, and gap analysis.
 	BranchService branch.Service
 	// TemplateRenderer handles multi-format (HTML, Markdown, PlainText) resume rendering.
-	TemplateRenderer domain.TemplateRenderer
+	TemplateRenderer core.TemplateRenderer
 	// ProfileRepo provides persistence access for career entities, bullet facts, and skills.
-	ProfileRepo domain.ProfileRepository
+	ProfileRepo core.ProfileRepository
 	// BranchRepo provides persistence access for resume branches and branch versions.
-	BranchRepo domain.BranchRepository
+	BranchRepo core.BranchRepository
 	// TemplateRepo provides persistence access for built-in and custom template sets.
-	TemplateRepo domain.TemplateRepository
+	TemplateRepo core.TemplateRepository
 	// PresetRepo provides access to tailoring presets and strategy instructions.
-	PresetRepo domain.PresetRepository
+	PresetRepo core.PresetRepository
 	// UserRepo provides persistence access for multi-tenant user accounts.
-	UserRepo domain.UserRepository
+	UserRepo core.UserRepository
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
 	ResumeExtractor worker.ResumeExtractor
 	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
@@ -48,7 +48,7 @@ type ServerConfig struct {
 	// AuthProvider authenticates incoming requests across transports.
 	AuthProvider auth.Provider
 	// TokenVerifier validates bearer tokens in multi-tenant mode.
-	TokenVerifier domain.TokenVerifier
+	TokenVerifier core.TokenVerifier
 	// Logger provides structured diagnostic logging across MCP tool invocations and transports.
 	Logger *slog.Logger
 	// RESTTimeout specifies the maximum execution deadline for synchronous database and rendering operations.
@@ -123,6 +123,6 @@ func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
 	if userID == "" || c.ProfileRepo == nil || c.BranchRepo == nil || c.TemplateRepo == nil {
 		return nil
 	}
-	return domain.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
+	return core.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
 }
 

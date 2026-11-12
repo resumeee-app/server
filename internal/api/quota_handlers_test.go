@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/memory"
@@ -97,7 +97,7 @@ func TestGetQuota_AfterUsageReservation(t *testing.T) {
 
 	// Reserve 5 requests and 5000 tokens
 	for i := 0; i < 5; i++ {
-		_, err := store.ReserveQuota(ctx, defaultUserID, domain.OperationResumeTailoring, 1000, 50, 1000000)
+		_, err := store.ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 1000, 50, 1000000)
 		if err != nil {
 			t.Fatalf("failed to reserve quota: %v", err)
 		}
@@ -151,7 +151,7 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 	}
 
 	// Consume entire quota (daily limit = 1)
-	_, err = store.ReserveQuota(ctx, defaultUserID, domain.OperationResumeTailoring, 100, 1, 100000)
+	_, err = store.ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 100, 1, 100000)
 	if err != nil {
 		t.Fatalf("failed to reserve quota: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 
 type mockUsageResumeExtractor struct {
 	resume *profile.JSONResume
-	usage  domain.TokenUsage
+	usage  core.TokenUsage
 	err    error
 }
 
@@ -213,7 +213,7 @@ func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text strin
 	return m.resume, m.err
 }
 
-func (m *mockUsageResumeExtractor) ExtractResumeWithUsage(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, domain.TokenUsage, error) {
+func (m *mockUsageResumeExtractor) ExtractResumeWithUsage(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, core.TokenUsage, error) {
 	return m.resume, m.usage, m.err
 }
 
@@ -232,7 +232,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 				Email: "test@example.com",
 			},
 		},
-		usage: domain.TokenUsage{
+		usage: core.TokenUsage{
 			PromptTokens:     120,
 			CompletionTokens: 380,
 			TotalTokens:      500,

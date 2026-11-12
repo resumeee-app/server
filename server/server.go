@@ -1,7 +1,7 @@
 // Package server provides a configurable, dependency-injected HTTP REST and Model Context Protocol (MCP)
 // server for Resumeee.
 //
-// External dependencies (such as domain.Store, domain.AuthProvider, and domain.LLMClient / domain.LLMProvider)
+// External dependencies (such as core.Store, core.AuthProvider, and core.LLMClient / core.LLMProvider)
 // are configured in their respective packages and injected into Server using functional With<Option> constructors.
 package server
 
@@ -19,7 +19,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/branch"
@@ -92,7 +92,7 @@ func (c *Config) toInternalConfig() *config.Config {
 }
 
 type registeredLLMClient struct {
-	client domain.LLMClient
+	client core.LLMClient
 	opts   []llm.Option
 }
 
@@ -100,16 +100,16 @@ type registeredLLMClient struct {
 type Server struct {
 	cfg              *Config
 	logger           *slog.Logger
-	store            domain.Store
-	authProvider     domain.AuthProvider
+	store            core.Store
+	authProvider     core.AuthProvider
 	llmRegistry      *llm.Registry
 	llmClients       []registeredLLMClient
-	llmProviders     []domain.LLMProvider
-	templateRenderer domain.TemplateRenderer
+	llmProviders     []core.LLMProvider
+	templateRenderer core.TemplateRenderer
 	provValidator    validator.ProvenanceValidator
-	pdfExtractor     domain.PDFTextExtractor
+	pdfExtractor     core.PDFTextExtractor
 	resumeExtractor  llm.ResumeExtractor
-	promptCompiler   domain.PromptCompiler
+	promptCompiler   core.PromptCompiler
 	mcpEnabled       bool
 }
 
@@ -149,7 +149,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	if s.store == nil {
-		return errors.New("server: a configured domain.Store must be injected via WithStore")
+		return errors.New("server: a configured core.Store must be injected via WithStore")
 	}
 
 	logger := s.logger

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
@@ -38,7 +38,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if createResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created, got %d: %s", createResp.StatusCode, string(createBody))
 	}
-	branch := decodeJSON[domain.Branch](t, createBody)
+	branch := decodeJSON[core.Branch](t, createBody)
 
 	// 3. GET prompt preview using saved branch state
 	getResp, getBody := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/prompt-preview", nil, nil)
@@ -112,7 +112,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if branchResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK fetching branch, got %d", branchResp.StatusCode)
 	}
-	persisted := decodeJSON[domain.Branch](t, branchBody)
+	persisted := decodeJSON[core.Branch](t, branchBody)
 	if persisted.TargetRole != "Staff Distributed Systems Engineer" {
 		t.Errorf("persisted branch target role was unexpectedly modified: %s", persisted.TargetRole)
 	}
@@ -127,7 +127,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	if presetResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created from POST /presets, got %d: %s", presetResp.StatusCode, string(presetBody))
 	}
-	createdPreset := decodeJSON[domain.Preset](t, presetBody)
+	createdPreset := decodeJSON[core.Preset](t, presetBody)
 
 	// Fetch profile to retrieve entity IDs for pinning/excluding
 	profResp, profBody := doRequest(t, client, http.MethodGet, baseURL+"/api/v1/profile", nil, nil)
@@ -135,8 +135,8 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 		t.Fatalf("expected 200 OK fetching profile, got %d", profResp.StatusCode)
 	}
 	var mainProf struct {
-		Experiences []domain.WorkExperience `json:"experiences"`
-		Projects    []domain.Project        `json:"projects"`
+		Experiences []core.WorkExperience `json:"experiences"`
+		Projects    []core.Project        `json:"projects"`
 	}
 	if err := json.Unmarshal(profBody, &mainProf); err != nil {
 		t.Fatalf("failed to decode profile: %v", err)
@@ -183,14 +183,14 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 }
 
 type mockVerifierForPromptPreview struct {
-	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+	verifyFunc func(ctx context.Context, token string) (*core.TokenInfo, error)
 }
 
-func (m *mockVerifierForPromptPreview) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+func (m *mockVerifierForPromptPreview) VerifyIDToken(ctx context.Context, token string) (*core.TokenInfo, error) {
 	if m.verifyFunc != nil {
 		return m.verifyFunc(ctx, token)
 	}
-	return nil, domain.ErrUnauthorized
+	return nil, core.ErrUnauthorized
 }
 
 func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
@@ -202,16 +202,16 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 	}
 
 	verifier := &mockVerifierForPromptPreview{
-		verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+		verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 			switch token {
 			case "token-admin-user":
-				return &domain.TokenInfo{UID: defaultUserID, Email: "admin@example.com", Admin: true}, nil
+				return &core.TokenInfo{UID: defaultUserID, Email: "admin@example.com", Admin: true}, nil
 			case "token-admin-role":
-				return &domain.TokenInfo{UID: defaultUserID, Email: "admin2@example.com", Role: "admin"}, nil
+				return &core.TokenInfo{UID: defaultUserID, Email: "admin2@example.com", Role: "admin"}, nil
 			case "token-regular-user":
-				return &domain.TokenInfo{UID: defaultUserID, Email: "user@example.com", Role: "user", Admin: false}, nil
+				return &core.TokenInfo{UID: defaultUserID, Email: "user@example.com", Role: "user", Admin: false}, nil
 			default:
-				return nil, domain.ErrUnauthorized
+				return nil, core.ErrUnauthorized
 			}
 		},
 	}
@@ -232,7 +232,7 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 	client := server.Client()
 
 	// Create branch in memory store
-	branch := &domain.Branch{
+	branch := &core.Branch{
 		ID:                 "branch-preview-auth-1",
 		UserID:             defaultUserID,
 		Name:               "Targeted Branch",

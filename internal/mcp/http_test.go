@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	"github.com/resumeee-app/resumeee-core/auth"
-	"github.com/resumeee-app/resumeee-core/domain"
+	"github.com/resumeee-app/resumeee-core"
 )
 
 type mockTokenVerifier struct {
-	verifyFunc func(ctx context.Context, token string) (*domain.TokenInfo, error)
+	verifyFunc func(ctx context.Context, token string) (*core.TokenInfo, error)
 }
 
-func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*domain.TokenInfo, error) {
+func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, token string) (*core.TokenInfo, error) {
 	return m.verifyFunc(ctx, token)
 }
 
@@ -62,18 +62,18 @@ func TestAuthenticateRequest(t *testing.T) {
 		}
 
 		_, err := authenticateRequest(req, cfg)
-		if !errors.Is(err, domain.ErrUnauthorized) {
+		if !errors.Is(err, core.ErrUnauthorized) {
 			t.Fatalf("expected ErrUnauthorized when verifier is nil and Admin is false, got %v", err)
 		}
 	})
 
 	t.Run("multi-tenant mode validates Bearer token via TokenVerifier", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 				if token == "valid-token" {
-					return &domain.TokenInfo{UID: "verified-uid-42"}, nil
+					return &core.TokenInfo{UID: "verified-uid-42"}, nil
 				}
-				return nil, domain.ErrUnauthorized
+				return nil, core.ErrUnauthorized
 			},
 		}
 		cfg := ServerConfig{
@@ -96,7 +96,7 @@ func TestAuthenticateRequest(t *testing.T) {
 		reqInvalid := httptest.NewRequest("GET", "/mcp/sse", nil)
 		reqInvalid.Header.Set("Authorization", "Bearer invalid-token")
 		_, err = authenticateRequest(reqInvalid, cfg)
-		if !errors.Is(err, domain.ErrUnauthorized) {
+		if !errors.Is(err, core.ErrUnauthorized) {
 			t.Fatalf("expected ErrUnauthorized for invalid token, got %v", err)
 		}
 	})
@@ -145,11 +145,11 @@ func TestAuthenticateRequest(t *testing.T) {
 
 	t.Run("auth provider integration with custom TokenVerifierProvider", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*domain.TokenInfo, error) {
+			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
 				if token == "mcp-token" {
-					return &domain.TokenInfo{UID: "custom-mcp-user"}, nil
+					return &core.TokenInfo{UID: "custom-mcp-user"}, nil
 				}
-				return nil, domain.ErrUnauthorized
+				return nil, core.ErrUnauthorized
 			},
 		}
 		provider := auth.NewTokenVerifierProvider("custom", verifier)
