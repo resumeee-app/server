@@ -13,6 +13,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
+	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/worker"
@@ -147,9 +148,9 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	}
 	var err error
 	if p.store != nil {
-		err = core.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
+		err = seed.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
 	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = core.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+		err = seed.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)

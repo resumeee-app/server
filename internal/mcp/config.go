@@ -7,6 +7,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/worker"
@@ -123,5 +124,5 @@ func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
 	if userID == "" || c.ProfileRepo == nil || c.BranchRepo == nil || c.TemplateRepo == nil {
 		return nil
 	}
-	return core.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
+	return seed.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
 }
