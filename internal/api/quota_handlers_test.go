@@ -205,6 +205,9 @@ type mockUsageResumeExtractor struct {
 	err    error
 }
 
+// Compile-time assertion ensuring mockUsageResumeExtractor satisfies core.UsageResumeExtractor,
+// which is checked via runtime type assertion in llm.ExtractResumeWithTokenUsage even though
+// RouterConfig.ResumeExtractor only requires the base core.ResumeExtractor interface.
 var _ core.UsageResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
 func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*core.JSONResume, error) {
