@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/resumeee-app/resumeee-core/auth"
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
 )
 

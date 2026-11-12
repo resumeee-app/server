@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/resumeee-app/resumeee-core/auth"
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"

@@ -15,7 +15,7 @@ import (
 
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core/llm"

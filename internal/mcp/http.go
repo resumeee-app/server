@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"github.com/resumeee-app/resumeee-core/auth"
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
 )
 
