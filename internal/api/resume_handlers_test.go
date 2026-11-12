@@ -99,7 +99,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	userID := "user-resume-1"
 
 	// Create test target resume (branch)
-	targetResume := &core.TargetResume{
+	targetResume := &core.Branch{
 		ID:            "resume-test-1",
 		UserID:        userID,
 		Name:          "Stripe - Staff Backend",
@@ -129,7 +129,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	vCompleted := &core.ResumeVersion{
+	vCompleted := &core.BranchVersion{
 		ID:                "ver-completed-1",
 		ResumeID:          targetResume.ID,
 		BranchID:          targetResume.ID,
@@ -252,7 +252,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 4. Assert 409 Conflict when version status is pending or processing
 	t.Run("RenderPreview_PendingStatus_Returns409", func(t *testing.T) {
-		vPending := &core.ResumeVersion{
+		vPending := &core.BranchVersion{
 			ID:                "ver-pending-1",
 			ResumeID:          targetResume.ID,
 			BranchID:          targetResume.ID,
@@ -288,7 +288,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 5. Assert 422 Unprocessable Entity when TailoredContent is nil
 	t.Run("RenderPreview_NilTailoredContent_Returns422", func(t *testing.T) {
-		vFailed := &core.ResumeVersion{
+		vFailed := &core.BranchVersion{
 			ID:                "ver-failed-1",
 			ResumeID:          targetResume.ID,
 			BranchID:          targetResume.ID,
@@ -367,7 +367,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	}
 
 	// Seed private strategy owned by attacker
-	foreignStrat := &core.TailoringStrategy{
+	foreignStrat := &core.Preset{
 		ID:                 "strat-foreign-attacker",
 		UserID:             attackerID,
 		Name:               "Secret Attacker Strategy",
@@ -451,7 +451,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	})
 
 	// Seed legitimate user branch
-	legitBranch := &core.TargetResume{
+	legitBranch := &core.Branch{
 		ID:            "branch-legit-user",
 		UserID:        userID,
 		Name:          "Legitimate Branch",
@@ -527,7 +527,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 		ID:            "branch-api-gap-test",
 		UserID:        userID,
 		Name:          "Site Reliability Lead",
-		TemplateSetID: renderer.TemplateStandardCleanID,
+		TemplateSetID: core.TemplateStandardCleanID,
 	}
 	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
@@ -734,7 +734,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			ID:            "branch-api-legacy-fallback",
 			UserID:        userID,
 			Name:          "Legacy Infrastructure Engineer",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 		}
 		if err := env.branchRepo.CreateBranch(ctx, bLegacy); err != nil {
 			t.Fatalf("failed to create legacy branch: %v", err)
@@ -867,7 +867,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			Name:               "No JD Variant",
 			TargetRole:         "Go Engineer",
 			TargetRequirements: "",
-			TemplateSetID:      renderer.TemplateStandardCleanID,
+			TemplateSetID:      core.TemplateStandardCleanID,
 		}
 		if err := env.branchRepo.CreateBranch(ctx, bNoJD); err != nil {
 			t.Fatalf("CreateBranch failed: %v", err)
@@ -894,7 +894,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			Name:               "Distributed Systems Engineer",
 			TargetRole:         "Staff Go Engineer",
 			TargetRequirements: "5+ years Go, Kubernetes, and distributed consensus experience.",
-			TemplateSetID:      renderer.TemplateStandardCleanID,
+			TemplateSetID:      core.TemplateStandardCleanID,
 		}
 		if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
 			t.Fatalf("CreateBranch failed: %v", err)

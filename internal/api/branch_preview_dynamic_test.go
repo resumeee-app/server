@@ -90,7 +90,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 2. Create branch with classic template
-	targetBranch := &core.TargetResume{
+	targetBranch := &core.Branch{
 		ID:            "branch-test-dyn",
 		UserID:        defaultUserID,
 		Name:          "Frontend Architect",
@@ -101,7 +101,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 3. Create completed version with classic template cached output
-	v1 := &core.ResumeVersion{
+	v1 := &core.BranchVersion{
 		ID:                "ver-dyn-1",
 		ResumeID:          targetBranch.ID,
 		BranchID:          targetBranch.ID,

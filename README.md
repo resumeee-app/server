@@ -53,7 +53,7 @@ func main() {
 	defer store.Close()
 
 	// 2. Configure authentication in resumeee-auth-firebase
-	authProvider := auth.NewFirebaseAuthProvider("my-firebase-project")
+	authProvider := auth.NewFirebaseTokenVerifier("my-firebase-project")
 
 	// 3. Configure LLM provider(s) in resumeee-core/llm
 	gemini := llm.NewGeminiProvider(

@@ -5,9 +5,9 @@ go 1.27.2
 require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v1.5.0
-	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112062929-fb599ca46151
-	github.com/resumeee-app/resumeee-core v0.0.0-20261112062736-93d82976ec6a
-	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261112062946-e748ab49e284
+	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112064701-762c32f45922
+	github.com/resumeee-app/resumeee-core v0.0.0-20261112064600-8a4aa3c5d154
+	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261112064743-dbcc6b8081d0
 )
 
 require (

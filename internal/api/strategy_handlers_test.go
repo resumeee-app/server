@@ -99,7 +99,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
 		}
 
-		var created core.TailoringStrategy
+		var created core.Preset
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
 		}
 
-		var created core.TailoringStrategy
+		var created core.Preset
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -433,7 +433,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		var created core.TailoringStrategy
+		var created core.Preset
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode created strategy: %v", err)
 		}
@@ -457,7 +457,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", putResp.StatusCode)
 		}
 
-		var updated core.TailoringStrategy
+		var updated core.Preset
 		if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -486,7 +486,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		var created core.TailoringStrategy
+		var created core.Preset
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode created strategy: %v", err)
 		}

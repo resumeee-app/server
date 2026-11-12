@@ -48,7 +48,7 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 
 	// Register Firebase provider if project ID is provided
 	if cfg.FirebaseProjectID != "" {
-		firebaseProvider := firebase.NewFirebaseAuthProvider(cfg.FirebaseProjectID, opts...)
+		firebaseProvider := firebase.NewFirebaseTokenVerifier(cfg.FirebaseProjectID, opts...)
 		r.Register(firebaseProvider)
 	}
 

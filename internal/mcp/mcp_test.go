@@ -23,16 +23,15 @@ import (
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/services/worker"
 	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 type dummyJobEnqueuer struct {
 	mu   sync.Mutex
-	jobs []worker.GenerationJob
+	jobs []core.GenerationJob
 }
 
-func (d *dummyJobEnqueuer) Enqueue(job worker.GenerationJob) error {
+func (d *dummyJobEnqueuer) Enqueue(job core.GenerationJob) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.jobs = append(d.jobs, job)

@@ -32,7 +32,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 		"target_company":      "Stripe",
 		"target_requirements": "Strong experience with Raft consensus and high-throughput systems.",
 		"branch_instructions": "Focus on reliability and fault injection.",
-		"template_set_id":     renderer.TemplateStandardCleanID,
+		"template_set_id":     core.TemplateStandardCleanID,
 	}
 	createResp, createBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", createReq, nil)
 	if createResp.StatusCode != http.StatusCreated {
@@ -121,7 +121,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	createPresetReq := map[string]any{
 		"name":                "Executive Preset",
 		"system_instructions": "Focus on P&L leadership and executive governance.",
-		"template_set_id":     renderer.TemplateStandardCleanID,
+		"template_set_id":     core.TemplateStandardCleanID,
 	}
 	presetResp, presetBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/presets", createPresetReq, nil)
 	if presetResp.StatusCode != http.StatusCreated {
@@ -239,7 +239,7 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 		TargetRole:         "Lead Architect",
 		TargetCompany:      "Acme Corp",
 		TargetRequirements: "Extensive distributed systems experience.",
-		TemplateSetID:      renderer.TemplateStandardCleanID,
+		TemplateSetID:      core.TemplateStandardCleanID,
 	}
 	if err := store.CreateBranch(ctx, branch); err != nil {
 		t.Fatalf("failed to create branch: %v", err)

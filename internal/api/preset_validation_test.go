@@ -12,7 +12,6 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
 func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepository) {
@@ -122,7 +121,7 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 			Name:               "Custom Engineering Preset",
 			Description:        "High density technical bullets",
 			SystemInstructions: "Focus on metrics and system design.",
-			TemplateSetID:      renderer.TemplateStandardCleanID,
+			TemplateSetID:      core.TemplateStandardCleanID,
 			Language:           "English",
 		})
 		if err != nil {
@@ -152,8 +151,8 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 		if created.Name != "Custom Engineering Preset" {
 			t.Errorf("expected name %q, got %q", "Custom Engineering Preset", created.Name)
 		}
-		if created.TemplateSetID != renderer.TemplateStandardCleanID {
-			t.Errorf("expected template_set_id %q, got %q", renderer.TemplateStandardCleanID, created.TemplateSetID)
+		if created.TemplateSetID != core.TemplateStandardCleanID {
+			t.Errorf("expected template_set_id %q, got %q", core.TemplateStandardCleanID, created.TemplateSetID)
 		}
 
 		// Update preset

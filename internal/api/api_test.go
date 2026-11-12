@@ -24,7 +24,6 @@ import (
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/services/worker"
 	"github.com/resumeee-app/resumeee-core/validator"
 )
 
@@ -395,7 +394,7 @@ func TestFullUserJourney(t *testing.T) {
 	presetReq := api.CreatePresetRequest{
 		Name:               "Custom SWE",
 		SystemInstructions: "Focus on distributed systems and backend engineering.",
-		TemplateSetID:      renderer.TemplateStandardCleanID,
+		TemplateSetID:      core.TemplateStandardCleanID,
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/presets", presetReq, nil)
 	if resp.StatusCode != http.StatusCreated {
@@ -859,7 +858,7 @@ func TestErrorEnvelopes(t *testing.T) {
 		// First create a branch
 		branchReq := api.CreateBranchRequest{
 			Name:          "Branch For Provenance Test",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 		}
 		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq, nil)
 		if resp.StatusCode != http.StatusCreated {
@@ -873,7 +872,7 @@ func TestErrorEnvelopes(t *testing.T) {
 			BranchID:          branch.ID,
 			Status:            core.VersionStatusCompleted,
 			MainRevisionUsed:  1,
-			TemplateSetIDUsed: renderer.TemplateStandardCleanID,
+			TemplateSetIDUsed: core.TemplateStandardCleanID,
 			SourceType:        core.SourceTypeLLMGeneration,
 		}
 		if err := env.branchRepo.CreateVersion(context.Background(), v1); err != nil {
@@ -913,7 +912,7 @@ func TestErrorEnvelopes(t *testing.T) {
 		// Setup branch
 		branchReq := api.CreateBranchRequest{
 			Name:          "Branch Queue Full",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 		}
 		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq, nil)
 		if resp.StatusCode != http.StatusCreated {
@@ -1087,19 +1086,19 @@ func buildTestPDF(text string) []byte {
 	return []byte(body + xrefAndTrailer)
 }
 
-func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtractor) *testEnv {
+func setupTestServerWithExtractor(t *testing.T, resumeExtractor core.ResumeExtractor) *testEnv {
 	return setupTestServerWithExtractorAndLogger(t, resumeExtractor, nil)
 }
 
-func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger) *testEnv {
+func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor core.ResumeExtractor, logger *slog.Logger) *testEnv {
 	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, logger, nil)
 }
 
-func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor core.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, nil, pdfEnqueuer)
 }
 
-func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor llm.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor core.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	t.Helper()
 
 	ctx := context.Background()
@@ -1119,7 +1118,7 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 	provValidator := validator.New()
 	enqueuer := api.NewChannelJobEnqueuer(100)
 
-	var enq api.PDFJobEnqueuer
+	var enq core.PDFJobEnqueuer
 	if pdfEnqueuer != nil {
 		enq = pdfEnqueuer
 	}
@@ -1163,17 +1162,17 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 }
 
 func TestProfilePDF_Parse(t *testing.T) {
-	mockResume := &profile.JSONResume{
-		Basics: profile.JSONResumeBasics{
+	mockResume := &core.JSONResume{
+		Basics: core.JSONResumeBasics{
 			Name:    "Morgan BrandNew",
 			Email:   "morgan@brandnew.dev",
 			Summary: "Full-Stack Engineer with 5 years experience.",
 		},
-		Skills: []profile.JSONResumeSkill{
+		Skills: []core.JSONResumeSkill{
 			{Name: "Go", Level: "Expert"},
 			{Name: "PostgreSQL", Level: "Senior"},
 		},
-		Work: []profile.JSONResumeWork{
+		Work: []core.JSONResumeWork{
 			{
 				Name:       "BrandNew Tech",
 				Position:   "Senior Developer",
@@ -1282,7 +1281,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var parsed profile.JSONResume
+		var parsed core.JSONResume
 		if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -1434,8 +1433,8 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		}
 
 		// Simulate worker completing the job
-		extractedResume := &profile.JSONResume{
-			Basics: profile.JSONResumeBasics{Name: "Morgan BrandNew"},
+		extractedResume := &core.JSONResume{
+			Basics: core.JSONResumeBasics{Name: "Morgan BrandNew"},
 		}
 		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
 			t.Fatalf("failed to update job status: %v", err)
@@ -1477,7 +1476,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		// Zero capacity enqueuer to instantly trigger ErrQueueFull
 		enqueuer := api.NewChannelPDFJobEnqueuer(1)
 		// Pre-fill buffer
-		_ = enqueuer.EnqueuePDFJob(worker.PDFParseJobTask{JobID: "fill"})
+		_ = enqueuer.EnqueuePDFJob(core.PDFParseJobTask{JobID: "fill"})
 
 		env := setupTestServerWithPDFEnqueuer(t, mockExtractor, enqueuer)
 		client := env.server.Client()
@@ -2124,7 +2123,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 		isDef := true
 		req := api.CreateBranchRequest{
 			Name:          "Duplicate Default",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 			IsDefault:     &isDef,
 		}
 		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", req, nil)
@@ -2134,7 +2133,7 @@ func TestDefaultBranchAPI(t *testing.T) {
 	})
 
 	t.Run("PUT /api/v1/branches/{id} updates template_set_id and re-renders", func(t *testing.T) {
-		newTmpl := renderer.TemplateDetailedImmigrationCVID
+		newTmpl := core.TemplateDetailedImmigrationCVID
 		req := api.UpdateBranchRequest{
 			TemplateSetID: &newTmpl,
 		}
@@ -2177,7 +2176,7 @@ func TestBranch_GapAnalysisEndpoint(t *testing.T) {
 		"target_role":         "Staff Site Reliability Engineer",
 		"target_company":      "Stripe",
 		"target_requirements": "Distributed Systems, Raft, Kubernetes Operators",
-		"template_set_id":     renderer.TemplateStandardCleanID,
+		"template_set_id":     core.TemplateStandardCleanID,
 	}
 	createResp, createBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", createReq, nil)
 	if createResp.StatusCode != http.StatusCreated {

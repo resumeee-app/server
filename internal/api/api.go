@@ -34,12 +34,6 @@ import (
 	"github.com/resumeee-app/resumeee-core/services/profile"
 )
 
-// JobEnqueuer defines the interface for submitting version jobs to the async generation worker pool.
-type JobEnqueuer = core.JobEnqueuer
-
-// PDFJobEnqueuer defines the interface for submitting PDF parse tasks to the async worker pool.
-type PDFJobEnqueuer = core.PDFJobEnqueuer
-
 // ChannelQueue provides a generic bounded channel-backed queue for asynchronous task dispatch.
 type ChannelQueue[T any] struct {
 	ch chan T
@@ -121,7 +115,7 @@ type RouterConfig struct {
 	TemplateRepo      core.TemplateRepository
 	BranchRepo        core.BranchRepository
 	PDFJobRepo        core.PDFParseJobRepository
-	PDFJobEnqueuer    PDFJobEnqueuer
+	PDFJobEnqueuer    core.PDFJobEnqueuer
 	QuotaRepo         core.QuotaRepository
 	BranchService     branch.Service
 	ProfileService    profile.Service
@@ -129,7 +123,7 @@ type RouterConfig struct {
 	ResumeExtractor   core.ResumeExtractor
 	Renderer          core.TemplateRenderer
 	Validator         core.ProvenanceValidator
-	JobEnqueuer       JobEnqueuer
+	JobEnqueuer       core.JobEnqueuer
 	PromptCompiler    core.PromptCompiler
 	ModelEnumerator   core.ModelEnumerator
 	DefaultUserID     string

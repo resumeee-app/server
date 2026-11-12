@@ -14,9 +14,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/profile"
 )
 
 func TestGetQuota_DefaultsAndRemaining(t *testing.T) {
@@ -202,18 +200,18 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 }
 
 type mockUsageResumeExtractor struct {
-	resume *profile.JSONResume
+	resume *core.JSONResume
 	usage  core.TokenUsage
 	err    error
 }
 
-var _ llm.UsageResumeExtractor = (*mockUsageResumeExtractor)(nil)
+var _ core.UsageResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
-func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, error) {
+func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*core.JSONResume, error) {
 	return m.resume, m.err
 }
 
-func (m *mockUsageResumeExtractor) ExtractResumeWithUsage(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, core.TokenUsage, error) {
+func (m *mockUsageResumeExtractor) ExtractResumeWithUsage(ctx context.Context, text string, provider string, model string) (*core.JSONResume, core.TokenUsage, error) {
 	return m.resume, m.usage, m.err
 }
 
@@ -226,8 +224,8 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	extractor := &mockUsageResumeExtractor{
-		resume: &profile.JSONResume{
-			Basics: profile.JSONResumeBasics{
+		resume: &core.JSONResume{
+			Basics: core.JSONResumeBasics{
 				Name:  "Test Candidate",
 				Email: "test@example.com",
 			},

@@ -11,7 +11,6 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
 type mockBranchModelEnumerator struct {
@@ -89,7 +88,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 	testBranch := &core.Branch{
 		UserID:             defaultUser,
 		Name:               "Targeted Staff Backend Role",
-		TemplateSetID:      renderer.TemplateStandardCleanID,
+		TemplateSetID:      core.TemplateStandardCleanID,
 		TargetRequirements: "Distributed systems, Go, Kubernetes",
 	}
 	created, err := branchService.CreateBranch(ctx, testBranch)
@@ -249,7 +248,7 @@ func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
 	t.Run("non-admin POST with provider_override returns 403 Forbidden", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:             "Non Admin Branch",
-			TemplateSetID:    renderer.TemplateStandardCleanID,
+			TemplateSetID:    core.TemplateStandardCleanID,
 			ProviderOverride: "gemini",
 		}
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, authHeaders)
@@ -261,7 +260,7 @@ func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
 	t.Run("non-admin POST with model_override returns 403 Forbidden", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:          "Non Admin Branch",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 			ModelOverride: "gemini-3.8-flash",
 		}
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, authHeaders)
@@ -273,7 +272,7 @@ func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
 	t.Run("non-admin POST with reasoning_level returns 403 Forbidden", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:           "Non Admin Branch",
-			TemplateSetID:  renderer.TemplateStandardCleanID,
+			TemplateSetID:  core.TemplateStandardCleanID,
 			ReasoningLevel: "low",
 		}
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, authHeaders)
@@ -285,7 +284,7 @@ func TestBranchModelSelection_NonAdminForbidden(t *testing.T) {
 	t.Run("non-admin POST without model fields succeeds (201 Created)", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:          "Standard Non-Admin Branch",
-			TemplateSetID: renderer.TemplateStandardCleanID,
+			TemplateSetID: core.TemplateStandardCleanID,
 		}
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, authHeaders)
 		if resp.StatusCode != http.StatusCreated {
@@ -349,7 +348,7 @@ func TestBranchModelSelection_CreateBranchWithReasoning(t *testing.T) {
 	t.Run("creates branch with valid reasoning_level", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:             "New Targeted Role",
-			TemplateSetID:    renderer.TemplateStandardCleanID,
+			TemplateSetID:    core.TemplateStandardCleanID,
 			ProviderOverride: "gemini",
 			ModelOverride:    "gemini-3.8-flash",
 			ReasoningLevel:   "high",
@@ -367,7 +366,7 @@ func TestBranchModelSelection_CreateBranchWithReasoning(t *testing.T) {
 	t.Run("rejects branch creation with invalid reasoning_level", func(t *testing.T) {
 		req := api.CreateBranchRequest{
 			Name:           "Invalid Reasoning Role",
-			TemplateSetID:  renderer.TemplateStandardCleanID,
+			TemplateSetID:  core.TemplateStandardCleanID,
 			ReasoningLevel: "invalid-effort",
 		}
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, nil)
