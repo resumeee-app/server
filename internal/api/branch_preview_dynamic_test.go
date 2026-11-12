@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/validator"
 )
 
@@ -102,18 +102,18 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 
 	// 3. Create completed version with classic template cached output
 	v1 := &core.ResumeVersion{
-		ID:                 "ver-dyn-1",
-		ResumeID:           targetBranch.ID,
-		BranchID:           targetBranch.ID,
-		VersionNumber:      1,
-		Status:             core.VersionStatusCompleted,
-		TemplateSetIDUsed:  "tmpl-classic-theme",
-		SourceType:         core.SourceTypeLLMGeneration,
-		HTMLOutput:         `<div class="classic-theme">Taylor Candidate - Classic</div>`,
-		MarkdownOutput:     `# Taylor Candidate - Classic`,
-		PlainTextOutput:    `Taylor Candidate - Classic`,
-		TailoredContent:    &core.TailoredContent{Summary: "Lead developer"},
-		CreatedAt:          now,
+		ID:                "ver-dyn-1",
+		ResumeID:          targetBranch.ID,
+		BranchID:          targetBranch.ID,
+		VersionNumber:     1,
+		Status:            core.VersionStatusCompleted,
+		TemplateSetIDUsed: "tmpl-classic-theme",
+		SourceType:        core.SourceTypeLLMGeneration,
+		HTMLOutput:        `<div class="classic-theme">Taylor Candidate - Classic</div>`,
+		MarkdownOutput:    `# Taylor Candidate - Classic`,
+		PlainTextOutput:   `Taylor Candidate - Classic`,
+		TailoredContent:   &core.TailoredContent{Summary: "Lead developer"},
+		CreatedAt:         now,
 	}
 	if err := branchRepo.CreateVersion(ctx, v1); err != nil {
 		t.Fatalf("failed to create version: %v", err)

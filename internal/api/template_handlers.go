@@ -308,4 +308,3 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 
 	writeRenderOutput(w, r, out)
 }
-

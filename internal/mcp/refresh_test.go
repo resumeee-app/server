@@ -11,8 +11,8 @@ import (
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/resumeee-app/resumeee-core"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 

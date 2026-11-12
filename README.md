@@ -76,3 +76,19 @@ func main() {
 	}
 }
 ```
+
+---
+
+## Quality Gates
+
+```bash
+# Format check (gofmt)
+test -z "$(gofmt -l .)"
+
+# Unit & race detection tests (includes TestGoFmtCompliance)
+go test -race -v ./...
+
+# Static analysis & gofmt linter
+golangci-lint run ./...
+```
+

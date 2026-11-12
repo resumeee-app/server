@@ -82,23 +82,23 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadOverrides(t *testing.T) {
 	envMap := map[string]string{
-		"PORT":                   "9090",
-		"DB_PATH":                "/var/lib/resumeee/custom.db",
-		"DEFAULT_USER_ID":        "user-123",
-		"WORKER_CONCURRENCY":            "8",
-		"WORKER_QUEUE_SIZE":             "500",
+		"PORT":                           "9090",
+		"DB_PATH":                        "/var/lib/resumeee/custom.db",
+		"DEFAULT_USER_ID":                "user-123",
+		"WORKER_CONCURRENCY":             "8",
+		"WORKER_QUEUE_SIZE":              "500",
 		"MAX_CONCURRENT_JOBS_PER_TENANT": "4",
-		"GEMINI_API_KEY":         "gem-secret",
-		"OPENAI_API_KEY":         "sk-openai-secret",
-		"ANTHROPIC_API_KEY":      "ant-secret",
-		"OPENAI_COMPAT_BASE_URL": "http://localhost:11434/v1",
-		"OPENAI_COMPAT_API_KEY":  "ollama-secret",
-		"FIREBASE_PROJECT_ID":   "custom-project",
-		"FIREBASE_API_KEY":      "custom-api-key",
-		"FIREBASE_AUTH_DOMAIN":  "custom-core.firebaseapp.com",
-		"AUTH_PROVIDER":         "firebase",
-		"ENV":                    "production",
-		"LOG_LEVEL":              "DEBUG",
+		"GEMINI_API_KEY":                 "gem-secret",
+		"OPENAI_API_KEY":                 "sk-openai-secret",
+		"ANTHROPIC_API_KEY":              "ant-secret",
+		"OPENAI_COMPAT_BASE_URL":         "http://localhost:11434/v1",
+		"OPENAI_COMPAT_API_KEY":          "ollama-secret",
+		"FIREBASE_PROJECT_ID":            "custom-project",
+		"FIREBASE_API_KEY":               "custom-api-key",
+		"FIREBASE_AUTH_DOMAIN":           "custom-core.firebaseapp.com",
+		"AUTH_PROVIDER":                  "firebase",
+		"ENV":                            "production",
+		"LOG_LEVEL":                      "DEBUG",
 	}
 
 	lookup := func(key string) string {
@@ -1065,4 +1065,3 @@ func TestEnvironmentTemplates_CleanDocHeaders(t *testing.T) {
 		})
 	}
 }
-

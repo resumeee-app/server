@@ -59,7 +59,7 @@ func TestTemplatePreview_SanitizesCustomTemplateWithScripts(t *testing.T) {
 
 	// Create custom template containing various script tags
 	createReq := map[string]string{
-		"name": "Custom Script Test Template",
+		"name":        "Custom Script Test Template",
 		"description": "Template with script tags to verify preview sanitization",
 		"html_template": `
 			<div class="resume">
@@ -70,9 +70,9 @@ func TestTemplatePreview_SanitizesCustomTemplateWithScripts(t *testing.T) {
 				<p>{{.Headline}}</p>
 			</div>
 		`,
-		"css_styles": ".resume { color: #333; }",
+		"css_styles":        ".resume { color: #333; }",
 		"markdown_template": "# {{.FullName}}\n{{.Headline}}",
-		"text_template": "{{.FullName}} - {{.Headline}}",
+		"text_template":     "{{.FullName}} - {{.Headline}}",
 	}
 
 	resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/templates", createReq, nil)

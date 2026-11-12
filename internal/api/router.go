@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
+	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 // JobEnqueuer defines the interface for submitting version jobs to the async generation worker pool.
@@ -101,22 +101,22 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan worker.PDFParseJobTask {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileRepo     core.ProfileRepository
-	PresetRepo      core.PresetRepository
-	TemplateRepo    core.TemplateRepository
-	BranchRepo      core.BranchRepository
-	PDFJobRepo      core.PDFParseJobRepository
-	PDFJobEnqueuer  PDFJobEnqueuer
-	QuotaRepo       core.QuotaRepository
-	BranchService   branch.Service
-	ProfileService  profile.Service
-	PDFExtractor    core.PDFTextExtractor
-	ResumeExtractor llm.ResumeExtractor
-	Renderer        core.TemplateRenderer
-	Validator       validator.ProvenanceValidator
-	JobEnqueuer     JobEnqueuer
-	PromptCompiler  core.PromptCompiler
-	ModelEnumerator core.ModelEnumerator
+	ProfileRepo       core.ProfileRepository
+	PresetRepo        core.PresetRepository
+	TemplateRepo      core.TemplateRepository
+	BranchRepo        core.BranchRepository
+	PDFJobRepo        core.PDFParseJobRepository
+	PDFJobEnqueuer    PDFJobEnqueuer
+	QuotaRepo         core.QuotaRepository
+	BranchService     branch.Service
+	ProfileService    profile.Service
+	PDFExtractor      core.PDFTextExtractor
+	ResumeExtractor   llm.ResumeExtractor
+	Renderer          core.TemplateRenderer
+	Validator         validator.ProvenanceValidator
+	JobEnqueuer       JobEnqueuer
+	PromptCompiler    core.PromptCompiler
+	ModelEnumerator   core.ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
 	AuthProvider      auth.Provider

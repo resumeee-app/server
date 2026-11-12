@@ -14,47 +14,47 @@ import (
 
 // Config encapsulates all runtime configuration for Resumeee.
 type Config struct {
-	Port                int
-	DBPath              string
-	DefaultUserID       string
-	Admin               bool
-	AuthProvider        string
-	FirebaseProjectID   string
-	FirebaseAPIKey      string
-	FirebaseAuthDomain  string
-	LLMDailyRequestLimit int
-	LLMMonthlyTokenLimit int
+	Port                       int
+	DBPath                     string
+	DefaultUserID              string
+	Admin                      bool
+	AuthProvider               string
+	FirebaseProjectID          string
+	FirebaseAPIKey             string
+	FirebaseAuthDomain         string
+	LLMDailyRequestLimit       int
+	LLMMonthlyTokenLimit       int
 	WorkerConcurrency          int
 	WorkerQueueSize            int
 	MaxConcurrentJobsPerTenant int
-	GeminiAPIKey        string
-	OpenAIAPIKey        string
-	AnthropicAPIKey     string
-	OpenAICompatBaseURL string
-	OpenAICompatAPIKey  string
-	Environment         string
-	LogLevel            slog.Level
-	LLMDebugPrompts     bool
-	LLMDebugDir         string
-	RESTTimeout         time.Duration
-	LLMTimeout          time.Duration
+	GeminiAPIKey               string
+	OpenAIAPIKey               string
+	AnthropicAPIKey            string
+	OpenAICompatBaseURL        string
+	OpenAICompatAPIKey         string
+	Environment                string
+	LogLevel                   slog.Level
+	LLMDebugPrompts            bool
+	LLMDebugDir                string
+	RESTTimeout                time.Duration
+	LLMTimeout                 time.Duration
 }
 
 // Default configuration constants.
 const (
-	DefaultPort                 = 8080
-	DefaultDBPath               = "./data/resumeee.db"
-	DefaultUserIDVal            = "default"
-	DefaultAdmin                = false
-	DefaultLLMDailyRequestLimit = 50
-	DefaultLLMMonthlyTokenLimit = 1000000
+	DefaultPort                       = 8080
+	DefaultDBPath                     = "./data/resumeee.db"
+	DefaultUserIDVal                  = "default"
+	DefaultAdmin                      = false
+	DefaultLLMDailyRequestLimit       = 50
+	DefaultLLMMonthlyTokenLimit       = 1000000
 	DefaultWorkerConcurrency          = 2
 	DefaultWorkerQueueSize            = 100
 	DefaultMaxConcurrentJobsPerTenant = 2
-	DefaultEnvironment       = "development"
-	DefaultLLMDebugDir       = "data/llm"
-	DefaultRESTTimeout       = 20 * time.Second
-	DefaultLLMTimeout        = 10 * time.Minute
+	DefaultEnvironment                = "development"
+	DefaultLLMDebugDir                = "data/llm"
+	DefaultRESTTimeout                = 20 * time.Second
+	DefaultLLMTimeout                 = 10 * time.Minute
 )
 
 // Load reads configuration from process environment variables and a local .env file if present.
@@ -69,21 +69,21 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:                 DefaultPort,
-		DBPath:               DefaultDBPath,
-		DefaultUserID:        DefaultUserIDVal,
-		Admin:                DefaultAdmin,
-		LLMDailyRequestLimit: DefaultLLMDailyRequestLimit,
-		LLMMonthlyTokenLimit: DefaultLLMMonthlyTokenLimit,
+		Port:                       DefaultPort,
+		DBPath:                     DefaultDBPath,
+		DefaultUserID:              DefaultUserIDVal,
+		Admin:                      DefaultAdmin,
+		LLMDailyRequestLimit:       DefaultLLMDailyRequestLimit,
+		LLMMonthlyTokenLimit:       DefaultLLMMonthlyTokenLimit,
 		WorkerConcurrency:          DefaultWorkerConcurrency,
 		WorkerQueueSize:            DefaultWorkerQueueSize,
 		MaxConcurrentJobsPerTenant: DefaultMaxConcurrentJobsPerTenant,
-		Environment:          DefaultEnvironment,
-		LogLevel:             slog.LevelInfo,
-		LLMDebugPrompts:      false,
-		LLMDebugDir:          DefaultLLMDebugDir,
-		RESTTimeout:          DefaultRESTTimeout,
-		LLMTimeout:           DefaultLLMTimeout,
+		Environment:                DefaultEnvironment,
+		LogLevel:                   slog.LevelInfo,
+		LLMDebugPrompts:            false,
+		LLMDebugDir:                DefaultLLMDebugDir,
+		RESTTimeout:                DefaultRESTTimeout,
+		LLMTimeout:                 DefaultLLMTimeout,
 	}
 
 	// Port

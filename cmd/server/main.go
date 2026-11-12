@@ -18,17 +18,17 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core/llm"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/pdf"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core"
-	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
-	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
+	"github.com/resumeee-app/resumeee-core/validator"
+	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
 // StoreInitializer initializes a storage backend and provides a core.Store implementation.
@@ -197,17 +197,17 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		QueueSize:              cfg.WorkerQueueSize,
 		MaxConcurrentPerTenant: cfg.MaxConcurrentJobsPerTenant,
 		BranchRepo:             branchRepo,
-		ProfileRepo:     profileRepo,
-		PresetRepo:      presetRepo,
-		TemplateRepo:    templateRepo,
-		PDFJobRepo:      pdfJobRepo,
-		QuotaRepo:       quotaRepo,
-		ResumeExtractor: resumeExtractor,
-		LLMTimeout:      cfg.LLMTimeout,
-		LLMService:      llmAdapter,
-		Validator:       provValidator,
-		Renderer:        templateRenderer,
-		Logger:          logger,
+		ProfileRepo:            profileRepo,
+		PresetRepo:             presetRepo,
+		TemplateRepo:           templateRepo,
+		PDFJobRepo:             pdfJobRepo,
+		QuotaRepo:              quotaRepo,
+		ResumeExtractor:        resumeExtractor,
+		LLMTimeout:             cfg.LLMTimeout,
+		LLMService:             llmAdapter,
+		Validator:              provValidator,
+		Renderer:               templateRenderer,
+		Logger:                 logger,
 	})
 	if err := workerPool.RecoverStaleJobs(ctx, "server restarted during job processing"); err != nil {
 		logger.Warn("failed to recover stale jobs", "err", err)

@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/services/branch"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/validator"
 )
 
@@ -130,20 +130,20 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	now := time.Now().UTC()
 	vCompleted := &core.ResumeVersion{
-		ID:                 "ver-completed-1",
-		ResumeID:           targetResume.ID,
-		BranchID:           targetResume.ID,
-		VersionNumber:      1,
-		Status:             core.VersionStatusCompleted,
-		MainRevisionUsed: 1,
-		TemplateSetIDUsed:  "builtin-standard-clean",
-		SourceType:         core.SourceTypeLLMGeneration,
-		TailoredContent:    tailoredContent,
-		HTMLOutput:         "<html>Old Standard Template</html>",
-		MarkdownOutput:     "# Old Standard Markdown",
-		PlainTextOutput:    "Old Standard Plain Text",
-		CreatedAt:          now,
-		CompletedAt:        &now,
+		ID:                "ver-completed-1",
+		ResumeID:          targetResume.ID,
+		BranchID:          targetResume.ID,
+		VersionNumber:     1,
+		Status:            core.VersionStatusCompleted,
+		MainRevisionUsed:  1,
+		TemplateSetIDUsed: "builtin-standard-clean",
+		SourceType:        core.SourceTypeLLMGeneration,
+		TailoredContent:   tailoredContent,
+		HTMLOutput:        "<html>Old Standard Template</html>",
+		MarkdownOutput:    "# Old Standard Markdown",
+		PlainTextOutput:   "Old Standard Plain Text",
+		CreatedAt:         now,
+		CompletedAt:       &now,
 	}
 	if err := env.branchRepo.CreateVersion(ctx, vCompleted); err != nil {
 		t.Fatalf("failed to create completed version: %v", err)
@@ -253,16 +253,16 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	// 4. Assert 409 Conflict when version status is pending or processing
 	t.Run("RenderPreview_PendingStatus_Returns409", func(t *testing.T) {
 		vPending := &core.ResumeVersion{
-			ID:                 "ver-pending-1",
-			ResumeID:           targetResume.ID,
-			BranchID:           targetResume.ID,
-			VersionNumber:      2,
-			Status:             core.VersionStatusPending,
-			MainRevisionUsed: 1,
-			TemplateSetIDUsed:  "builtin-standard-clean",
-			SourceType:         core.SourceTypeLLMGeneration,
-			TailoredContent:    tailoredContent,
-			CreatedAt:          time.Now().UTC(),
+			ID:                "ver-pending-1",
+			ResumeID:          targetResume.ID,
+			BranchID:          targetResume.ID,
+			VersionNumber:     2,
+			Status:            core.VersionStatusPending,
+			MainRevisionUsed:  1,
+			TemplateSetIDUsed: "builtin-standard-clean",
+			SourceType:        core.SourceTypeLLMGeneration,
+			TailoredContent:   tailoredContent,
+			CreatedAt:         time.Now().UTC(),
 		}
 		if err := env.branchRepo.CreateVersion(ctx, vPending); err != nil {
 			t.Fatalf("failed to create pending version: %v", err)
@@ -289,17 +289,17 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	// 5. Assert 422 Unprocessable Entity when TailoredContent is nil
 	t.Run("RenderPreview_NilTailoredContent_Returns422", func(t *testing.T) {
 		vFailed := &core.ResumeVersion{
-			ID:                 "ver-failed-1",
-			ResumeID:           targetResume.ID,
-			BranchID:           targetResume.ID,
-			VersionNumber:      3,
-			Status:             core.VersionStatusFailed,
-			MainRevisionUsed: 1,
-			TemplateSetIDUsed:  "builtin-standard-clean",
-			SourceType:         core.SourceTypeLLMGeneration,
-			TailoredContent:    nil,
-			ErrorMessage:       "LLM failed to respond",
-			CreatedAt:          time.Now().UTC(),
+			ID:                "ver-failed-1",
+			ResumeID:          targetResume.ID,
+			BranchID:          targetResume.ID,
+			VersionNumber:     3,
+			Status:            core.VersionStatusFailed,
+			MainRevisionUsed:  1,
+			TemplateSetIDUsed: "builtin-standard-clean",
+			SourceType:        core.SourceTypeLLMGeneration,
+			TailoredContent:   nil,
+			ErrorMessage:      "LLM failed to respond",
+			CreatedAt:         time.Now().UTC(),
 		}
 		if err := env.branchRepo.CreateVersion(ctx, vFailed); err != nil {
 			t.Fatalf("failed to create failed version: %v", err)
@@ -969,5 +969,3 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 		}
 	})
 }
-
-

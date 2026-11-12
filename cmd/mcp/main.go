@@ -16,16 +16,16 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core/llm"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core"
-	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
-	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
+	"github.com/resumeee-app/resumeee-core/validator"
+	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
 // StoreInitializer is a factory function initializing domain repositories and storage resources for the MCP server.
@@ -192,11 +192,11 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	defer workerPool.Stop()
 
 	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:   branchRepo,
-		ProfileRepo:  profileRepo,
-		PresetRepo:   presetRepo,
-		TemplateRepo: templateRepo,
-		QuotaRepo:    store.Quota(),
+		BranchRepo:     branchRepo,
+		ProfileRepo:    profileRepo,
+		PresetRepo:     presetRepo,
+		TemplateRepo:   templateRepo,
+		QuotaRepo:      store.Quota(),
 		JobEnqueuer:    workerPool,
 		Validator:      provValidator,
 		Renderer:       templateRenderer,

@@ -20,12 +20,12 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
+	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 type testEnv struct {
@@ -869,12 +869,12 @@ func TestErrorEnvelopes(t *testing.T) {
 
 		// Create dummy version 1 in DB
 		v1 := &core.BranchVersion{
-			ID:                 "ver-prov-test",
-			BranchID:           branch.ID,
-			Status:             core.VersionStatusCompleted,
-			MainRevisionUsed:   1,
-			TemplateSetIDUsed:  renderer.TemplateStandardCleanID,
-			SourceType:         core.SourceTypeLLMGeneration,
+			ID:                "ver-prov-test",
+			BranchID:          branch.ID,
+			Status:            core.VersionStatusCompleted,
+			MainRevisionUsed:  1,
+			TemplateSetIDUsed: renderer.TemplateStandardCleanID,
+			SourceType:        core.SourceTypeLLMGeneration,
 		}
 		if err := env.branchRepo.CreateVersion(context.Background(), v1); err != nil {
 			t.Fatalf("failed to create v1: %v", err)
@@ -3134,5 +3134,3 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 		t.Errorf("expected email 'newuser@example.com', got %q", user.Email)
 	}
 }
-
-

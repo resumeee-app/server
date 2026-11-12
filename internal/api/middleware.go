@@ -236,4 +236,3 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifie
 
 	return AuthMiddlewareWithProvider(provider, provisioners...)
 }
-

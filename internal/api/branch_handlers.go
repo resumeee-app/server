@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
@@ -89,9 +89,9 @@ type RenderPreviewRequest struct {
 }
 
 type AsyncJobEnqueued struct {
-	VersionID string               `json:"version_id"`
+	VersionID string             `json:"version_id"`
 	Status    core.VersionStatus `json:"status"`
-	Message   string               `json:"message"`
+	Message   string             `json:"message"`
 }
 
 type SyncBranchesRequest struct {
@@ -193,21 +193,21 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b := &core.Branch{
-		UserID:                   userID,
-		Name:                     req.Name,
-		TargetRole:               req.TargetRole,
-		TargetCompany:            req.TargetCompany,
-		TargetRequirements:       req.TargetRequirements,
-		CustomDirectives:         directives,
-		BranchInstructions:       directives,
-		TailoringStrategyID:      stratID,
-		PresetID:                 stratID,
-		TemplateSetID:            req.TemplateSetID,
-		ProviderOverride:         req.ProviderOverride,
-		ModelOverride:            req.ModelOverride,
-		ReasoningLevel:           req.ReasoningLevel,
-		PinnedEntityIDs:          req.PinnedEntityIDs,
-		ExcludedEntityIDs:        req.ExcludedEntityIDs,
+		UserID:              userID,
+		Name:                req.Name,
+		TargetRole:          req.TargetRole,
+		TargetCompany:       req.TargetCompany,
+		TargetRequirements:  req.TargetRequirements,
+		CustomDirectives:    directives,
+		BranchInstructions:  directives,
+		TailoringStrategyID: stratID,
+		PresetID:            stratID,
+		TemplateSetID:       req.TemplateSetID,
+		ProviderOverride:    req.ProviderOverride,
+		ModelOverride:       req.ModelOverride,
+		ReasoningLevel:      req.ReasoningLevel,
+		PinnedEntityIDs:     req.PinnedEntityIDs,
+		ExcludedEntityIDs:   req.ExcludedEntityIDs,
 	}
 
 	created, err := h.svc.CreateBranch(ctx, b)
@@ -813,5 +813,3 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 		"plain_text":        rendered.PlainText,
 	})
 }
-
-

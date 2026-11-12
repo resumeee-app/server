@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
@@ -125,4 +125,3 @@ func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
 	}
 	return core.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
 }
-

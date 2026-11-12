@@ -85,15 +85,15 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 // --- Request DTOs ---
 
 type UpdateProfileRequest struct {
-	FullName           *string             `json:"full_name"`
-	Headline           *string             `json:"headline"`
-	Email              *string             `json:"email"`
-	Phone              *string             `json:"phone"`
+	FullName           *string           `json:"full_name"`
+	Headline           *string           `json:"headline"`
+	Email              *string           `json:"email"`
+	Phone              *string           `json:"phone"`
 	Location           *core.Location    `json:"location"`
 	Profiles           []core.SocialLink `json:"profiles"`
-	Summary            *string             `json:"summary"`
-	GlobalWritingRules *string             `json:"global_writing_rules"`
-	Metadata           map[string]any      `json:"metadata"`
+	Summary            *string           `json:"summary"`
+	GlobalWritingRules *string           `json:"global_writing_rules"`
+	Metadata           map[string]any    `json:"metadata"`
 }
 
 type CreateSkillRequest struct {
@@ -117,41 +117,41 @@ type UpdateSkillRequest struct {
 }
 
 type CreateExperienceRequest struct {
-	ShortID           string                `json:"short_id,omitempty"`
-	Company           string                `json:"company"`
-	RoleTitle         string                `json:"role_title"`
+	ShortID           string              `json:"short_id,omitempty"`
+	Company           string              `json:"company"`
+	RoleTitle         string              `json:"role_title"`
 	EmploymentType    core.EmploymentType `json:"employment_type"`
 	StartDate         core.Date           `json:"start_date"`
 	EndDate           *core.Date          `json:"end_date"`
-	IsCurrent         bool                  `json:"is_current"`
+	IsCurrent         bool                `json:"is_current"`
 	Location          core.Location       `json:"location"`
 	CompanyLocation   *core.Location      `json:"company_location"`
 	CompanyContact    *core.ContactDetail `json:"company_contact"`
-	HoursPerWeek      *int                  `json:"hours_per_week"`
-	SupervisorName    string                `json:"supervisor_name"`
-	SupervisorContact string                `json:"supervisor_contact"`
-	DutiesSummary     string                `json:"duties_summary"`
-	SkillIDs          []string              `json:"skill_ids"`
-	Metadata          map[string]any        `json:"metadata"`
+	HoursPerWeek      *int                `json:"hours_per_week"`
+	SupervisorName    string              `json:"supervisor_name"`
+	SupervisorContact string              `json:"supervisor_contact"`
+	DutiesSummary     string              `json:"duties_summary"`
+	SkillIDs          []string            `json:"skill_ids"`
+	Metadata          map[string]any      `json:"metadata"`
 }
 
 type UpdateExperienceRequest struct {
-	ShortID           *string                `json:"short_id,omitempty"`
-	Company           *string                `json:"company"`
-	RoleTitle         *string                `json:"role_title"`
+	ShortID           *string              `json:"short_id,omitempty"`
+	Company           *string              `json:"company"`
+	RoleTitle         *string              `json:"role_title"`
 	EmploymentType    *core.EmploymentType `json:"employment_type"`
 	StartDate         *core.Date           `json:"start_date"`
 	EndDate           *core.Date           `json:"end_date"`
-	IsCurrent         *bool                  `json:"is_current"`
+	IsCurrent         *bool                `json:"is_current"`
 	Location          *core.Location       `json:"location"`
 	CompanyLocation   *core.Location       `json:"company_location"`
 	CompanyContact    *core.ContactDetail  `json:"company_contact"`
-	HoursPerWeek      *int                   `json:"hours_per_week"`
-	SupervisorName    *string                `json:"supervisor_name"`
-	SupervisorContact *string                `json:"supervisor_contact"`
-	DutiesSummary     *string                `json:"duties_summary"`
-	SkillIDs          []string               `json:"skill_ids"`
-	Metadata          map[string]any         `json:"metadata"`
+	HoursPerWeek      *int                 `json:"hours_per_week"`
+	SupervisorName    *string              `json:"supervisor_name"`
+	SupervisorContact *string              `json:"supervisor_contact"`
+	DutiesSummary     *string              `json:"duties_summary"`
+	SkillIDs          []string             `json:"skill_ids"`
+	Metadata          map[string]any       `json:"metadata"`
 }
 
 type CreateProjectRequest struct {
@@ -159,8 +159,8 @@ type CreateProjectRequest struct {
 	Name      string         `json:"name"`
 	Role      string         `json:"role"`
 	URL       string         `json:"url"`
-	StartDate *core.Date   `json:"start_date"`
-	EndDate   *core.Date   `json:"end_date"`
+	StartDate *core.Date     `json:"start_date"`
+	EndDate   *core.Date     `json:"end_date"`
 	Summary   string         `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
@@ -171,42 +171,42 @@ type UpdateProjectRequest struct {
 	Name      *string        `json:"name"`
 	Role      *string        `json:"role"`
 	URL       *string        `json:"url"`
-	StartDate *core.Date   `json:"start_date"`
-	EndDate   *core.Date   `json:"end_date"`
+	StartDate *core.Date     `json:"start_date"`
+	EndDate   *core.Date     `json:"end_date"`
 	Summary   *string        `json:"summary"`
 	SkillIDs  []string       `json:"skill_ids"`
 	Metadata  map[string]any `json:"metadata"`
 }
 
 type CreateEducationRequest struct {
-	ShortID     string          `json:"short_id,omitempty"`
-	Institution string          `json:"institution"`
-	Degree      string          `json:"degree"`
-	Field       string          `json:"field"`
-	StartDate   *core.Date    `json:"start_date"`
-	EndDate     *core.Date    `json:"end_date"`
-	Score       string          `json:"score"`
-	Location    core.Location `json:"location"`
-	Metadata    map[string]any  `json:"metadata"`
+	ShortID     string         `json:"short_id,omitempty"`
+	Institution string         `json:"institution"`
+	Degree      string         `json:"degree"`
+	Field       string         `json:"field"`
+	StartDate   *core.Date     `json:"start_date"`
+	EndDate     *core.Date     `json:"end_date"`
+	Score       string         `json:"score"`
+	Location    core.Location  `json:"location"`
+	Metadata    map[string]any `json:"metadata"`
 }
 
 type UpdateEducationRequest struct {
-	ShortID     *string          `json:"short_id,omitempty"`
-	Institution *string          `json:"institution"`
-	Degree      *string          `json:"degree"`
-	Field       *string          `json:"field"`
+	ShortID     *string        `json:"short_id,omitempty"`
+	Institution *string        `json:"institution"`
+	Degree      *string        `json:"degree"`
+	Field       *string        `json:"field"`
 	StartDate   *core.Date     `json:"start_date"`
 	EndDate     *core.Date     `json:"end_date"`
-	Score       *string          `json:"score"`
+	Score       *string        `json:"score"`
 	Location    *core.Location `json:"location"`
-	Metadata    map[string]any   `json:"metadata"`
+	Metadata    map[string]any `json:"metadata"`
 }
 
 type CreateCertificationRequest struct {
 	ShortID  string         `json:"short_id,omitempty"`
 	Name     string         `json:"name"`
 	Issuer   string         `json:"issuer"`
-	Date     *core.Date   `json:"date"`
+	Date     *core.Date     `json:"date"`
 	URL      string         `json:"url"`
 	Summary  string         `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
@@ -216,19 +216,19 @@ type UpdateCertificationRequest struct {
 	ShortID  *string        `json:"short_id,omitempty"`
 	Name     *string        `json:"name"`
 	Issuer   *string        `json:"issuer"`
-	Date     *core.Date   `json:"date"`
+	Date     *core.Date     `json:"date"`
 	URL      *string        `json:"url"`
 	Summary  *string        `json:"summary"`
 	Metadata map[string]any `json:"metadata"`
 }
 
 type CreateFactRequest struct {
-	ShortID   string           `json:"short_id,omitempty"`
-	OwnerID   string           `json:"owner_id"`
+	ShortID   string         `json:"short_id,omitempty"`
+	OwnerID   string         `json:"owner_id"`
 	OwnerType core.OwnerType `json:"owner_type"`
-	Statement string           `json:"statement"`
-	Impact    string           `json:"impact"`
-	SkillIDs  []string         `json:"skill_ids"`
+	Statement string         `json:"statement"`
+	Impact    string         `json:"impact"`
+	SkillIDs  []string       `json:"skill_ids"`
 }
 
 type UpdateFactRequest struct {
@@ -399,9 +399,9 @@ const DefaultPDFParseTimeout = 10 * time.Minute
 
 // AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
 type AsyncPDFJobResponse struct {
-	JobID   string                   `json:"job_id"`
+	JobID   string                 `json:"job_id"`
 	Status  core.PDFParseJobStatus `json:"status"`
-	Message string                   `json:"message"`
+	Message string                 `json:"message"`
 }
 
 // reserveQuota reserves quota for an LLM operation, writing error responses directly and returning (reservationID, ok).

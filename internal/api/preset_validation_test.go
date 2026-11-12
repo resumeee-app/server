@@ -11,8 +11,8 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
 func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepository) {
@@ -195,4 +195,3 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 		}
 	})
 }
-

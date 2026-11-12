@@ -576,5 +576,3 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 		}
 	})
 }
-
-

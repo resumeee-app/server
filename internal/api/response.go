@@ -175,4 +175,3 @@ func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, deta
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 	writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, message, details)
 }
-

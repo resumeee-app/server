@@ -17,14 +17,14 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
+	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 type dummyJobEnqueuer struct {
@@ -961,17 +961,17 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 	now := time.Now().UTC()
 	rawHTMLWithScript := `<div class="resume"><h1>John Doe</h1><script>alert("xss")</script><script src="evil.js"></script><p>Engineer</p></div>`
 	ver := &core.BranchVersion{
-		ID:                 "ver-render-1",
-		BranchID:           b.ID,
-		VersionNumber:      1,
-		Status:             core.VersionStatusCompleted,
-		MainRevisionUsed:   1,
-		TemplateSetIDUsed:  "builtin-standard-clean",
-		HTMLOutput:         rawHTMLWithScript,
-		MarkdownOutput:     "# John Doe\nEngineer",
-		PlainTextOutput:    "John Doe\nEngineer",
-		CreatedAt:          now,
-		CompletedAt:        &now,
+		ID:                "ver-render-1",
+		BranchID:          b.ID,
+		VersionNumber:     1,
+		Status:            core.VersionStatusCompleted,
+		MainRevisionUsed:  1,
+		TemplateSetIDUsed: "builtin-standard-clean",
+		HTMLOutput:        rawHTMLWithScript,
+		MarkdownOutput:    "# John Doe\nEngineer",
+		PlainTextOutput:   "John Doe\nEngineer",
+		CreatedAt:         now,
+		CompletedAt:       &now,
 	}
 	if err := env.branchRepo.CreateVersion(ctx, ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
@@ -1795,4 +1795,3 @@ func TestTools_SimulateATS(t *testing.T) {
 		t.Errorf("expected duplicate simulate_ats call on same version to return tool error")
 	}
 }
-
