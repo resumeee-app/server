@@ -106,9 +106,9 @@ type Server struct {
 	llmClients       []registeredLLMClient
 	llmProviders     []core.LLMProvider
 	templateRenderer core.TemplateRenderer
-	provValidator    validator.ProvenanceValidator
+	provValidator    core.ProvenanceValidator
 	pdfExtractor     core.PDFTextExtractor
-	resumeExtractor  llm.ResumeExtractor
+	resumeExtractor  core.ResumeExtractor
 	promptCompiler   core.PromptCompiler
 	mcpEnabled       bool
 }

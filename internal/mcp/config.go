@@ -7,7 +7,6 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
@@ -39,7 +38,7 @@ type ServerConfig struct {
 	// UserRepo provides persistence access for multi-tenant user accounts.
 	UserRepo core.UserRepository
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
-	ResumeExtractor llm.ResumeExtractor
+	ResumeExtractor core.ResumeExtractor
 	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
 	JobEnqueuer core.JobEnqueuer
 	// DefaultUserID specifies the fallback user identifier when no auth header or token is provided.

@@ -32,7 +32,6 @@ import (
 	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 // JobEnqueuer defines the interface for submitting version jobs to the async generation worker pool.
@@ -127,9 +126,9 @@ type RouterConfig struct {
 	BranchService     branch.Service
 	ProfileService    profile.Service
 	PDFExtractor      core.PDFTextExtractor
-	ResumeExtractor   llm.ResumeExtractor
+	ResumeExtractor   core.ResumeExtractor
 	Renderer          core.TemplateRenderer
-	Validator         validator.ProvenanceValidator
+	Validator         core.ProvenanceValidator
 	JobEnqueuer       JobEnqueuer
 	PromptCompiler    core.PromptCompiler
 	ModelEnumerator   core.ModelEnumerator

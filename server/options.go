@@ -10,7 +10,6 @@ import (
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/validator"
 )
 
 // Option configures a Server instance during construction.
@@ -225,8 +224,8 @@ func WithTemplateRenderer(r core.TemplateRenderer) Option {
 	}
 }
 
-// WithValidator injects a custom validator.ProvenanceValidator implementation.
-func WithValidator(v validator.ProvenanceValidator) Option {
+// WithValidator injects a custom core.ProvenanceValidator implementation.
+func WithValidator(v core.ProvenanceValidator) Option {
 	return func(s *Server) error {
 		if v == nil {
 			return errors.New("server: ProvenanceValidator cannot be nil")
@@ -247,8 +246,8 @@ func WithPDFExtractor(extractor core.PDFTextExtractor) Option {
 	}
 }
 
-// WithResumeExtractor injects a custom llm.ResumeExtractor implementation.
-func WithResumeExtractor(extractor llm.ResumeExtractor) Option {
+// WithResumeExtractor injects a custom core.ResumeExtractor implementation.
+func WithResumeExtractor(extractor core.ResumeExtractor) Option {
 	return func(s *Server) error {
 		if extractor == nil {
 			return errors.New("server: ResumeExtractor cannot be nil")
