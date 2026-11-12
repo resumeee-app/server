@@ -26,7 +26,6 @@ import (
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
-	llmproviders "github.com/resumeee-app/resumeee-llm"
 )
 
 // StoreInitializer is a factory function initializing domain repositories and storage resources for the MCP server.
@@ -164,13 +163,13 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		llm.WithLogger(logger),
 		llm.WithDebugPrompts(cfg.LLMDebugPrompts, cfg.LLMDebugDir),
 	)
-	llmproviders.RegisterClients(llmRegistry, llmproviders.ProviderConfig{
+	llm.RegisterClients(llmRegistry, llm.ProviderConfig{
 		GeminiAPIKey:    cfg.GeminiAPIKey,
 		OpenAIAPIKey:    cfg.OpenAIAPIKey,
 		AnthropicAPIKey: cfg.AnthropicAPIKey,
 		CompatBaseURL:   cfg.OpenAICompatBaseURL,
 		CompatAPIKey:    cfg.OpenAICompatAPIKey,
-	}, llmproviders.WithTimeout(cfg.LLMTimeout))
+	}, llm.WithTimeout(cfg.LLMTimeout))
 	llmAdapter := llm.NewServiceAdapter(llmRegistry)
 	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
 

@@ -41,10 +41,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261111075744-9c641169c615 h1:JMJZ1b1Fn1eFgfO6v+Bla7cxxYtj+8LJUq1Am5Ap+7c=
 github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261111075744-9c641169c615/go.mod h1:iEALgNO2FDyomaOpfKzsq0B44o6UI9ceZp5bh/qSJdE=
-github.com/resumeee-app/resumeee-core v0.0.0-20261111074502-ee7edf4ad958 h1:TJaRsqd2iBd3lhcNg2/ejoztrUTdkjuT75PH4NW9j0I=
-github.com/resumeee-app/resumeee-core v0.0.0-20261111074502-ee7edf4ad958/go.mod h1:5l+FoQPM/M7qZtALfZeCIdvt7DDW1H87qXTg4XFtBEM=
-github.com/resumeee-app/resumeee-llm v0.0.0-20261111075308-fb8ad9b4763a h1:tAvWcWM9iq7qaF295tN7cXreLKObcyAkVpW67OaCWYw=
-github.com/resumeee-app/resumeee-llm v0.0.0-20261111075308-fb8ad9b4763a/go.mod h1:FJQO+f6eYKZNnB8wYDape8AaJ8dY7H29sXiCzuW5HDg=
+github.com/resumeee-app/resumeee-core v0.0.0-20261112010632-bd3416befe89 h1:NLciIIubRSV1XOuWLyIiFpUhKzI9qgY/aGUf/rRL1UY=
+github.com/resumeee-app/resumeee-core v0.0.0-20261112010632-bd3416befe89/go.mod h1:5l+FoQPM/M7qZtALfZeCIdvt7DDW1H87qXTg4XFtBEM=
 github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261111075740-a74a06ae2cea h1:lL1yLTMsSzqODh3zfXlzKMnOeavpEb+0xPYIRJ8EHHs=
 github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261111075740-a74a06ae2cea/go.mod h1:I/p2txqLQcCww/+rHtm7KOeVC0oRxRsFqtXMP+A2+t0=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
@@ -58,8 +56,8 @@ github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD
 github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
-golang.org/x/sys v0.7.0 h1:3jlCCIQZPdOYu1h8BkNvLz8Kgwtae2cagcG/VamtZRU=
-golang.org/x/sys v0.7.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
+golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
 golang.org/x/text v0.44.0 h1:YItdp/mQNGnsmrgpcdA5yQ3bnRxCfo/Tj/iByGW9GGo=
 golang.org/x/text v0.44.0/go.mod h1:S4FR1waQ9LbjQTls97SyRjDaUUVkaM+cXwwuG/G+MwY=
 golang.org/x/tools v0.52.0 h1:ryxg4U63oaUYk7uOLTF37n43f4qgtGvqV4Ioit1BaEs=

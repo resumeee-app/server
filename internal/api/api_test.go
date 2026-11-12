@@ -26,7 +26,6 @@ import (
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
-	llmproviders "github.com/resumeee-app/resumeee-llm"
 )
 
 type testEnv struct {
@@ -1977,7 +1976,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 
 		// Configure LLM registry with prompt debugging enabled targeting debugDir
 		registry := llm.NewRegistry(llm.WithDebugPrompts(true, debugDir))
-		llmproviders.RegisterClients(registry, llmproviders.ProviderConfig{
+		llm.RegisterClients(registry, llm.ProviderConfig{
 			CompatBaseURL: upstreamServer.URL + "/v1",
 			CompatAPIKey:  "test-key",
 		})

@@ -7,8 +7,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/mark3labs/mcp-go v1.5.0
 	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261111075744-9c641169c615
-	github.com/resumeee-app/resumeee-core v0.0.0-20261111074502-ee7edf4ad958
-	github.com/resumeee-app/resumeee-llm v0.0.0-20261111075308-fb8ad9b4763a
+	github.com/resumeee-app/resumeee-core v0.0.0-20261112010632-bd3416befe89
 	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261111075740-a74a06ae2cea
 )
 
@@ -24,7 +23,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/sys v0.7.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	gorm.io/gorm v1.31.2 // indirect
 	modernc.org/libc v1.22.5 // indirect
