@@ -1087,27 +1087,6 @@ func buildTestPDF(text string) []byte {
 	return []byte(body + xrefAndTrailer)
 }
 
-type mockModelEnumeratingExtractor struct {
-	completer func(ctx context.Context, sys, user, prov, model string) (string, error)
-	models    []domain.ModelOption
-}
-
-func (m *mockModelEnumeratingExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*profile.JSONResume, error) {
-	if m.completer != nil {
-		_, err := m.completer(ctx, "", text, provider, model)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &profile.JSONResume{
-		Basics: profile.JSONResumeBasics{Name: "Morgan BrandNew"},
-	}, nil
-}
-
-func (m *mockModelEnumeratingExtractor) AvailableModels() []domain.ModelOption {
-	return m.models
-}
-
 func setupTestServerWithExtractor(t *testing.T, resumeExtractor llm.ResumeExtractor) *testEnv {
 	return setupTestServerWithExtractorAndLogger(t, resumeExtractor, nil)
 }
@@ -1777,7 +1756,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		}
 	})
 
-	t.Run("Omitting provider and model resolves from user main profile", func(t *testing.T) {
+	t.Run("Omitting provider and model passes empty overrides to extractor", func(t *testing.T) {
 		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 		var capturedProvider, capturedModel string
 
@@ -1790,17 +1769,6 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		env := setupTestServerWithExtractor(t, mockExtractor)
 		client := env.server.Client()
 		baseURL := env.server.URL
-
-		// Set default provider and model on user's profile
-		prof, err := env.profileRepo.GetProfile(context.Background(), "default")
-		if err != nil {
-			t.Fatalf("failed to get profile: %v", err)
-		}
-		prof.DefaultProvider = "custom-provider"
-		prof.DefaultModel = "custom-model"
-		if err := env.profileRepo.UpsertProfile(context.Background(), prof); err != nil {
-			t.Fatalf("failed to update profile: %v", err)
-		}
 
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
@@ -1824,132 +1792,11 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 			t.Fatalf("expected status 200, got %d", resp.StatusCode)
 		}
 
-		if capturedProvider != "custom-provider" {
-			t.Errorf("expected provider 'custom-provider', got %q", capturedProvider)
+		if capturedProvider != "" {
+			t.Errorf("expected empty provider override, got %q", capturedProvider)
 		}
-		if capturedModel != "custom-model" {
-			t.Errorf("expected model 'custom-model', got %q", capturedModel)
-		}
-	})
-
-	t.Run("ModelEnumerator validates profile defaults and handles aliases", func(t *testing.T) {
-		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
-
-		testCases := []struct {
-			name             string
-			profileProvider  string
-			profileModel     string
-			reqProvider      string
-			reqModel         string
-			availableModels  []domain.ModelOption
-			expectedProvider string
-			expectedModel    string
-		}{
-			{
-				name:            "profile provider matching available model is selected",
-				profileProvider: "openai",
-				profileModel:    "gpt-4o",
-				availableModels: []domain.ModelOption{
-					{Provider: "openai", Model: "gpt-4o"},
-					{Provider: "gemini", Model: "gemini-2.5-flash"},
-				},
-				expectedProvider: "openai",
-				expectedModel:    "gpt-4o",
-			},
-			{
-				name:            "profile provider unavailable gracefully defaults to empty",
-				profileProvider: "unsupported-cloud",
-				profileModel:    "unknown-model",
-				availableModels: []domain.ModelOption{
-					{Provider: "openai", Model: "gpt-4o"},
-				},
-				expectedProvider: "",
-				expectedModel:    "",
-			},
-			{
-				name:            "provider alias matching for openai-compat and compat",
-				profileProvider: "openai-compat",
-				profileModel:    "llama-3.3-70b",
-				availableModels: []domain.ModelOption{
-					{Provider: "compat", Model: "llama-3.3-70b"},
-				},
-				expectedProvider: "openai-compat",
-				expectedModel:    "llama-3.3-70b",
-			},
-			{
-				name:             "reqProvider supplied with empty model resolves model from profile default",
-				profileProvider:  "openai",
-				profileModel:     "gpt-4o",
-				reqProvider:      "openai",
-				reqModel:         "",
-				availableModels:  []domain.ModelOption{{Provider: "openai", Model: "gpt-4o"}},
-				expectedProvider: "openai",
-				expectedModel:    "gpt-4o",
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				var capturedProvider, capturedModel string
-
-				mockExt := &mockModelEnumeratingExtractor{
-					completer: func(ctx context.Context, sys, user, prov, model string) (string, error) {
-						capturedProvider = prov
-						capturedModel = model
-						return `{"basics":{"name":"Morgan BrandNew"}}`, nil
-					},
-					models: tc.availableModels,
-				}
-
-				env := setupTestServerWithExtractor(t, mockExt)
-				client := env.server.Client()
-				baseURL := env.server.URL
-
-				prof, err := env.profileRepo.GetProfile(context.Background(), "default")
-				if err != nil {
-					t.Fatalf("failed to get profile: %v", err)
-				}
-				prof.DefaultProvider = tc.profileProvider
-				prof.DefaultModel = tc.profileModel
-				if err := env.profileRepo.UpsertProfile(context.Background(), prof); err != nil {
-					t.Fatalf("failed to update profile: %v", err)
-				}
-
-				var buf bytes.Buffer
-				mw := multipart.NewWriter(&buf)
-				part, err := mw.CreateFormFile("file", "resume.pdf")
-				if err != nil {
-					t.Fatalf("create form file failed: %v", err)
-				}
-				_, _ = part.Write(pdfBytes)
-				if tc.reqProvider != "" {
-					_ = mw.WriteField("provider", tc.reqProvider)
-				}
-				if tc.reqModel != "" {
-					_ = mw.WriteField("model", tc.reqModel)
-				}
-				_ = mw.Close()
-
-				req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
-				req.Header.Set("Content-Type", mw.FormDataContentType())
-
-				resp, err := client.Do(req)
-				if err != nil {
-					t.Fatalf("request failed: %v", err)
-				}
-				defer func() { _ = resp.Body.Close() }()
-
-				if resp.StatusCode != http.StatusOK {
-					t.Fatalf("expected status 200, got %d", resp.StatusCode)
-				}
-
-				if capturedProvider != tc.expectedProvider {
-					t.Errorf("expected provider %q, got %q", tc.expectedProvider, capturedProvider)
-				}
-				if capturedModel != tc.expectedModel {
-					t.Errorf("expected model %q, got %q", tc.expectedModel, capturedModel)
-				}
-			})
+		if capturedModel != "" {
+			t.Errorf("expected empty model override, got %q", capturedModel)
 		}
 	})
 

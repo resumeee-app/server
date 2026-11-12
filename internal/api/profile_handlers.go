@@ -93,8 +93,6 @@ type UpdateProfileRequest struct {
 	Profiles           []domain.SocialLink `json:"profiles"`
 	Summary            *string             `json:"summary"`
 	GlobalWritingRules *string             `json:"global_writing_rules"`
-	DefaultProvider    *string             `json:"default_provider"`
-	DefaultModel       *string             `json:"default_model"`
 	Metadata           map[string]any      `json:"metadata"`
 }
 
@@ -309,12 +307,6 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if req.GlobalWritingRules != nil {
 		prof.GlobalWritingRules = *req.GlobalWritingRules
 	}
-	if req.DefaultProvider != nil {
-		prof.DefaultProvider = *req.DefaultProvider
-	}
-	if req.DefaultModel != nil {
-		prof.DefaultModel = *req.DefaultModel
-	}
 	if req.Metadata != nil {
 		prof.Metadata = req.Metadata
 	}
@@ -405,15 +397,6 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 // DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
 const DefaultPDFParseTimeout = 10 * time.Minute
 
-// resolveExtractionProviderAndModel determines the active LLM provider and model for resume parsing.
-func (h *profileHandler) resolveExtractionProviderAndModel(ctx context.Context, userID, reqProvider, reqModel string) (string, string) {
-	var prof *domain.Profile
-	if h.cfg.ProfileRepo != nil {
-		prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	}
-	return domain.ResolveExtractionProviderAndModel(prof, h.cfg.ModelEnumerator, reqProvider, reqModel)
-}
-
 // AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
 type AsyncPDFJobResponse struct {
 	JobID   string                   `json:"job_id"`
@@ -480,7 +463,8 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	defer func() { _ = file.Close() }()
 
 	userID := getUserID(r, h.cfg.DefaultUserID)
-	provider, model := h.resolveExtractionProviderAndModel(ctx, userID, r.FormValue("provider"), r.FormValue("model"))
+	provider := strings.TrimSpace(r.FormValue("provider"))
+	model := strings.TrimSpace(r.FormValue("model"))
 
 	fileSize := fileHeader.Size
 	if fileSize <= 0 {
