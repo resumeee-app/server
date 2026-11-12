@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/domain"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/validator"
 	"github.com/resumeee-app/resumeee-core/services/worker"
@@ -100,9 +100,7 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan worker.PDFParseJobTask {
 }
 
 // ModelEnumerator defines the interface for enumerating available configured LLM models.
-type ModelEnumerator interface {
-	AvailableModels() []domain.ModelOption
-}
+type ModelEnumerator = domain.ModelEnumerator
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
@@ -115,7 +113,7 @@ type RouterConfig struct {
 	QuotaRepo       domain.QuotaRepository
 	BranchService   branch.Service
 	ProfileService  profile.Service
-	PDFExtractor    pdf.PDFTextExtractor
+	PDFExtractor    domain.PDFTextExtractor
 	ResumeExtractor llm.ResumeExtractor
 	Renderer        domain.TemplateRenderer
 	Validator       validator.ProvenanceValidator
@@ -152,9 +150,9 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	}
 	var err error
 	if p.store != nil {
-		err = memory.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
+		err = domain.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
 	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = memory.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+		err = domain.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)
@@ -191,7 +189,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cfg.MonthlyTokenLimit = 1000000
 	}
 	if cfg.PDFJobRepo == nil {
-		cfg.PDFJobRepo = NewInMemoryPDFJobRepository()
+		cfg.PDFJobRepo = memory.New()
 	}
 	if cfg.PDFExtractor == nil {
 		cfg.PDFExtractor = pdf.NewExtractor()

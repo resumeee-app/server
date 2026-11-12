@@ -9,20 +9,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/domain"
 	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
@@ -93,9 +92,7 @@ func (c *Config) toInternalConfig() *config.Config {
 }
 
 // PDFTextExtractor abstracts extracting textual content from PDF binary streams.
-type PDFTextExtractor interface {
-	ExtractText(ctx context.Context, r io.ReaderAt, size int64) (string, error)
-}
+type PDFTextExtractor = domain.PDFTextExtractor
 
 type registeredLLMClient struct {
 	client domain.LLMClient

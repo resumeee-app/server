@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/domain"
 )
 

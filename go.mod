@@ -4,11 +4,10 @@ go 1.27.2
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/mark3labs/mcp-go v1.5.0
-	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261111075744-9c641169c615
-	github.com/resumeee-app/resumeee-core v0.0.0-20261112010632-bd3416befe89
-	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261111075740-a74a06ae2cea
+	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112041310-0e5cc800c411
+	github.com/resumeee-app/resumeee-core v0.0.0-20261112040810-4f91283d6433
+	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261112041154-db3bbb14e02e
 )
 
 require (
@@ -18,6 +17,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

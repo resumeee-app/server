@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -50,41 +48,13 @@ type UpdatePresetRequest struct {
 // validateReasoningLevel verifies that the given reasoning effort level is empty or
 // matches one of the accepted enum values ("none", "low", "medium", "high").
 func validateReasoningLevel(level string) error {
-	switch level {
-	case "", "none", "low", "medium", "high":
-		return nil
-	default:
-		return errors.New("reasoning_level must be one of: none, low, medium, high")
-	}
+	return domain.ValidateReasoningLevel(level)
 }
 
 // validateModelOverride verifies that the specified model override and optional provider override
 // correspond to an available LLM model option registered in the enumerator catalog.
 func validateModelOverride(enumerator ModelEnumerator, providerOverride, modelOverride string) error {
-	if enumerator == nil || modelOverride == "" {
-		return nil
-	}
-
-	available := enumerator.AvailableModels()
-	if len(available) == 0 {
-		return nil
-	}
-
-	var found bool
-	for _, m := range available {
-		if strings.EqualFold(m.Model, modelOverride) {
-			if providerOverride == "" || strings.EqualFold(m.Provider, providerOverride) {
-				found = true
-				break
-			}
-		}
-	}
-
-	if !found {
-		return errors.New("model_override is not available for the specified provider")
-	}
-
-	return nil
+	return domain.ValidateModelOverride(enumerator, providerOverride, modelOverride)
 }
 
 // validateTemplateAccess verifies that the target template exists and is accessible by the user.

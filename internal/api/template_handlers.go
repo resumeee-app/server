@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	htmltemplate "html/template"
 	"net/http"
 	"strings"
@@ -225,101 +224,14 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// defaultSeededProfileName identifies the default placeholder name seeded upon database initialization.
-const defaultSeededProfileName = "Default User"
-
-// hasCustomProfileData returns true if the profile contains non-empty custom user data rather than unconfigured defaults.
-func hasCustomProfileData(prof *domain.Profile, snap *domain.MainProfileSnapshot) bool {
-	if prof == nil {
-		return false
-	}
-	if prof.FullName != "" && prof.FullName != defaultSeededProfileName {
-		return true
-	}
-	if snap != nil && (len(snap.Experiences) > 0 || len(snap.Skills) > 0 || len(snap.Projects) > 0 || len(snap.Education) > 0) {
-		return true
-	}
-	return false
-}
-
 // getRenderContext constructs a comprehensive execution context for template rendering.
-// Prefers actual user profile facts when present, merging with synthetic sample data for empty sections.
 func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *domain.TemplateSet) *renderer.RenderContext {
-	synth := renderer.SyntheticRenderContext()
-	if tmpl != nil && tmpl.CSSStyles != "" {
-		synth.CSSStyles = htmltemplate.CSS(tmpl.CSSStyles)
-	}
-
-	if h.cfg.ProfileRepo == nil {
-		return synth
-	}
-
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	if err == nil && prof != nil {
-		snapshot, _ := h.cfg.ProfileRepo.GetSnapshot(ctx, userID)
-		if hasCustomProfileData(prof, snapshot) {
-			var tailored *domain.TailoredContent
-			if snapshot != nil {
-				tailored = domain.SnapshotToTailoredContent(snapshot)
-			}
-			userCtx := renderer.NewRenderContext(tmpl, prof, tailored)
-			if len(userCtx.Experiences) == 0 {
-				userCtx.Experiences = synth.Experiences
-			}
-			if len(userCtx.SkillGroups) == 0 {
-				userCtx.SkillGroups = synth.SkillGroups
-			}
-			if len(userCtx.Projects) == 0 {
-				userCtx.Projects = synth.Projects
-			}
-			if len(userCtx.Education) == 0 {
-				userCtx.Education = synth.Education
-			}
-			if len(userCtx.Certifications) == 0 {
-				userCtx.Certifications = synth.Certifications
-			}
-			if userCtx.Summary == "" {
-				userCtx.Summary = synth.Summary
-			}
-			return userCtx
-		}
-	}
-
-	return synth
+	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileRepo, userID, tmpl)
 }
 
 // renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
 func (h *templateHandler) renderAllFormats(tmpl *domain.TemplateSet, renderCtx *renderer.RenderContext) (domain.RenderOutput, error) {
-	if tmpl == nil {
-		return domain.RenderOutput{}, nil
-	}
-
-	var out domain.RenderOutput
-	if tmpl.HTMLTemplate != "" {
-		htmlOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx)
-		if err != nil {
-			return domain.RenderOutput{}, fmt.Errorf("html template rendering failed: %w", err)
-		}
-		out.HTML = renderer.StripScriptTags(htmlOut)
-	}
-
-	if tmpl.MarkdownTemplate != "" {
-		mdOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx)
-		if err != nil {
-			return domain.RenderOutput{}, fmt.Errorf("markdown template rendering failed: %w", err)
-		}
-		out.Markdown = mdOut
-	}
-
-	if tmpl.TextTemplate != "" {
-		txtOut, err := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx)
-		if err != nil {
-			return domain.RenderOutput{}, fmt.Errorf("text template rendering failed: %w", err)
-		}
-		out.PlainText = txtOut
-	}
-
-	return out, nil
+	return renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 }
 
 // previewTemplate renders a saved template set on the server across HTML, Markdown, and text formats.

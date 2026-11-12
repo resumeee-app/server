@@ -5,10 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/domain"
-	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 )
@@ -124,6 +123,6 @@ func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
 	if userID == "" || c.ProfileRepo == nil || c.BranchRepo == nil || c.TemplateRepo == nil {
 		return nil
 	}
-	return memory.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
+	return domain.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
 }
 

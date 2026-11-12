@@ -22,7 +22,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core/llm"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	repository "github.com/resumeee-app/resumeee-core/domain"

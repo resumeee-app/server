@@ -241,27 +241,8 @@ type UpdateFactRequest struct {
 }
 
 // parseSkillsInput converts raw skill identifier/name strings from user payloads into domain.Skill instances.
-// Tokens matching UUID formats (with or without prefixes) route to domain.Skill{ID: ...}.
-// Plain text names (e.g. "Kubernetes", "Go") route to domain.Skill{Name: ...} for canonical resolution.
 func parseSkillsInput(skillIDs []string) []domain.Skill {
-	if len(skillIDs) == 0 {
-		return []domain.Skill{}
-	}
-	skills := make([]domain.Skill, 0, len(skillIDs))
-	for _, s := range skillIDs {
-		trimmed := strings.TrimSpace(s)
-		if trimmed == "" {
-			continue
-		}
-		rawUUID := strings.TrimPrefix(trimmed, "skill-")
-		rawUUID = strings.TrimPrefix(rawUUID, "sk-")
-		if _, err := uuid.Parse(rawUUID); err == nil {
-			skills = append(skills, domain.Skill{ID: trimmed})
-		} else {
-			skills = append(skills, domain.Skill{Name: trimmed})
-		}
-	}
-	return skills
+	return domain.ParseSkillsInput(skillIDs)
 }
 
 // --- Main Profile Handlers ---
@@ -425,79 +406,12 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 const DefaultPDFParseTimeout = 10 * time.Minute
 
 // resolveExtractionProviderAndModel determines the active LLM provider and model for resume parsing.
-// Explicit request values take precedence; omitted fields fall back to the authenticated user's main
-// profile defaults, verified against configured models when ModelEnumerator is present.
 func (h *profileHandler) resolveExtractionProviderAndModel(ctx context.Context, userID, reqProvider, reqModel string) (string, string) {
-	provider := strings.TrimSpace(reqProvider)
-	model := strings.TrimSpace(reqModel)
-
-	if h.cfg.ProfileRepo == nil || (provider != "" && model != "") {
-		return provider, model
+	var prof *domain.Profile
+	if h.cfg.ProfileRepo != nil {
+		prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
 	}
-
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
-	if err != nil || prof == nil {
-		return provider, model
-	}
-
-	var availableModels []domain.ModelOption
-	if h.cfg.ModelEnumerator != nil {
-		availableModels = h.cfg.ModelEnumerator.AvailableModels()
-	}
-
-	isProviderConfigured := func(candidate string) bool {
-		if len(availableModels) == 0 {
-			return true
-		}
-		for _, opt := range availableModels {
-			if strings.EqualFold(opt.Provider, candidate) ||
-				(strings.EqualFold(candidate, "openai-compat") && strings.EqualFold(opt.Provider, "compat")) ||
-				(strings.EqualFold(candidate, "compat") && strings.EqualFold(opt.Provider, "openai-compat")) {
-				return true
-			}
-		}
-		return false
-	}
-
-	profileProviderAccepted := false
-	if provider == "" && strings.TrimSpace(prof.DefaultProvider) != "" {
-		candidate := strings.TrimSpace(prof.DefaultProvider)
-		if isProviderConfigured(candidate) {
-			provider = candidate
-			profileProviderAccepted = true
-		}
-	} else if provider != "" {
-		if strings.EqualFold(provider, strings.TrimSpace(prof.DefaultProvider)) {
-			profileProviderAccepted = true
-		}
-	}
-
-	if model == "" && strings.TrimSpace(prof.DefaultModel) != "" {
-		candidateModel := strings.TrimSpace(prof.DefaultModel)
-		if len(availableModels) == 0 {
-			if profileProviderAccepted || strings.TrimSpace(prof.DefaultProvider) == "" {
-				model = candidateModel
-			}
-		} else {
-			if profileProviderAccepted || strings.TrimSpace(prof.DefaultProvider) == "" {
-				for _, opt := range availableModels {
-					providerMatches := provider == "" || strings.EqualFold(opt.Provider, provider) ||
-						(strings.EqualFold(provider, "openai-compat") && strings.EqualFold(opt.Provider, "compat")) ||
-						(strings.EqualFold(provider, "compat") && strings.EqualFold(opt.Provider, "openai-compat"))
-
-					if providerMatches && strings.EqualFold(opt.Model, candidateModel) {
-						model = candidateModel
-						break
-					}
-				}
-				if model == "" && strings.TrimSpace(provider) != "" && strings.EqualFold(provider, strings.TrimSpace(prof.DefaultProvider)) {
-					model = candidateModel
-				}
-			}
-		}
-	}
-
-	return provider, model
+	return domain.ResolveExtractionProviderAndModel(prof, h.cfg.ModelEnumerator, reqProvider, reqModel)
 }
 
 // AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.

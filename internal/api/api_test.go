@@ -20,7 +20,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core/domain"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-api/internal/pdf"
+	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/services/profile"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/memory"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,13 +12,8 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core/domain"
-)
-
-var (
-	// scriptTagRegex matches paired HTML <script>...</script> blocks across multiple lines.
-	scriptTagRegex = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
-	// scriptTagSelfClosing matches standalone or unclosed opening <script ...> tags.
-	scriptTagSelfClosing = regexp.MustCompile(`(?is)<script\b[^>]*\/?>`)
+	"github.com/resumeee-app/resumeee-core/privacy"
+	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
 // StripScriptTags removes HTML script tags (both paired blocks and standalone unclosed tags) from rendered HTML.
@@ -33,10 +27,8 @@ func StripScriptTags(html string) string {
 	return stripScriptTags(html)
 }
 
-// stripScriptTags performs regex substitution to remove paired and standalone script tags.
 func stripScriptTags(html string) string {
-	cleaned := scriptTagRegex.ReplaceAllString(html, "")
-	return scriptTagSelfClosing.ReplaceAllString(cleaned, "")
+	return renderer.StripScriptTags(html)
 }
 
 // SanitizeXMLFence neutralizes closing and parent prompt tags and wraps content in XML boundary tags.
@@ -51,14 +43,8 @@ func SanitizeXMLFence(content, tagName string) string {
 	return sanitizeXMLFence(content, tagName)
 }
 
-// sanitizeXMLFence applies regex matching against tag variations, whitespace, attributes, and parent enclosure tags.
 func sanitizeXMLFence(content, tagName string) string {
-	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions|resume_document|extracted_candidate_data|ats_extraction_rules|ats_matching_rules|response_schema)\b[^>]*>`, regexp.QuoteMeta(tagName)))
-	safe := tagRegex.ReplaceAllStringFunc(content, func(m string) string {
-		escaped := strings.ReplaceAll(m, "<", "&lt;")
-		return strings.ReplaceAll(escaped, ">", "&gt;")
-	})
-	return fmt.Sprintf("<%s>\n%s\n</%s>", tagName, strings.TrimSpace(safe), tagName)
+	return privacy.SanitizeXMLFence(content, tagName)
 }
 
 // parseArguments extracts and casts the tool arguments map from a CallToolRequest.
@@ -588,9 +574,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		providerOverride = strings.TrimSpace(providerOverride)
 		modelOverride = strings.TrimSpace(modelOverride)
 		reasoningLevel = strings.TrimSpace(strings.ToLower(reasoningLevel))
-		switch reasoningLevel {
-		case "", "none", "low", "medium", "high":
-		default:
+		if err := domain.ValidateReasoningLevel(reasoningLevel); err != nil {
 			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 		}
 
@@ -758,12 +742,10 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		if rLvl, ok := args["reasoning_level"].(string); ok {
 			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
-			switch rLvl {
-			case "", "none", "low", "medium", "high":
-				branch.ReasoningLevel = rLvl
-			default:
+			if err := domain.ValidateReasoningLevel(rLvl); err != nil {
 				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 			}
+			branch.ReasoningLevel = rLvl
 		}
 
 		updatedBranch, err := cfg.BranchService.UpdateBranch(ctx, branch)
@@ -824,12 +806,10 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		if rLvl, ok := args["reasoning_level"].(string); ok && strings.TrimSpace(rLvl) != "" {
 			rLvl = strings.TrimSpace(strings.ToLower(rLvl))
-			switch rLvl {
-			case "none", "low", "medium", "high":
-				branch.ReasoningLevel = rLvl
-			default:
+			if err := domain.ValidateReasoningLevel(rLvl); err != nil {
 				return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 			}
+			branch.ReasoningLevel = rLvl
 		}
 
 		if err := cfg.BranchRepo.UpdateBranch(ctx, branch); err != nil {

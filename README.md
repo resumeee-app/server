@@ -12,7 +12,6 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 - `internal/api/` — HTTP handlers, routers, and authentication/timeout middleware.
 - `internal/mcp/` — MCP tools (`get_main_profile`, `add_career_fact`, `list_branches`, `create_tailored_branch`, `trigger_tailoring`, `get_tailored_resume`, `extract_resume`, etc.) and SSE/stdio handlers.
 - `internal/config/` — Environment and CLI flag configuration.
-- `internal/pdf/` — PDF text extraction utility.
 - `api/openapi.yaml` — Canonical OpenAPI 3.1 contract.
 
 ---

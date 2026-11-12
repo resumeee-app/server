@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -473,84 +472,8 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 }
 
 // getOrRenderVersionOutputs resolves or dynamically re-renders resume outputs incorporating targetTemplateID.
-func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, branchID, v string, b *domain.Branch, ver *domain.BranchVersion, targetTemplateID string) domain.RenderOutput {
-	htmlOut := ver.HTMLOutput
-	mdOut := ver.MarkdownOutput
-	txtOut := ver.PlainTextOutput
-
-	if targetTemplateID == "" && b != nil {
-		targetTemplateID = b.TemplateSetID
-	}
-	if targetTemplateID == "" {
-		targetTemplateID = ver.TemplateSetIDUsed
-	}
-
-	isDifferentTemplate := targetTemplateID != "" && targetTemplateID != ver.TemplateSetIDUsed
-	missingOutputs := htmlOut == "" || mdOut == "" || txtOut == ""
-	shouldRender := isDifferentTemplate || missingOutputs
-
-	if shouldRender && h.cfg.Renderer != nil && h.cfg.TemplateRepo != nil && targetTemplateID != "" {
-		tmpl, tErr := h.cfg.TemplateRepo.GetTemplate(ctx, userID, targetTemplateID)
-		if tErr != nil {
-			slog.WarnContext(ctx, "failed to load template for branch version rendering",
-				"error", tErr,
-				"user_id", userID,
-				"branch_id", branchID,
-				"version", v,
-				"template_id", targetTemplateID,
-			)
-		} else if tmpl != nil {
-			var prof *domain.Profile
-			if h.cfg.ProfileRepo != nil {
-				prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
-			}
-			if ver.TailoredContent != nil {
-				rendered, rErr := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)
-				if rErr != nil {
-					slog.ErrorContext(ctx, "failed to dynamically render branch version",
-						"error", rErr,
-						"user_id", userID,
-						"branch_id", branchID,
-						"version", v,
-						"template_id", targetTemplateID,
-					)
-				} else if rendered != nil {
-					htmlOut = rendered.HTML
-					mdOut = rendered.Markdown
-					txtOut = rendered.PlainText
-				}
-			} else {
-				renderCtx := renderer.NewRenderContext(tmpl, prof, nil)
-				if htmlOut == "" && tmpl.HTMLTemplate != "" {
-					if hOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatHTML, tmpl.HTMLTemplate, renderCtx); rErr != nil {
-						slog.WarnContext(ctx, "failed to render html format", "error", rErr)
-					} else {
-						htmlOut = hOut
-					}
-				}
-				if mdOut == "" && tmpl.MarkdownTemplate != "" {
-					if mOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatMarkdown, tmpl.MarkdownTemplate, renderCtx); rErr != nil {
-						slog.WarnContext(ctx, "failed to render markdown format", "error", rErr)
-					} else {
-						mdOut = mOut
-					}
-				}
-				if txtOut == "" && tmpl.TextTemplate != "" {
-					if tOut, rErr := h.cfg.Renderer.RenderFormat(domain.OutputFormatPlainText, tmpl.TextTemplate, renderCtx); rErr != nil {
-						slog.WarnContext(ctx, "failed to render plain text format", "error", rErr)
-					} else {
-						txtOut = tOut
-					}
-				}
-			}
-		}
-	}
-
-	return domain.RenderOutput{
-		HTML:      htmlOut,
-		Markdown:  mdOut,
-		PlainText: txtOut,
-	}
+func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, _, _ string, b *domain.Branch, ver *domain.BranchVersion, targetTemplateID string) domain.RenderOutput {
+	return renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateRepo, h.cfg.ProfileRepo, userID, b, ver, targetTemplateID)
 }
 
 // exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
