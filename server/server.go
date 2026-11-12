@@ -1,9 +1,8 @@
 // Package server provides a configurable, dependency-injected HTTP REST and Model Context Protocol (MCP)
 // server for Resumeee.
 //
-// It allows callers to customize runtime configuration, storage backends, authentication providers,
-// LLM transport clients or providers, and domain services using functional With<Option> constructors,
-// while providing sensible 12-Factor defaults out of the box.
+// External dependencies (such as domain.Store, domain.AuthProvider, and domain.LLMClient / domain.LLMProvider)
+// are configured in their respective packages and injected into Server using functional With<Option> constructors.
 package server
 
 import (
@@ -29,29 +28,20 @@ import (
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 	"github.com/resumeee-app/resumeee-core/services/worker"
 	"github.com/resumeee-app/resumeee-core/validator"
-	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
-// Config encapsulates all runtime configuration parameters for a Resumeee Server.
+// Config encapsulates HTTP server, worker pool, quota, and logging settings owned by the API server.
+// Adapter-specific configurations (database drivers/paths, auth provider credentials, LLM vendor keys)
+// belong to their respective packages and are injected as constructed dependencies.
 type Config struct {
 	Port                       int
-	DBPath                     string
 	DefaultUserID              string
 	Admin                      bool
-	AuthProvider               string
-	FirebaseProjectID          string
-	FirebaseAPIKey             string
-	FirebaseAuthDomain         string
 	LLMDailyRequestLimit       int
 	LLMMonthlyTokenLimit       int
 	WorkerConcurrency          int
 	WorkerQueueSize            int
 	MaxConcurrentJobsPerTenant int
-	GeminiAPIKey               string
-	OpenAIAPIKey               string
-	AnthropicAPIKey            string
-	OpenAICompatBaseURL        string
-	OpenAICompatAPIKey         string
 	Environment                string
 	LogLevel                   slog.Level
 	LLMDebugPrompts            bool
@@ -60,11 +50,10 @@ type Config struct {
 	LLMTimeout                 time.Duration
 }
 
-// DefaultConfig returns a Config initialized with standard Resumeee defaults.
+// DefaultConfig returns a Config initialized with standard Resumeee server defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Port:                       config.DefaultPort,
-		DBPath:                     config.DefaultDBPath,
 		DefaultUserID:              config.DefaultUserIDVal,
 		Admin:                      config.DefaultAdmin,
 		LLMDailyRequestLimit:       config.DefaultLLMDailyRequestLimit,
@@ -81,79 +70,19 @@ func DefaultConfig() *Config {
 	}
 }
 
-// LoadConfig reads server configuration from process environment variables and a local .env file if present.
-func LoadConfig() (*Config, error) {
-	icfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
-	return fromInternalConfig(icfg), nil
-}
-
-// LoadConfigFrom parses server configuration using a custom environment lookup function.
-func LoadConfigFrom(lookup func(string) string) (*Config, error) {
-	icfg, err := config.LoadFrom(lookup)
-	if err != nil {
-		return nil, err
-	}
-	return fromInternalConfig(icfg), nil
-}
-
-func fromInternalConfig(c *config.Config) *Config {
-	if c == nil {
-		return DefaultConfig()
-	}
-	return &Config{
-		Port:                       c.Port,
-		DBPath:                     c.DBPath,
-		DefaultUserID:              c.DefaultUserID,
-		Admin:                      c.Admin,
-		AuthProvider:               c.AuthProvider,
-		FirebaseProjectID:          c.FirebaseProjectID,
-		FirebaseAPIKey:             c.FirebaseAPIKey,
-		FirebaseAuthDomain:         c.FirebaseAuthDomain,
-		LLMDailyRequestLimit:       c.LLMDailyRequestLimit,
-		LLMMonthlyTokenLimit:       c.LLMMonthlyTokenLimit,
-		WorkerConcurrency:          c.WorkerConcurrency,
-		WorkerQueueSize:            c.WorkerQueueSize,
-		MaxConcurrentJobsPerTenant: c.MaxConcurrentJobsPerTenant,
-		GeminiAPIKey:               c.GeminiAPIKey,
-		OpenAIAPIKey:               c.OpenAIAPIKey,
-		AnthropicAPIKey:            c.AnthropicAPIKey,
-		OpenAICompatBaseURL:        c.OpenAICompatBaseURL,
-		OpenAICompatAPIKey:         c.OpenAICompatAPIKey,
-		Environment:                c.Environment,
-		LogLevel:                   c.LogLevel,
-		LLMDebugPrompts:            c.LLMDebugPrompts,
-		LLMDebugDir:                c.LLMDebugDir,
-		RESTTimeout:                c.RESTTimeout,
-		LLMTimeout:                 c.LLMTimeout,
-	}
-}
-
 func (c *Config) toInternalConfig() *config.Config {
 	if c == nil {
 		c = DefaultConfig()
 	}
 	return &config.Config{
 		Port:                       c.Port,
-		DBPath:                     c.DBPath,
 		DefaultUserID:              c.DefaultUserID,
 		Admin:                      c.Admin,
-		AuthProvider:               c.AuthProvider,
-		FirebaseProjectID:          c.FirebaseProjectID,
-		FirebaseAPIKey:             c.FirebaseAPIKey,
-		FirebaseAuthDomain:         c.FirebaseAuthDomain,
 		LLMDailyRequestLimit:       c.LLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       c.LLMMonthlyTokenLimit,
 		WorkerConcurrency:          c.WorkerConcurrency,
 		WorkerQueueSize:            c.WorkerQueueSize,
 		MaxConcurrentJobsPerTenant: c.MaxConcurrentJobsPerTenant,
-		GeminiAPIKey:               c.GeminiAPIKey,
-		OpenAIAPIKey:               c.OpenAIAPIKey,
-		AnthropicAPIKey:            c.AnthropicAPIKey,
-		OpenAICompatBaseURL:        c.OpenAICompatBaseURL,
-		OpenAICompatAPIKey:         c.OpenAICompatAPIKey,
 		Environment:                c.Environment,
 		LogLevel:                   c.LogLevel,
 		LLMDebugPrompts:            c.LLMDebugPrompts,
@@ -162,9 +91,6 @@ func (c *Config) toInternalConfig() *config.Config {
 		LLMTimeout:                 c.LLMTimeout,
 	}
 }
-
-// StoreInitializer initializes a storage backend and returns a domain.Store implementation.
-type StoreInitializer func(ctx context.Context, cfg *Config, logger *slog.Logger) (domain.Store, error)
 
 // PDFTextExtractor abstracts extracting textual content from PDF binary streams.
 type PDFTextExtractor interface {
@@ -176,25 +102,15 @@ type registeredLLMClient struct {
 	opts   []llm.Option
 }
 
-type registeredLLMProviderCfg struct {
-	cfg  llm.ProviderConfig
-	opts []llm.Option
-}
-
 // Server orchestrates the Resumeee HTTP REST API, MCP server, background worker pool, and domain services.
 type Server struct {
 	cfg              *Config
-	loadEnv          bool
-	flagArgs         []string
 	logger           *slog.Logger
 	store            domain.Store
-	storeInit        StoreInitializer
 	authProvider     domain.AuthProvider
-	authRegistry     *auth.Registry
 	llmRegistry      *llm.Registry
 	llmClients       []registeredLLMClient
 	llmProviders     []domain.LLMProvider
-	llmProviderCfgs  []registeredLLMProviderCfg
 	templateRenderer domain.TemplateRenderer
 	provValidator    validator.ProvenanceValidator
 	pdfExtractor     PDFTextExtractor
@@ -231,36 +147,15 @@ func Run(ctx context.Context, opts ...Option) error {
 	return srv.Run(ctx)
 }
 
-// DefaultSQLiteStoreInitializer opens the default SQLite persistence backend with auto-migration and seeding.
-func DefaultSQLiteStoreInitializer(ctx context.Context, cfg *Config, logger *slog.Logger) (domain.Store, error) {
-	store, err := storage.Open(ctx, storage.Config{
-		Driver:        storage.DriverSQLite,
-		DSN:           cfg.DBPath,
-		AutoMigrate:   true,
-		DefaultUserID: cfg.DefaultUserID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if logger != nil {
-		logger.Info("database seeded with default profile, built-in templates, and presets")
-	}
-	return store, nil
-}
-
-// Run initializes all configured or default dependencies, starts the background worker pool,
+// Run initializes all injected and default domain services, starts the background worker pool,
 // serves the HTTP API (and optional MCP routes), and performs a graceful shutdown when ctx is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	if s.cfg == nil {
 		s.cfg = DefaultConfig()
 	}
 
-	if len(s.flagArgs) > 0 {
-		icfg := s.cfg.toInternalConfig()
-		if err := icfg.ParseFlags(s.flagArgs); err != nil {
-			return fmt.Errorf("parsing command line flags: %w", err)
-		}
-		s.cfg = fromInternalConfig(icfg)
+	if s.store == nil {
+		return errors.New("server: a configured domain.Store must be injected via WithStore")
 	}
 
 	logger := s.logger
@@ -271,7 +166,6 @@ func (s *Server) Run(ctx context.Context) error {
 	logger.Info("starting resumeee server",
 		"port", s.cfg.Port,
 		"env", s.cfg.Environment,
-		"db_path", s.cfg.DBPath,
 		"default_user_id", s.cfg.DefaultUserID,
 		"worker_concurrency", s.cfg.WorkerConcurrency,
 		"worker_queue_size", s.cfg.WorkerQueueSize,
@@ -286,18 +180,7 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 
-	store, closeStore, err := s.resolveStore(ctx, logger)
-	if err != nil {
-		return fmt.Errorf("initializing store: %w", err)
-	}
-	if closeStore {
-		defer func() {
-			if err := store.Close(); err != nil {
-				logger.Warn("failed to close store", "err", err)
-			}
-		}()
-	}
-
+	store := s.store
 	branchRepo := store.Branch()
 	if err := branchRepo.FailInterruptedVersions(ctx, "server restarted while generation job was in flight"); err != nil {
 		logger.Warn("failed to clean up interrupted versions on boot", "err", err)
@@ -404,7 +287,6 @@ func (s *Server) Run(ctx context.Context) error {
 		Admin:             s.cfg.Admin,
 		AuthProvider:      authProvider,
 		TokenVerifier:     authProvider,
-		FirebaseProjectID: s.cfg.FirebaseProjectID,
 		UserRepo:          store.User(),
 		Store:             store,
 		DailyRequestLimit: s.cfg.LLMDailyRequestLimit,
@@ -476,61 +358,22 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) resolveStore(ctx context.Context, logger *slog.Logger) (domain.Store, bool, error) {
-	if s.store != nil {
-		return s.store, false, nil
-	}
-	initFn := s.storeInit
-	if initFn == nil {
-		initFn = DefaultSQLiteStoreInitializer
-	}
-	st, err := initFn(ctx, s.cfg, logger)
-	if err != nil {
-		return nil, false, err
-	}
-	return st, true, nil
-}
-
 func (s *Server) resolveAuthProvider(logger *slog.Logger) (auth.Provider, error) {
 	if s.authProvider != nil {
-		logger.Info("initialized custom authentication provider", "provider", s.authProvider.Name())
+		logger.Info("initialized authentication provider", "provider", s.authProvider.Name())
 		if ap, ok := s.authProvider.(auth.Provider); ok {
 			return ap, nil
 		}
 		return auth.NewTokenVerifierProvider(s.authProvider.Name(), s.authProvider), nil
 	}
 
-	reg := s.authRegistry
-	if reg == nil {
-		var err error
-		reg, err = auth.NewRegistryFromConfig(auth.Config{
-			DefaultUserID:     s.cfg.DefaultUserID,
-			FirebaseProjectID: s.cfg.FirebaseProjectID,
-			AuthProvider:      s.cfg.AuthProvider,
-			Admin:             s.cfg.Admin,
-		})
-		if err != nil {
-			logger.Error("failed to initialize auth registry", "err", err)
-			return nil, fmt.Errorf("initializing auth registry: %w", err)
-		}
-	}
-
-	prov, err := reg.Default()
-	if err != nil {
-		logger.Error("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
-		return nil, errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
-	}
-
-	switch prov.Name() {
-	case auth.ProviderAdmin:
+	if s.cfg.Admin {
 		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", s.cfg.DefaultUserID)
-	case auth.ProviderFirebase:
-		logger.Info("initialized firebase token verifier", "project_id", s.cfg.FirebaseProjectID)
-	default:
-		logger.Info("initialized authentication provider", "provider", prov.Name())
+		return auth.NewAdminAuthProvider(s.cfg.DefaultUserID), nil
 	}
 
-	return prov, nil
+	logger.Error("multi-tenant mode requires an injected AuthProvider (WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)")
+	return nil, errors.New("multi-tenant mode requires an injected AuthProvider (WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)")
 }
 
 func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
@@ -540,25 +383,14 @@ func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
 			llm.WithLogger(logger),
 			llm.WithDebugPrompts(s.cfg.LLMDebugPrompts, s.cfg.LLMDebugDir),
 		)
-		llm.RegisterClients(reg, llm.ProviderConfig{
-			GeminiAPIKey:    s.cfg.GeminiAPIKey,
-			OpenAIAPIKey:    s.cfg.OpenAIAPIKey,
-			AnthropicAPIKey: s.cfg.AnthropicAPIKey,
-			CompatBaseURL:   s.cfg.OpenAICompatBaseURL,
-			CompatAPIKey:    s.cfg.OpenAICompatAPIKey,
-		}, llm.WithTimeout(s.cfg.LLMTimeout))
-	}
-
-	for _, pcfg := range s.llmProviderCfgs {
-		opts := pcfg.opts
-		if len(opts) == 0 {
-			opts = []llm.Option{llm.WithTimeout(s.cfg.LLMTimeout)}
-		}
-		llm.RegisterClients(reg, pcfg.cfg, opts...)
 	}
 
 	for _, c := range s.llmClients {
-		reg.RegisterClient(c.client, c.opts...)
+		opts := c.opts
+		if len(opts) == 0 {
+			opts = []llm.Option{llm.WithTimeout(s.cfg.LLMTimeout)}
+		}
+		reg.RegisterClient(c.client, opts...)
 	}
 
 	for _, p := range s.llmProviders {

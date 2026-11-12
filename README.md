@@ -19,7 +19,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 ## Programmatic Usage (`server` Package)
 
-External callers can import `github.com/resumeee-app/resumeee-api/server` to customize configuration, storage backends, authentication providers, and LLM transport clients:
+External callers configure storage, authentication, and LLM providers in their respective packages and inject them into `github.com/resumeee-app/resumeee-api/server`:
 
 ```go
 package main
@@ -33,24 +33,44 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/server"
+	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := server.Run(ctx,
-		server.WithEnvConfig(),
-		server.WithFlags(os.Args[1:]...),
+	// 1. Configure storage in resumeee-storage-sql
+	store, err := sql.OpenWithOptions(ctx,
+		sql.WithDriver("sqlite"),
+		sql.WithDBPath("resumeee.db"),
+		sql.WithAutoMigrate(true),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
+
+	// 2. Configure authentication in resumeee-auth-firebase
+	authProvider := auth.NewFirebaseAuthProvider("my-firebase-project")
+
+	// 3. Configure LLM provider(s) in resumeee-core/llm
+	gemini := llm.NewGeminiProvider(
+		os.Getenv("GEMINI_API_KEY"),
+		llm.WithDefaultModel("gemini-2.5-flash"),
+	)
+
+	// 4. Inject configured dependencies into resumeee-api/server
+	err = server.Run(ctx,
+		server.WithStore(store),
+		server.WithAuthProvider(authProvider),
+		server.WithLLMClient(gemini),
 		server.WithPort(8080),
-		server.WithAdminMode(true),
 		server.WithQuotaLimits(100, 2_000_000),
 		server.WithWorkerPoolConfig(4, 200, 3),
 		server.WithTimeouts(30*time.Second, 10*time.Minute),
-		// Inject custom dependencies as needed:
-		// server.WithStore(customStore),
-		// server.WithAuthProvider(customAuthProvider),
-		// server.WithLLMClient(customLLMClient),
 	)
 	if err != nil {
 		log.Fatal(err)

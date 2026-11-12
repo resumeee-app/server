@@ -28,28 +28,6 @@ func WithConfig(cfg *Config) Option {
 	}
 }
 
-// WithEnvConfig loads configuration values from process environment variables and .env file if present.
-func WithEnvConfig() Option {
-	return func(s *Server) error {
-		cfg, err := LoadConfig()
-		if err != nil {
-			return err
-		}
-		s.cfg = cfg
-		s.loadEnv = true
-		return nil
-	}
-}
-
-// WithFlags parses CLI flag arguments (such as -admin-mode, -auth-provider, -debug-llm-prompts, -llm-debug-dir)
-// onto the server configuration before startup.
-func WithFlags(args ...string) Option {
-	return func(s *Server) error {
-		s.flagArgs = append([]string(nil), args...)
-		return nil
-	}
-}
-
 // WithPort overrides the TCP port the HTTP server listens on.
 func WithPort(port int) Option {
 	return func(s *Server) error {
@@ -57,17 +35,6 @@ func WithPort(port int) Option {
 			return fmt.Errorf("server: invalid port %d: must be between 1 and 65535", port)
 		}
 		s.cfg.Port = port
-		return nil
-	}
-}
-
-// WithDBPath overrides the default SQLite database file path.
-func WithDBPath(dbPath string) Option {
-	return func(s *Server) error {
-		if strings.TrimSpace(dbPath) == "" {
-			return errors.New("server: dbPath cannot be empty")
-		}
-		s.cfg.DBPath = strings.TrimSpace(dbPath)
 		return nil
 	}
 }
@@ -87,25 +54,6 @@ func WithDefaultUserID(userID string) Option {
 			return errors.New("server: defaultUserID cannot be empty")
 		}
 		s.cfg.DefaultUserID = strings.TrimSpace(userID)
-		return nil
-	}
-}
-
-// WithFirebaseProjectID sets the Firebase project ID for multi-tenant JWT verification.
-func WithFirebaseProjectID(projectID string) Option {
-	return func(s *Server) error {
-		s.cfg.FirebaseProjectID = strings.TrimSpace(projectID)
-		if s.cfg.FirebaseAuthDomain == "" && s.cfg.FirebaseProjectID != "" {
-			s.cfg.FirebaseAuthDomain = s.cfg.FirebaseProjectID + ".firebaseapp.com"
-		}
-		return nil
-	}
-}
-
-// WithAuthProviderName sets the active authentication provider name (e.g. "admin", "firebase").
-func WithAuthProviderName(name string) Option {
-	return func(s *Server) error {
-		s.cfg.AuthProvider = strings.TrimSpace(name)
 		return nil
 	}
 }
@@ -197,8 +145,7 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithStore injects a pre-initialized domain.Store implementation (such as an in-memory, SQLite, or PostgreSQL store).
-// Stores provided via WithStore are managed by the caller and are not closed automatically by Server.Run.
+// WithStore injects a configured domain.Store implementation (e.g., from resumeee-storage-sql or resumeee-core/memory).
 func WithStore(store domain.Store) Option {
 	return func(s *Server) error {
 		if store == nil {
@@ -209,19 +156,7 @@ func WithStore(store domain.Store) Option {
 	}
 }
 
-// WithStoreInitializer injects a custom StoreInitializer factory executed during Server.Run startup.
-// Stores created via WithStoreInitializer are automatically closed when Server.Run shuts down.
-func WithStoreInitializer(initFn StoreInitializer) Option {
-	return func(s *Server) error {
-		if initFn == nil {
-			return errors.New("server: StoreInitializer cannot be nil")
-		}
-		s.storeInit = initFn
-		return nil
-	}
-}
-
-// WithAuthProvider injects a custom domain.AuthProvider implementation for request authentication.
+// WithAuthProvider injects a configured domain.AuthProvider implementation (e.g., from resumeee-auth-firebase).
 func WithAuthProvider(provider domain.AuthProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
@@ -232,7 +167,7 @@ func WithAuthProvider(provider domain.AuthProvider) Option {
 	}
 }
 
-// WithTokenVerifier injects a custom domain.TokenVerifier wrapped as an AuthProvider with the given name.
+// WithTokenVerifier injects a configured domain.TokenVerifier wrapped as an AuthProvider with the given name.
 func WithTokenVerifier(name string, verifier domain.TokenVerifier) Option {
 	return func(s *Server) error {
 		if verifier == nil {
@@ -243,18 +178,7 @@ func WithTokenVerifier(name string, verifier domain.TokenVerifier) Option {
 	}
 }
 
-// WithAuthRegistry injects a pre-configured authentication Registry.
-func WithAuthRegistry(reg *auth.Registry) Option {
-	return func(s *Server) error {
-		if reg == nil {
-			return errors.New("server: AuthRegistry cannot be nil")
-		}
-		s.authRegistry = reg
-		return nil
-	}
-}
-
-// WithLLMRegistry injects a pre-configured llm.Registry, replacing default environment-based LLM provider registration.
+// WithLLMRegistry injects a pre-configured llm.Registry.
 func WithLLMRegistry(reg *llm.Registry) Option {
 	return func(s *Server) error {
 		if reg == nil {
@@ -265,8 +189,7 @@ func WithLLMRegistry(reg *llm.Registry) Option {
 	}
 }
 
-// WithLLMClient registers an additional pure-transport domain.LLMClient (wrapped via llm.NewClientProvider)
-// into the server's LLM registry.
+// WithLLMClient registers a configured domain.LLMClient (wrapped via llm.NewClientProvider) into the server's LLM registry.
 func WithLLMClient(client domain.LLMClient, opts ...llm.Option) Option {
 	return func(s *Server) error {
 		if client == nil {
@@ -280,24 +203,13 @@ func WithLLMClient(client domain.LLMClient, opts ...llm.Option) Option {
 	}
 }
 
-// WithLLMProvider registers a custom domain.LLMProvider implementation into the server's LLM registry.
+// WithLLMProvider registers a configured domain.LLMProvider implementation into the server's LLM registry.
 func WithLLMProvider(provider domain.LLMProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: LLMProvider cannot be nil")
 		}
 		s.llmProviders = append(s.llmProviders, provider)
-		return nil
-	}
-}
-
-// WithLLMProviderConfig registers built-in LLM transport providers from an explicit llm.ProviderConfig.
-func WithLLMProviderConfig(cfg llm.ProviderConfig, opts ...llm.Option) Option {
-	return func(s *Server) error {
-		s.llmProviderCfgs = append(s.llmProviderCfgs, registeredLLMProviderCfg{
-			cfg:  cfg,
-			opts: opts,
-		})
 		return nil
 	}
 }

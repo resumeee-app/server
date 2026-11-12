@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +115,7 @@ func (m *mockPDFExtractor) ExtractText(_ context.Context, _ io.ReaderAt, _ int64
 	return m.extracted, nil
 }
 
-func TestServer_RunWithCustomDependenciesAndOptions(t *testing.T) {
+func TestServer_RunWithInjectedDependencies(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -282,35 +281,24 @@ func TestServer_WithCustomAuthProvider(t *testing.T) {
 	}
 }
 
-func TestServer_WithStoreInitializerAndEnvFlags(t *testing.T) {
+func TestServer_WithDomainServicesAndMCPToggle(t *testing.T) {
 	tmpDir := t.TempDir()
 	debugDir := filepath.Join(tmpDir, "llm-debug")
 	port := freePort(t)
-
-	t.Setenv("PORT", strconv.Itoa(port))
-	t.Setenv("ADMIN_MODE", "false")
 
 	memStore, err := memory.NewSeeded(context.Background())
 	if err != nil {
 		t.Fatalf("failed to create memory store: %v", err)
 	}
 
-	var initializerCalled bool
-	storeInit := func(_ context.Context, cfg *Config, _ *slog.Logger) (domain.Store, error) {
-		initializerCalled = true
-		if cfg.Port != port {
-			return nil, fmt.Errorf("expected port %d in initializer, got %d", port, cfg.Port)
-		}
-		return memStore, nil
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- Run(ctx,
-			WithEnvConfig(),
-			WithFlags("-admin-mode", "-debug-llm-prompts", "-llm-debug-dir", debugDir),
-			WithStoreInitializer(storeInit),
+			WithPort(port),
+			WithAdminMode(true),
+			WithLLMDebug(true, debugDir),
+			WithStore(memStore),
 			WithMCPEnabled(false),
 			WithTemplateRenderer(renderer.NewTemplateRenderer()),
 			WithValidator(validator.New()),
@@ -323,11 +311,7 @@ func TestServer_WithStoreInitializerAndEnvFlags(t *testing.T) {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitForHealthy(t, baseURL)
 
-	if !initializerCalled {
-		t.Error("expected custom StoreInitializer to be called")
-	}
-
-	// Verify LLM debug directory was created by flag override
+	// Verify LLM debug directory was created
 	if info, err := os.Stat(debugDir); err != nil || !info.IsDir() {
 		t.Errorf("expected debug dir %s to exist, err=%v", debugDir, err)
 	}
@@ -355,6 +339,30 @@ func TestServer_WithStoreInitializerAndEnvFlags(t *testing.T) {
 	}
 }
 
+func TestServer_RequiresInjectedStoreAndAuth(t *testing.T) {
+	t.Run("missing store returns error", func(t *testing.T) {
+		err := Run(context.Background(), WithAdminMode(true))
+		if err == nil || !strings.Contains(err.Error(), "WithStore") {
+			t.Fatalf("expected error requiring WithStore, got: %v", err)
+		}
+	})
+
+	t.Run("missing auth provider when not in admin mode returns error", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(context.Background())
+		if err != nil {
+			t.Fatalf("failed to create memory store: %v", err)
+		}
+		err = Run(context.Background(),
+			WithStore(memStore),
+			WithAdminMode(false),
+			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		)
+		if err == nil || !strings.Contains(err.Error(), "WithAuthProvider") {
+			t.Fatalf("expected error requiring WithAuthProvider or WithAdminMode(true), got: %v", err)
+		}
+	})
+}
+
 func TestServer_OptionValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -363,7 +371,6 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"nil Config", WithConfig(nil)},
 		{"invalid port 0", WithPort(0)},
 		{"invalid port 70000", WithPort(70000)},
-		{"empty DBPath", WithDBPath("   ")},
 		{"empty DefaultUserID", WithDefaultUserID("")},
 		{"invalid daily quota", WithQuotaLimits(0, 100)},
 		{"invalid monthly quota", WithQuotaLimits(10, 0)},
@@ -373,9 +380,8 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"invalid restTimeout", WithTimeouts(0, time.Minute)},
 		{"invalid llmTimeout", WithTimeouts(time.Second, 0)},
 		{"nil Store", WithStore(nil)},
-		{"nil StoreInitializer", WithStoreInitializer(nil)},
 		{"nil AuthProvider", WithAuthProvider(nil)},
-		{"nil AuthRegistry", WithAuthRegistry(nil)},
+		{"nil TokenVerifier", WithTokenVerifier("custom", nil)},
 		{"nil LLMRegistry", WithLLMRegistry(nil)},
 		{"nil LLMClient", WithLLMClient(nil)},
 		{"nil LLMProvider", WithLLMProvider(nil)},
