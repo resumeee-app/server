@@ -1,0 +1,11 @@
+.git
+.worktrees
+.agents
+.gemini
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+coverage.out
+.env

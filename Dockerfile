@@ -7,14 +7,42 @@ FROM golang:1.27-alpine AS builder
 # Install build prerequisites
 RUN apk add --no-cache git ca-certificates tzdata
 
-WORKDIR /src
+WORKDIR /workspace
 
-# Leverage layer caching for Go modules
-COPY go.mod go.sum ./
-RUN go mod download && go mod verify
+# Copy Go module manifests from all local workspace modules for layer caching
+COPY --from=resumeee-core go.mod go.sum ./resumeee-core/
+COPY --from=resumeee-storage-sql go.mod go.sum ./resumeee-storage-sql/
+COPY --from=resumeee-auth-firebase go.mod go.sum ./resumeee-auth-firebase/
+COPY go.mod go.sum ./resumeee-api/
 
-# Copy application source tree
-COPY . .
+# Point inter-module dependencies to local workspace paths before downloading public modules
+RUN go -C ./resumeee-storage-sql mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+    go -C ./resumeee-auth-firebase mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+    go -C ./resumeee-api mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core \
+        -replace github.com/resumeee-app/resumeee-storage-sql=../resumeee-storage-sql \
+        -replace github.com/resumeee-app/resumeee-auth-firebase=../resumeee-auth-firebase && \
+    go -C ./resumeee-api mod download
+
+# Copy application and module source trees
+COPY --from=resumeee-core . ./resumeee-core/
+COPY --from=resumeee-storage-sql . ./resumeee-storage-sql/
+COPY --from=resumeee-auth-firebase . ./resumeee-auth-firebase/
+COPY . ./resumeee-api/
+
+# Re-apply local module replacements over copied go.mod files
+RUN go -C ./resumeee-storage-sql mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+    go -C ./resumeee-auth-firebase mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+    go -C ./resumeee-api mod edit \
+        -replace github.com/resumeee-app/resumeee-core=../resumeee-core \
+        -replace github.com/resumeee-app/resumeee-storage-sql=../resumeee-storage-sql \
+        -replace github.com/resumeee-app/resumeee-auth-firebase=../resumeee-auth-firebase
+
+WORKDIR /workspace/resumeee-api
 
 # Build fully static pure-Go binaries (CGO_ENABLED=0)
 # -trimpath strips host paths from stack traces
