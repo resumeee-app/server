@@ -91,9 +91,6 @@ func (c *Config) toInternalConfig() *config.Config {
 	}
 }
 
-// PDFTextExtractor abstracts extracting textual content from PDF binary streams.
-type PDFTextExtractor = domain.PDFTextExtractor
-
 type registeredLLMClient struct {
 	client domain.LLMClient
 	opts   []llm.Option
@@ -110,7 +107,7 @@ type Server struct {
 	llmProviders     []domain.LLMProvider
 	templateRenderer domain.TemplateRenderer
 	provValidator    validator.ProvenanceValidator
-	pdfExtractor     PDFTextExtractor
+	pdfExtractor     domain.PDFTextExtractor
 	resumeExtractor  llm.ResumeExtractor
 	promptCompiler   domain.PromptCompiler
 	mcpEnabled       bool

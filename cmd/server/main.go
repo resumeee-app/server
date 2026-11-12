@@ -18,6 +18,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	coreauth "github.com/resumeee-app/resumeee-core/auth"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core/llm"
@@ -168,9 +169,9 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		return errors.New("multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode")
 	}
 
-	if authProvider.Name() == auth.ProviderAdmin {
+	if authProvider.Name() == coreauth.ProviderAdmin {
 		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", cfg.DefaultUserID)
-	} else if authProvider.Name() == auth.ProviderFirebase {
+	} else if authProvider.Name() == coreauth.ProviderFirebase {
 		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
 	} else {
 		logger.Info("initialized authentication provider", "provider", authProvider.Name())

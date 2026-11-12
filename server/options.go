@@ -236,8 +236,8 @@ func WithValidator(v validator.ProvenanceValidator) Option {
 	}
 }
 
-// WithPDFExtractor injects a custom PDFTextExtractor implementation.
-func WithPDFExtractor(extractor PDFTextExtractor) Option {
+// WithPDFExtractor injects a custom domain.PDFTextExtractor implementation.
+func WithPDFExtractor(extractor domain.PDFTextExtractor) Option {
 	return func(s *Server) error {
 		if extractor == nil {
 			return errors.New("server: PDFTextExtractor cannot be nil")

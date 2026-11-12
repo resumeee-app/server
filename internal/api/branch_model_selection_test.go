@@ -33,11 +33,11 @@ func (m *mockVerifierForBranchModel) VerifyIDToken(ctx context.Context, token st
 	return nil, domain.ErrUnauthorized
 }
 
-func setupBranchModelTestServer(t *testing.T, enumerator api.ModelEnumerator) (*httptest.Server, *domain.Branch) {
+func setupBranchModelTestServer(t *testing.T, enumerator domain.ModelEnumerator) (*httptest.Server, *domain.Branch) {
 	return setupBranchModelTestServerWithAdmin(t, enumerator, true)
 }
 
-func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator api.ModelEnumerator, admin bool) (*httptest.Server, *domain.Branch) {
+func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator domain.ModelEnumerator, admin bool) (*httptest.Server, *domain.Branch) {
 	t.Helper()
 
 	ctx := context.Background()

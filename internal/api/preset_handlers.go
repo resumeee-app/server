@@ -53,7 +53,7 @@ func validateReasoningLevel(level string) error {
 
 // validateModelOverride verifies that the specified model override and optional provider override
 // correspond to an available LLM model option registered in the enumerator catalog.
-func validateModelOverride(enumerator ModelEnumerator, providerOverride, modelOverride string) error {
+func validateModelOverride(enumerator domain.ModelEnumerator, providerOverride, modelOverride string) error {
 	return domain.ValidateModelOverride(enumerator, providerOverride, modelOverride)
 }
 

@@ -99,9 +99,6 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan worker.PDFParseJobTask {
 	return e.queue.Channel()
 }
 
-// ModelEnumerator defines the interface for enumerating available configured LLM models.
-type ModelEnumerator = domain.ModelEnumerator
-
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
 	ProfileRepo     domain.ProfileRepository
@@ -119,7 +116,7 @@ type RouterConfig struct {
 	Validator       validator.ProvenanceValidator
 	JobEnqueuer     JobEnqueuer
 	PromptCompiler  domain.PromptCompiler
-	ModelEnumerator ModelEnumerator
+	ModelEnumerator domain.ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
 	AuthProvider      auth.Provider
@@ -198,7 +195,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
 	}
 	if cfg.ModelEnumerator == nil {
-		if me, ok := cfg.ResumeExtractor.(ModelEnumerator); ok {
+		if me, ok := cfg.ResumeExtractor.(domain.ModelEnumerator); ok {
 			cfg.ModelEnumerator = me
 		}
 	}
