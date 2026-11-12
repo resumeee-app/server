@@ -7,10 +7,10 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/services/branch"
 	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 // contextKey defines a private string type used for context value keys in the mcp package.
@@ -39,9 +39,9 @@ type ServerConfig struct {
 	// UserRepo provides persistence access for multi-tenant user accounts.
 	UserRepo core.UserRepository
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
-	ResumeExtractor worker.ResumeExtractor
+	ResumeExtractor llm.ResumeExtractor
 	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
-	JobEnqueuer worker.JobEnqueuer
+	JobEnqueuer core.JobEnqueuer
 	// DefaultUserID specifies the fallback user identifier when no auth header or token is provided.
 	DefaultUserID string
 	// Admin indicates local single-user mode bypassing external token verification.

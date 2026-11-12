@@ -16,7 +16,6 @@ import (
 
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/services/worker"
 )
 
 type profileHandler struct {
@@ -667,7 +666,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	task := worker.PDFParseJobTask{
+	task := core.PDFParseJobTask{
 		JobID:         jobID,
 		UserID:        userID,
 		RawText:       text,
