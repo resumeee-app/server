@@ -13,7 +13,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 // StripScriptTags removes HTML script tags (both paired blocks and standalone unclosed tags) from rendered HTML.
@@ -266,9 +266,9 @@ func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		var snapshot *core.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
-			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
-		} else if cfg.ProfileRepo != nil {
-			snapshot, err = cfg.ProfileRepo.GetSnapshot(ctx, userID)
+			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
+		} else if cfg.ProfileStore != nil {
+			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
 			return mcpSDK.NewToolResultError("profile service and repository unavailable"), nil
 		}
@@ -296,7 +296,7 @@ func handleListBranches(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		branches, err := cfg.BranchRepo.ListBranches(ctx, userID)
+		branches, err := cfg.BranchStore.ListBranches(ctx, userID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to list branches", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to list branches due to an internal repository error"), nil
@@ -339,7 +339,7 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("format must be 'html', 'markdown', or 'text'"), nil
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, branchID)
 		if err != nil || branch == nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", branchID)), nil
 		}
@@ -359,13 +359,13 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		var ver *core.BranchVersion
 		if versionNum > 0 {
-			v, vErr := cfg.BranchRepo.GetVersionByNumber(ctx, branchID, versionNum)
+			v, vErr := cfg.BranchStore.VersionByNumber(ctx, branchID, versionNum)
 			if vErr != nil || v == nil {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("version number %d not found for branch %q", versionNum, branchID)), nil
 			}
 			ver = v
 		} else if branch.ActiveVersionID != nil && *branch.ActiveVersionID != "" {
-			v, vErr := cfg.BranchRepo.GetVersion(ctx, branchID, *branch.ActiveVersionID)
+			v, vErr := cfg.BranchStore.Version(ctx, branchID, *branch.ActiveVersionID)
 			if vErr == nil && v != nil {
 				ver = v
 			}
@@ -389,13 +389,13 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			templateSetID = "builtin-standard-clean"
 		}
 
-		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
+		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
 		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
 		var output string
-		prof, _ := cfg.ProfileRepo.GetProfile(ctx, userID)
+		prof, _ := cfg.ProfileStore.Profile(ctx, userID)
 		if cfg.TemplateRenderer != nil && prof != nil && ver.TailoredContent != nil {
 			rendered, rErr := cfg.TemplateRenderer.Render(ctx, tmpl, prof, ver.TailoredContent)
 			if rErr == nil && rendered != nil {
@@ -476,7 +476,7 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			DutiesSummary: summary,
 		}
 
-		if err := cfg.ProfileRepo.CreateExperience(ctx, exp); err != nil {
+		if err := cfg.CareerStore.CreateExperience(ctx, exp); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create experience", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to create work experience due to an internal repository error"), nil
 		}
@@ -520,13 +520,13 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		var exists bool
 		switch ownerType {
 		case core.OwnerTypeWorkExperience:
-			exp, err := cfg.ProfileRepo.GetExperience(ctx, userID, ownerID)
+			exp, err := cfg.CareerStore.Experience(ctx, userID, ownerID)
 			exists = err == nil && exp != nil && exp.UserID == userID
 		case core.OwnerTypeProject:
-			proj, err := cfg.ProfileRepo.GetProject(ctx, userID, ownerID)
+			proj, err := cfg.CareerStore.Project(ctx, userID, ownerID)
 			exists = err == nil && proj != nil && proj.UserID == userID
 		case core.OwnerTypeEducation:
-			edu, err := cfg.ProfileRepo.GetEducation(ctx, userID, ownerID)
+			edu, err := cfg.CareerStore.Education(ctx, userID, ownerID)
 			exists = err == nil && edu != nil && edu.UserID == userID
 		}
 
@@ -542,7 +542,7 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			Statement: statement,
 		}
 
-		if err := cfg.ProfileRepo.CreateFact(ctx, fact); err != nil {
+		if err := cfg.CareerStore.CreateFact(ctx, fact); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create achievement fact", "user_id", userID, "owner_id", ownerID, "err", err)
 			return mcpSDK.NewToolResultError("failed to create achievement fact due to an internal repository error"), nil
 		}
@@ -595,9 +595,9 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		// Verify multi-tenant access to tailoring_strategy_id if provided
 		var stratPtr *string
 		if strategyID != "" {
-			preset, err := cfg.PresetRepo.GetPreset(ctx, userID, strategyID)
+			preset, err := cfg.PresetStore.Preset(ctx, userID, strategyID)
 			if err != nil && (strings.HasPrefix(strategyID, "builtin-") || cfg.DefaultUserID != "") {
-				if p, pErr := cfg.PresetRepo.GetPreset(ctx, cfg.DefaultUserID, strategyID); pErr == nil && p != nil {
+				if p, pErr := cfg.PresetStore.Preset(ctx, cfg.DefaultUserID, strategyID); pErr == nil && p != nil {
 					preset = p
 					err = nil
 				}
@@ -612,7 +612,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if templateSetID == "" {
 			templateSetID = "builtin-standard-clean"
 		}
-		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
+		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
 		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
@@ -671,7 +671,7 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, branchID)
 		if err != nil || branch == nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", branchID)), nil
 		}
@@ -707,9 +707,9 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if strat, ok := args["tailoring_strategy_id"].(string); ok {
 			strat = strings.TrimSpace(strat)
 			if strat != "" {
-				preset, err := cfg.PresetRepo.GetPreset(ctx, userID, strat)
+				preset, err := cfg.PresetStore.Preset(ctx, userID, strat)
 				if err != nil && (strings.HasPrefix(strat, "builtin-") || cfg.DefaultUserID != "") {
-					if p, pErr := cfg.PresetRepo.GetPreset(ctx, cfg.DefaultUserID, strat); pErr == nil && p != nil {
+					if p, pErr := cfg.PresetStore.Preset(ctx, cfg.DefaultUserID, strat); pErr == nil && p != nil {
 						preset = p
 						err = nil
 					}
@@ -727,7 +727,7 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if tmplID, ok := args["template_set_id"].(string); ok {
 			tmplID = strings.TrimSpace(tmplID)
 			if tmplID != "" {
-				tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, tmplID)
+				tmpl, err := cfg.TemplateStore.Template(ctx, userID, tmplID)
 				if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", tmplID)), nil
 				}
@@ -786,7 +786,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("branch_id and job_description are required"), nil
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, branchID)
 		if err != nil || branch == nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", branchID)), nil
 		}
@@ -817,7 +817,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			branch.ReasoningLevel = rLvl
 		}
 
-		if err := cfg.BranchRepo.UpdateBranch(ctx, branch); err != nil {
+		if err := cfg.BranchStore.UpdateBranch(ctx, branch); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update branch with fenced requirements", "branch_id", branchID, "err", err)
 			return mcpSDK.NewToolResultError("failed to update branch requirements"), nil
 		}
@@ -866,7 +866,7 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		targetBranchID := branchID
 		if targetBranchID == "" {
-			branches, err := cfg.BranchRepo.ListBranches(ctx, userID)
+			branches, err := cfg.BranchStore.ListBranches(ctx, userID)
 			if err == nil {
 				for _, b := range branches {
 					if b.IsDefault {
@@ -884,14 +884,14 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("no target branch available for gap analysis; please create a branch first"), nil
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, targetBranchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, targetBranchID)
 		if err != nil || branch == nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", targetBranchID)), nil
 		}
 
 		// Apply XML boundary fencing
 		branch.TargetRequirements = sanitizeXMLFence(jobDescription, "target_job_description")
-		_ = cfg.BranchRepo.UpdateBranch(ctx, branch)
+		_ = cfg.BranchStore.UpdateBranch(ctx, branch)
 
 		report, err := cfg.BranchService.AnalyzeGaps(ctx, userID, targetBranchID)
 		if err != nil {
@@ -952,11 +952,11 @@ func handleListPresets(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetRepo == nil {
+		if cfg.PresetStore == nil {
 			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
 		}
 
-		presets, err := cfg.PresetRepo.ListPresets(ctx, userID)
+		presets, err := cfg.PresetStore.ListPresets(ctx, userID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to list presets", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to list presets due to an internal repository error"), nil
@@ -990,7 +990,7 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetRepo == nil {
+		if cfg.PresetStore == nil {
 			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
 		}
 
@@ -1001,7 +1001,7 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
 		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
@@ -1019,7 +1019,7 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetRepo == nil {
+		if cfg.PresetStore == nil {
 			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
 		}
 
@@ -1039,8 +1039,8 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		templateSetID = strings.TrimSpace(templateSetID)
 
-		if templateSetID != "" && cfg.TemplateRepo != nil {
-			tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateSetID)
+		if templateSetID != "" && cfg.TemplateStore != nil {
+			tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
 			if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
 			}
@@ -1068,7 +1068,7 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			Language:           validatedLang,
 		}
 
-		if err := cfg.PresetRepo.CreatePreset(ctx, &preset); err != nil {
+		if err := cfg.PresetStore.CreatePreset(ctx, &preset); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create preset", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to create preset due to an internal repository error"), nil
 		}
@@ -1086,7 +1086,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetRepo == nil {
+		if cfg.PresetStore == nil {
 			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
 		}
 
@@ -1097,7 +1097,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
 		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
@@ -1122,8 +1122,8 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			rawTemplateID = strings.TrimSpace(themeID)
 		}
 		if rawTemplateID != "" {
-			if cfg.TemplateRepo != nil {
-				tmpl, tErr := cfg.TemplateRepo.GetTemplate(ctx, userID, rawTemplateID)
+			if cfg.TemplateStore != nil {
+				tmpl, tErr := cfg.TemplateStore.Template(ctx, userID, rawTemplateID)
 				if tErr != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)), nil
 				}
@@ -1139,7 +1139,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			preset.Language = validatedLang
 		}
 
-		if err := cfg.PresetRepo.UpdatePreset(ctx, preset); err != nil {
+		if err := cfg.PresetStore.UpdatePreset(ctx, preset); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update preset", "preset_id", presetID, "err", err)
 			return mcpSDK.NewToolResultError("failed to update preset due to an internal repository error"), nil
 		}
@@ -1167,7 +1167,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileRepo == nil {
+		if cfg.ProfileStore == nil {
 			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
 		}
 
@@ -1179,9 +1179,9 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		var err error
 		switch skillType {
 		case "global":
-			skills, err = cfg.ProfileRepo.ListGlobalSkills(ctx)
+			skills, err = cfg.CareerStore.ListGlobalSkills(ctx)
 		case "custom":
-			all, lErr := cfg.ProfileRepo.ListSkills(ctx, userID)
+			all, lErr := cfg.CareerStore.ListSkills(ctx, userID)
 			if lErr == nil {
 				skills = make([]core.Skill, 0, len(all))
 				for _, s := range all {
@@ -1192,7 +1192,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			}
 			err = lErr
 		default:
-			skills, err = cfg.ProfileRepo.ListSkills(ctx, userID)
+			skills, err = cfg.CareerStore.ListSkills(ctx, userID)
 		}
 
 		if err != nil {
@@ -1272,7 +1272,7 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileRepo == nil {
+		if cfg.ProfileStore == nil {
 			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
 		}
 
@@ -1307,7 +1307,7 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			Keywords:        keywords,
 		}
 
-		if err := cfg.ProfileRepo.CreateSkill(ctx, &skill); err != nil {
+		if err := cfg.CareerStore.CreateSkill(ctx, &skill); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create skill", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to create skill due to an internal repository error"), nil
 		}
@@ -1325,7 +1325,7 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileRepo == nil {
+		if cfg.ProfileStore == nil {
 			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
 		}
 
@@ -1336,7 +1336,7 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		skill, err := cfg.ProfileRepo.GetSkill(ctx, userID, id)
+		skill, err := cfg.CareerStore.Skill(ctx, userID, id)
 		if err != nil || skill == nil || skill.UserID != userID {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("skill with ID %q not found or access denied", id)), nil
 		}
@@ -1357,7 +1357,7 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			skill.Keywords = kw
 		}
 
-		if err := cfg.ProfileRepo.UpdateSkill(ctx, skill); err != nil {
+		if err := cfg.CareerStore.UpdateSkill(ctx, skill); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update skill", "id", id, "err", err)
 			return mcpSDK.NewToolResultError("failed to update skill due to an internal repository error"), nil
 		}

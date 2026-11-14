@@ -19,6 +19,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -26,12 +27,14 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/renderer"
 	"github.com/resumeee-app/resumeee-core/seed"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // ChannelQueue provides a generic bounded channel-backed queue for asynchronous task dispatch.
@@ -108,30 +111,42 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan core.PDFParseJobTask {
 	return e.queue.Channel()
 }
 
+// PDFTextExtractor defines the narrow PDF text extraction contract required by upload handlers.
+type PDFTextExtractor interface {
+	ExtractText(ctx context.Context, r io.ReaderAt, size int64) (string, error)
+}
+
+// TemplateRenderer defines the template validation and rendering contract required by API handlers.
+type TemplateRenderer interface {
+	renderer.TemplateRenderer
+	Validate(tmpl *core.TemplateSet) error
+}
+
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileRepo       core.ProfileRepository
-	PresetRepo        core.PresetRepository
-	TemplateRepo      core.TemplateRepository
-	BranchRepo        core.BranchRepository
-	PDFJobRepo        core.PDFParseJobRepository
+	ProfileStore      core.ProfileStore
+	CareerStore       core.CareerStore
+	PresetStore       core.PresetStore
+	TemplateStore     core.TemplateStore
+	BranchStore       core.BranchStore
+	PDFJobStore       core.PDFJobStore
 	PDFJobEnqueuer    core.PDFJobEnqueuer
-	QuotaRepo         core.QuotaRepository
-	BranchService     branch.Service
-	ProfileService    profile.Service
-	PDFExtractor      core.PDFTextExtractor
-	ResumeExtractor   core.ResumeExtractor
-	Renderer          core.TemplateRenderer
-	Validator         core.ProvenanceValidator
-	JobEnqueuer       core.JobEnqueuer
-	PromptCompiler    core.PromptCompiler
+	QuotaStore        core.QuotaStore
+	BranchService     *branch.Service
+	ProfileService    *profile.Service
+	PDFExtractor      PDFTextExtractor
+	ResumeExtractor   worker.ResumeExtractor
+	Renderer          TemplateRenderer
+	Validator         branch.ProvenanceValidator
+	JobEnqueuer       branch.JobEnqueuer
+	PromptCompiler    branch.PromptCompiler
 	ModelEnumerator   core.ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
 	AuthProvider      auth.Provider
 	TokenVerifier     core.TokenVerifier
 	FirebaseProjectID string
-	UserRepo          core.UserRepository
+	UserStore         core.UserStore
 	Store             core.Store
 	Provisioner       TenantProvisioner
 	Logger            *slog.Logger
@@ -142,12 +157,12 @@ type RouterConfig struct {
 }
 
 type defaultTenantProvisioner struct {
-	store        core.Store
-	profileRepo  core.ProfileRepository
-	branchRepo   core.BranchRepository
-	templateRepo core.TemplateRepository
-	userRepo     core.UserRepository
-	provisioned  sync.Map
+	store         core.Store
+	profileStore  core.ProfileStore
+	branchStore   core.BranchStore
+	templateStore core.TemplateStore
+	userStore     core.UserStore
+	provisioned   sync.Map
 }
 
 func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error {
@@ -157,8 +172,8 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	var err error
 	if p.store != nil {
 		err = seed.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
-	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = seed.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+	} else if p.profileStore != nil && p.branchStore != nil && p.templateStore != nil {
+		err = seed.EnsureTenantProvisionedStores(ctx, p.profileStore, p.branchStore, p.templateStore, p.userStore, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)
@@ -194,14 +209,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.MonthlyTokenLimit <= 0 {
 		cfg.MonthlyTokenLimit = 1000000
 	}
-	if cfg.PDFJobRepo == nil {
-		cfg.PDFJobRepo = memory.New()
+	if cfg.PDFJobStore == nil {
+		cfg.PDFJobStore = memory.New()
 	}
 	if cfg.PDFExtractor == nil {
 		cfg.PDFExtractor = pdf.NewExtractor()
 	}
 	if cfg.ResumeExtractor == nil {
-		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
+		cfg.ResumeExtractor = llm.NewRegistryExtractor(nil)
 	}
 	if cfg.ModelEnumerator == nil {
 		if me, ok := cfg.ResumeExtractor.(core.ModelEnumerator); ok {
@@ -213,13 +228,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cfg.PromptCompiler = llm.NewPromptCompiler()
 	}
 
-	if cfg.BranchService == nil && cfg.BranchRepo != nil {
-		cfg.BranchService = branch.NewService(branch.Config{
-			BranchRepo:        cfg.BranchRepo,
-			ProfileRepo:       cfg.ProfileRepo,
-			PresetRepo:        cfg.PresetRepo,
-			TemplateRepo:      cfg.TemplateRepo,
-			QuotaRepo:         cfg.QuotaRepo,
+	if cfg.BranchService == nil && cfg.BranchStore != nil {
+		cfg.BranchService = branch.New(branch.Config{
+			Branches:          cfg.BranchStore,
+			Profiles:          cfg.ProfileStore,
+			Presets:           cfg.PresetStore,
+			Templates:         cfg.TemplateStore,
+			Quotas:            cfg.QuotaStore,
 			JobEnqueuer:       cfg.JobEnqueuer,
 			Validator:         cfg.Validator,
 			Renderer:          cfg.Renderer,
@@ -241,13 +256,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerQuotaRoutes(mux, cfg)
 
 	provisioner := cfg.Provisioner
-	if provisioner == nil && (cfg.Store != nil || cfg.ProfileRepo != nil) {
+	if provisioner == nil && (cfg.Store != nil || cfg.ProfileStore != nil) {
 		provisioner = &defaultTenantProvisioner{
-			store:        cfg.Store,
-			profileRepo:  cfg.ProfileRepo,
-			branchRepo:   cfg.BranchRepo,
-			templateRepo: cfg.TemplateRepo,
-			userRepo:     cfg.UserRepo,
+			store:         cfg.Store,
+			profileStore:  cfg.ProfileStore,
+			branchStore:   cfg.BranchStore,
+			templateStore: cfg.TemplateStore,
+			userStore:     cfg.UserStore,
 		}
 	}
 

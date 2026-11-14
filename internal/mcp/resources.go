@@ -105,9 +105,9 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 		var snapshot *core.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
-			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
-		} else if cfg.ProfileRepo != nil {
-			snapshot, err = cfg.ProfileRepo.GetSnapshot(ctx, userID)
+			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
+		} else if cfg.ProfileStore != nil {
+			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
 			return nil, errors.New("profile service and repository unavailable")
 		}
@@ -160,7 +160,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid branch URI: missing branch ID")
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, branchID)
 		if err != nil || branch == nil {
 			cfg.Logger.WarnContext(ctx, "branch resource not found or access denied", "branch_id", branchID, "user_id", userID)
 			return nil, errors.New("branch not found or access denied")
@@ -168,7 +168,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 
 		var activeVer any
 		if branch.ActiveVersionID != nil && *branch.ActiveVersionID != "" {
-			if v, vErr := cfg.BranchRepo.GetVersion(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
+			if v, vErr := cfg.BranchStore.Version(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
 				activeVer = v
 			}
 		}
@@ -210,7 +210,7 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 			return nil, errors.New("invalid template URI: missing template ID")
 		}
 
-		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
+		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateID)
 		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
 			return nil, errors.New("template not found or access denied")
@@ -241,11 +241,11 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid preset URI: missing preset ID")
 		}
 
-		if cfg.PresetRepo == nil {
+		if cfg.PresetStore == nil {
 			return nil, errors.New("preset repository unavailable")
 		}
 
-		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
+		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
 		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)
 			return nil, errors.New("preset not found or access denied")

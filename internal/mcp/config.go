@@ -7,9 +7,11 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/renderer"
 	"github.com/resumeee-app/resumeee-core/seed"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // contextKey defines a private string type used for context value keys in the mcp package.
@@ -22,25 +24,27 @@ const userIDContextKey contextKey = "mcp_user_id"
 // parameters required by the MCP server subsystem across both stdio and SSE HTTP transports.
 type ServerConfig struct {
 	// ProfileService provides main career profile snapshot retrieval and mutation operations.
-	ProfileService profile.Service
+	ProfileService *profile.Service
 	// BranchService coordinates targeted resume branch lifecycles, version generation, and gap analysis.
-	BranchService branch.Service
+	BranchService *branch.Service
 	// TemplateRenderer handles multi-format (HTML, Markdown, PlainText) resume rendering.
-	TemplateRenderer core.TemplateRenderer
-	// ProfileRepo provides persistence access for career entities, bullet facts, and skills.
-	ProfileRepo core.ProfileRepository
-	// BranchRepo provides persistence access for resume branches and branch versions.
-	BranchRepo core.BranchRepository
-	// TemplateRepo provides persistence access for built-in and custom template sets.
-	TemplateRepo core.TemplateRepository
-	// PresetRepo provides access to tailoring presets and strategy instructions.
-	PresetRepo core.PresetRepository
-	// UserRepo provides persistence access for multi-tenant user accounts.
-	UserRepo core.UserRepository
+	TemplateRenderer renderer.TemplateRenderer
+	// ProfileStore provides persistence access for base profiles and career snapshots.
+	ProfileStore core.ProfileStore
+	// CareerStore provides persistence access for career entities, bullet facts, and skills.
+	CareerStore core.CareerStore
+	// BranchStore provides persistence access for resume branches and branch versions.
+	BranchStore core.BranchStore
+	// TemplateStore provides persistence access for built-in and custom template sets.
+	TemplateStore core.TemplateStore
+	// PresetStore provides access to tailoring presets and strategy instructions.
+	PresetStore core.PresetStore
+	// UserStore provides persistence access for multi-tenant user accounts.
+	UserStore core.UserStore
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
-	ResumeExtractor core.ResumeExtractor
+	ResumeExtractor worker.ResumeExtractor
 	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
-	JobEnqueuer core.JobEnqueuer
+	JobEnqueuer branch.JobEnqueuer
 	// DefaultUserID specifies the fallback user identifier when no auth header or token is provided.
 	DefaultUserID string
 	// Admin indicates local single-user mode bypassing external token verification.
@@ -120,8 +124,8 @@ func (c *ServerConfig) setDefaults() {
 // EnsureTenant lazily provisions a tenant in the repository if unprovisioned.
 // It ensures default profile, branch, and templates exist for the given user.
 func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
-	if userID == "" || c.ProfileRepo == nil || c.BranchRepo == nil || c.TemplateRepo == nil {
+	if userID == "" || c.ProfileStore == nil || c.BranchStore == nil || c.TemplateStore == nil {
 		return nil
 	}
-	return seed.EnsureTenantProvisionedRepos(ctx, c.ProfileRepo, c.BranchRepo, c.TemplateRepo, c.UserRepo, userID)
+	return seed.EnsureTenantProvisionedStores(ctx, c.ProfileStore, c.BranchStore, c.TemplateStore, c.UserStore, userID)
 }

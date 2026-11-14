@@ -12,10 +12,10 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
@@ -30,22 +30,22 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	presetRepo := store
 	templateRepo := store
 	branchRepo := store
-	rend := renderer.NewTemplateRenderer()
+	rend := renderer.New()
 
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:   branchRepo,
-		ProfileRepo:  profileRepo,
-		PresetRepo:   presetRepo,
-		TemplateRepo: templateRepo,
-		Validator:    validator.New(),
-		Renderer:     rend,
+	branchSvc := branch.New(branch.Config{
+		Branches:  branchRepo,
+		Profiles:  profileRepo,
+		Presets:   presetRepo,
+		Templates: templateRepo,
+		Validator: provenance.New(),
+		Renderer:  rend,
 	})
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:   profileRepo,
-		PresetRepo:    presetRepo,
-		TemplateRepo:  templateRepo,
-		BranchRepo:    branchRepo,
+		ProfileStore:  profileRepo,
+		PresetStore:   presetRepo,
+		TemplateStore: templateRepo,
+		BranchStore:   branchRepo,
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
@@ -201,7 +201,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 8. Verify database version immutability
-	dbVer, err := branchRepo.GetVersion(ctx, targetBranch.ID, v1.ID)
+	dbVer, err := branchRepo.Version(ctx, targetBranch.ID, v1.ID)
 	if err != nil {
 		t.Fatalf("failed to fetch version from repo: %v", err)
 	}

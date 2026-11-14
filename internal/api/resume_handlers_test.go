@@ -12,10 +12,10 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 type mockLLMProvider struct {
@@ -31,10 +31,10 @@ func (m *mockLLMProvider) GenerateTailoredResume(_ context.Context, _ core.Gener
 type resumeTestEnv struct {
 	server       *httptest.Server
 	db           any
-	branchRepo   core.BranchRepository
-	profileRepo  core.ProfileRepository
-	presetRepo   core.PresetRepository
-	templateRepo core.TemplateRepository
+	branchRepo   core.BranchStore
+	profileRepo  core.ProfileStore
+	presetRepo   core.PresetStore
+	templateRepo core.TemplateStore
 	mockProvider *mockLLMProvider
 }
 
@@ -53,22 +53,22 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 	templateRepo := store
 	branchRepo := store
 	mockProv := &mockLLMProvider{}
-	rend := renderer.NewTemplateRenderer()
+	rend := renderer.New()
 
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:   branchRepo,
-		ProfileRepo:  profileRepo,
-		PresetRepo:   presetRepo,
-		TemplateRepo: templateRepo,
-		Validator:    validator.New(),
-		Renderer:     rend,
+	branchSvc := branch.New(branch.Config{
+		Branches:  branchRepo,
+		Profiles:  profileRepo,
+		Presets:   presetRepo,
+		Templates: templateRepo,
+		Validator: provenance.New(),
+		Renderer:  rend,
 	})
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:   profileRepo,
-		PresetRepo:    presetRepo,
-		TemplateRepo:  templateRepo,
-		BranchRepo:    branchRepo,
+		ProfileStore:  profileRepo,
+		PresetStore:   presetRepo,
+		TemplateStore: templateRepo,
+		BranchStore:   branchRepo,
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
@@ -238,7 +238,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		}
 
 		// 3. Assert version immutability: check historical version in DB is unchanged
-		freshVersion, err := env.branchRepo.GetVersion(ctx, targetResume.ID, vCompleted.ID)
+		freshVersion, err := env.branchRepo.Version(ctx, targetResume.ID, vCompleted.ID)
 		if err != nil {
 			t.Fatalf("failed to retrieve version from DB: %v", err)
 		}

@@ -19,12 +19,16 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/services/worker"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/llm/anthropic"
+	"github.com/resumeee-app/resumeee-core/llm/gemini"
+	"github.com/resumeee-app/resumeee-core/llm/openai"
+	"github.com/resumeee-app/resumeee-core/llm/openaicompat"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/worker"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
@@ -150,39 +154,46 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		}
 	}()
 
-	profileRepo := store.Profile()
-	presetRepo := store.Preset()
-	templateRepo := store.Template()
-	branchRepo := store.Branch()
-	templateRenderer := renderer.NewTemplateRenderer()
-	provValidator := validator.New()
+	profileStore := store.Profiles()
+	careerStore := store.Career()
+	presetStore := store.Presets()
+	templateStore := store.Templates()
+	branchStore := store.Branches()
+	userStore := store.Users()
+	templateRenderer := renderer.New()
+	provValidator := provenance.New()
 
-	profileSvc := profile.NewService(profileRepo, branchRepo)
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 
 	llmRegistry := llm.NewRegistry(
 		llm.WithLogger(logger),
 	)
-	llm.RegisterClients(llmRegistry, llm.ProviderConfig{
-		GeminiAPIKey:    cfg.GeminiAPIKey,
-		OpenAIAPIKey:    cfg.OpenAIAPIKey,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		CompatBaseURL:   cfg.OpenAICompatBaseURL,
-		CompatAPIKey:    cfg.OpenAICompatAPIKey,
-	}, llm.WithTimeout(cfg.LLMTimeout))
-	llmAdapter := llm.NewServiceAdapter(llmRegistry)
-	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
+	if cfg.GeminiAPIKey != "" {
+		llmRegistry.Register(gemini.New(cfg.GeminiAPIKey, gemini.WithTimeout(cfg.LLMTimeout)))
+	}
+	if cfg.OpenAIAPIKey != "" {
+		llmRegistry.Register(openai.New(cfg.OpenAIAPIKey, openai.WithTimeout(cfg.LLMTimeout)))
+	}
+	if cfg.AnthropicAPIKey != "" {
+		llmRegistry.Register(anthropic.New(cfg.AnthropicAPIKey, anthropic.WithTimeout(cfg.LLMTimeout)))
+	}
+	if cfg.OpenAICompatBaseURL != "" {
+		llmRegistry.Register(openaicompat.New(cfg.OpenAICompatBaseURL, cfg.OpenAICompatAPIKey, openaicompat.WithTimeout(cfg.LLMTimeout)))
+	}
+	llmService := llm.NewService(llmRegistry)
+	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 
-	workerPool := worker.NewPool(worker.PoolConfig{
+	workerPool := worker.New(worker.Config{
 		Concurrency:     2,
 		QueueSize:       50,
-		BranchRepo:      branchRepo,
-		ProfileRepo:     profileRepo,
-		PresetRepo:      presetRepo,
-		TemplateRepo:    templateRepo,
-		QuotaRepo:       store.Quota(),
+		Branches:        branchStore,
+		Profiles:        profileStore,
+		Presets:         presetStore,
+		Templates:       templateStore,
+		Quotas:          store.Quotas(),
 		ResumeExtractor: resumeExtractor,
 		LLMTimeout:      cfg.LLMTimeout,
-		LLMService:      llmAdapter,
+		Generator:       llmService,
 		Validator:       provValidator,
 		Renderer:        templateRenderer,
 		Logger:          logger,
@@ -190,16 +201,16 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	workerPool.Start(parent)
 	defer workerPool.Stop()
 
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:     branchRepo,
-		ProfileRepo:    profileRepo,
-		PresetRepo:     presetRepo,
-		TemplateRepo:   templateRepo,
-		QuotaRepo:      store.Quota(),
+	branchSvc := branch.New(branch.Config{
+		Branches:       branchStore,
+		Profiles:       profileStore,
+		Presets:        presetStore,
+		Templates:      templateStore,
+		Quotas:         store.Quotas(),
 		JobEnqueuer:    workerPool,
 		Validator:      provValidator,
 		Renderer:       templateRenderer,
-		LLMService:     llmAdapter,
+		Generator:      llmService,
 		PromptCompiler: llm.NewPromptCompiler(),
 		Logger:         logger,
 	})
@@ -208,11 +219,12 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		ProfileService:   profileSvc,
 		BranchService:    branchSvc,
 		TemplateRenderer: templateRenderer,
-		ProfileRepo:      profileRepo,
-		BranchRepo:       branchRepo,
-		TemplateRepo:     templateRepo,
-		PresetRepo:       presetRepo,
-		UserRepo:         store.User(),
+		ProfileStore:     profileStore,
+		CareerStore:      careerStore,
+		BranchStore:      branchStore,
+		TemplateStore:    templateStore,
+		PresetStore:      presetStore,
+		UserStore:        userStore,
 		ResumeExtractor:  resumeExtractor,
 		JobEnqueuer:      workerPool,
 		DefaultUserID:    cfg.DefaultUserID,

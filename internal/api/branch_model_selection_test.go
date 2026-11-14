@@ -9,8 +9,8 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/branch"
 )
 
 type mockBranchModelEnumerator struct {
@@ -60,11 +60,11 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 
 	cfg := api.RouterConfig{
 		DefaultUserID:   defaultUser,
-		BranchRepo:      store,
-		ProfileRepo:     store,
-		PresetRepo:      store,
-		TemplateRepo:    store,
-		QuotaRepo:       store,
+		BranchStore:     store,
+		ProfileStore:    store,
+		PresetStore:     store,
+		TemplateStore:   store,
+		QuotaStore:      store,
 		ModelEnumerator: enumerator,
 		Admin:           admin,
 		TokenVerifier:   verifier,
@@ -77,12 +77,12 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 	})
 
 	// Create a non-default branch for testing
-	branchService := branch.NewService(branch.Config{
-		BranchRepo:   store,
-		ProfileRepo:  store,
-		PresetRepo:   store,
-		TemplateRepo: store,
-		QuotaRepo:    store,
+	branchService := branch.New(branch.Config{
+		Branches:  store,
+		Profiles:  store,
+		Presets:   store,
+		Templates: store,
+		Quotas:    store,
 	})
 
 	testBranch := &core.Branch{

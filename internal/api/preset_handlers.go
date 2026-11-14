@@ -59,10 +59,10 @@ func validateModelOverride(enumerator core.ModelEnumerator, providerOverride, mo
 
 // validateTemplateAccess verifies that the target template exists and is accessible by the user.
 func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID string, userID string) error {
-	if templateID == "" || h.cfg.TemplateRepo == nil {
+	if templateID == "" || h.cfg.TemplateStore == nil {
 		return nil
 	}
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, templateID)
 	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
 		return core.ErrForbidden
 	}
@@ -74,7 +74,7 @@ func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	presets, err := h.cfg.PresetRepo.ListPresets(ctx, userID)
+	presets, err := h.cfg.PresetStore.ListPresets(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -141,7 +141,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		preset.SuggestedThemeID = &preset.TemplateSetID
 	}
 
-	if err := h.cfg.PresetRepo.CreatePreset(ctx, &preset); err != nil {
+	if err := h.cfg.PresetStore.CreatePreset(ctx, &preset); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -155,7 +155,7 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, id)
+	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -170,7 +170,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, id)
+	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -228,7 +228,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		preset.Language = lang
 	}
 
-	if err := h.cfg.PresetRepo.UpdatePreset(ctx, preset); err != nil {
+	if err := h.cfg.PresetStore.UpdatePreset(ctx, preset); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -242,7 +242,7 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, id)
+	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -253,7 +253,7 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.cfg.PresetRepo.DeletePreset(ctx, userID, id); err != nil {
+	if err := h.cfg.PresetStore.DeletePreset(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}

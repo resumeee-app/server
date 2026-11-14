@@ -18,8 +18,8 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func freePort(t *testing.T) int {
@@ -80,8 +80,8 @@ func (m *mockLLMClient) SupportsStructuredOutput(_ string) bool {
 	return false
 }
 
-func (m *mockLLMClient) Complete(_ context.Context, _ core.LLMCompletionRequest) (*core.LLMCompletionResponse, error) {
-	return &core.LLMCompletionResponse{
+func (m *mockLLMClient) Complete(_ context.Context, _ llm.Request) (*llm.Response, error) {
+	return &llm.Response{
 		Text:       `{"tailored_content":{}}`,
 		StatusCode: http.StatusOK,
 		Usage: core.TokenUsage{
@@ -129,7 +129,7 @@ func TestServer_RunWithInjectedDependencies(t *testing.T) {
 	}
 
 	customUser := "custom-tenant"
-	if err := memStore.Profile().UpsertProfile(ctx, &core.Profile{
+	if err := memStore.UpsertProfile(ctx, &core.Profile{
 		UserID:   customUser,
 		FullName: "Ada Lovelace",
 		Headline: "Analytical Engine Architect",
@@ -304,8 +304,8 @@ func TestServer_WithDomainServicesAndMCPToggle(t *testing.T) {
 			WithLLMDebug(true, debugDir),
 			WithStore(memStore),
 			WithMCPEnabled(false),
-			WithTemplateRenderer(renderer.NewTemplateRenderer()),
-			WithValidator(validator.New()),
+			WithTemplateRenderer(renderer.New()),
+			WithValidator(provenance.New()),
 			WithPDFExtractor(&mockPDFExtractor{extracted: "mock pdf text"}),
 			WithPromptCompiler(llm.NewPromptCompiler()),
 			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
@@ -388,7 +388,6 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"nil TokenVerifier", WithTokenVerifier("custom", nil)},
 		{"nil LLMRegistry", WithLLMRegistry(nil)},
 		{"nil LLMClient", WithLLMClient(nil)},
-		{"nil LLMProvider", WithLLMProvider(nil)},
 		{"nil TemplateRenderer", WithTemplateRenderer(nil)},
 		{"nil Validator", WithValidator(nil)},
 		{"nil PDFExtractor", WithPDFExtractor(nil)},

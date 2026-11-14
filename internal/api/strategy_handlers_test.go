@@ -29,8 +29,8 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 	templateRepo := store
 
 	router := api.NewRouter(api.RouterConfig{
-		PresetRepo:    presetRepo,
-		TemplateRepo:  templateRepo,
+		PresetStore:   presetRepo,
+		TemplateStore: templateRepo,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})
@@ -49,8 +49,8 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 
 type strategyTestRepos struct {
 	db           any
-	presetRepo   core.PresetRepository
-	templateRepo core.TemplateRepository
+	presetRepo   core.PresetStore
+	templateRepo core.TemplateStore
 }
 
 func TestStrategyCRUD_RFC005(t *testing.T) {

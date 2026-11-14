@@ -66,7 +66,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 	}
 
 	// Verify profile is accessible
-	prof, err := memStore.Profile().GetProfile(context.Background(), "default")
+	prof, err := memStore.Profile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("expected default profile to be seeded, got: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		Name:          "Pending Branch",
 		TemplateSetID: "tmpl-1",
 	}
-	if err := memStore.Branch().CreateBranch(context.Background(), branch); err != nil {
+	if err := memStore.CreateBranch(context.Background(), branch); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -98,11 +98,11 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		BranchID: branch.ID,
 		Status:   core.VersionStatusProcessing,
 	}
-	if err := memStore.Branch().CreateVersion(context.Background(), ver); err != nil {
+	if err := memStore.CreateVersion(context.Background(), ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 	// Force status to processing
-	_ = memStore.Branch().UpdateVersionStatus(context.Background(), ver.ID, core.VersionStatusProcessing, "")
+	_ = memStore.UpdateVersionStatus(context.Background(), ver.ID, core.VersionStatusProcessing, "")
 
 	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
 		return memStore, nil
@@ -128,7 +128,7 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 	}
 
 	// Verify interrupted version was marked failed
-	recoveredVer, err := memStore.Branch().GetVersion(context.Background(), branch.ID, ver.ID)
+	recoveredVer, err := memStore.Version(context.Background(), branch.ID, ver.ID)
 	if err != nil {
 		t.Fatalf("failed to get version: %v", err)
 	}

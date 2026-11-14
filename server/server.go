@@ -20,13 +20,13 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/pdf"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/services/worker"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // Config encapsulates HTTP server, worker pool, quota, and logging settings owned by the API server.
@@ -91,11 +91,6 @@ func (c *Config) toInternalConfig() *config.Config {
 	}
 }
 
-type registeredLLMClient struct {
-	client core.LLMClient
-	opts   []llm.Option
-}
-
 // Server orchestrates the Resumeee HTTP REST API, MCP server, background worker pool, and domain services.
 type Server struct {
 	cfg              *Config
@@ -103,13 +98,12 @@ type Server struct {
 	store            core.Store
 	authProvider     core.AuthProvider
 	llmRegistry      *llm.Registry
-	llmClients       []registeredLLMClient
-	llmProviders     []core.LLMProvider
-	templateRenderer core.TemplateRenderer
-	provValidator    core.ProvenanceValidator
-	pdfExtractor     core.PDFTextExtractor
-	resumeExtractor  core.ResumeExtractor
-	promptCompiler   core.PromptCompiler
+	llmClients       []llm.Client
+	templateRenderer TemplateRenderer
+	provValidator    ProvenanceValidator
+	pdfExtractor     PDFTextExtractor
+	resumeExtractor  worker.ResumeExtractor
+	promptCompiler   branch.PromptCompiler
 	mcpEnabled       bool
 }
 
@@ -175,28 +169,30 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	store := s.store
-	branchRepo := store.Branch()
-	if err := branchRepo.FailInterruptedVersions(ctx, "server restarted while generation job was in flight"); err != nil {
+	branchStore := store.Branches()
+	if err := branchStore.FailInterruptedVersions(ctx, "server restarted while generation job was in flight"); err != nil {
 		logger.Warn("failed to clean up interrupted versions on boot", "err", err)
 	} else {
 		logger.Info("cleaned up interrupted generation versions")
 	}
 
-	profileRepo := store.Profile()
-	presetRepo := store.Preset()
-	templateRepo := store.Template()
-	pdfJobRepo := store.PDFJob()
-	quotaRepo := store.Quota()
-	profileSvc := profile.NewService(profileRepo, branchRepo)
+	profileStore := store.Profiles()
+	careerStore := store.Career()
+	presetStore := store.Presets()
+	templateStore := store.Templates()
+	pdfJobStore := store.PDFJobs()
+	quotaStore := store.Quotas()
+	userStore := store.Users()
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 
 	templateRenderer := s.templateRenderer
 	if templateRenderer == nil {
-		templateRenderer = renderer.NewTemplateRenderer()
+		templateRenderer = renderer.New()
 	}
 
 	provValidator := s.provValidator
 	if provValidator == nil {
-		provValidator = validator.New()
+		provValidator = provenance.New()
 	}
 
 	pdfExtractor := s.pdfExtractor
@@ -215,26 +211,26 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	llmRegistry := s.resolveLLMRegistry(logger)
-	llmAdapter := llm.NewServiceAdapter(llmRegistry)
+	llmService := llm.NewService(llmRegistry)
 
 	resumeExtractor := s.resumeExtractor
 	if resumeExtractor == nil {
-		resumeExtractor = llm.NewDefaultResumeExtractor(llmRegistry)
+		resumeExtractor = llm.NewRegistryExtractor(llmRegistry)
 	}
 
-	workerPool := worker.NewPool(worker.PoolConfig{
+	workerPool := worker.New(worker.Config{
 		Concurrency:            s.cfg.WorkerConcurrency,
 		QueueSize:              s.cfg.WorkerQueueSize,
 		MaxConcurrentPerTenant: s.cfg.MaxConcurrentJobsPerTenant,
-		BranchRepo:             branchRepo,
-		ProfileRepo:            profileRepo,
-		PresetRepo:             presetRepo,
-		TemplateRepo:           templateRepo,
-		PDFJobRepo:             pdfJobRepo,
-		QuotaRepo:              quotaRepo,
+		Branches:               branchStore,
+		Profiles:               profileStore,
+		Presets:                presetStore,
+		Templates:              templateStore,
+		PDFJobs:                pdfJobStore,
+		Quotas:                 quotaStore,
 		ResumeExtractor:        resumeExtractor,
 		LLMTimeout:             s.cfg.LLMTimeout,
-		LLMService:             llmAdapter,
+		Generator:              llmService,
 		Validator:              provValidator,
 		Renderer:               templateRenderer,
 		Logger:                 logger,
@@ -245,16 +241,16 @@ func (s *Server) Run(ctx context.Context) error {
 	workerPool.Start(ctx)
 	defer workerPool.Stop()
 
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:        branchRepo,
-		ProfileRepo:       profileRepo,
-		PresetRepo:        presetRepo,
-		TemplateRepo:      templateRepo,
-		QuotaRepo:         quotaRepo,
+	branchSvc := branch.New(branch.Config{
+		Branches:          branchStore,
+		Profiles:          profileStore,
+		Presets:           presetStore,
+		Templates:         templateStore,
+		Quotas:            quotaStore,
 		JobEnqueuer:       workerPool,
 		Validator:         provValidator,
 		Renderer:          templateRenderer,
-		LLMService:        llmAdapter,
+		Generator:         llmService,
 		PromptCompiler:    promptCompiler,
 		DailyRequestLimit: s.cfg.LLMDailyRequestLimit,
 		MonthlyTokenLimit: s.cfg.LLMMonthlyTokenLimit,
@@ -262,12 +258,13 @@ func (s *Server) Run(ctx context.Context) error {
 	})
 
 	apiRouter := api.NewRouter(api.RouterConfig{
-		ProfileRepo:       profileRepo,
-		PresetRepo:        presetRepo,
-		TemplateRepo:      templateRepo,
-		BranchRepo:        branchRepo,
-		PDFJobRepo:        pdfJobRepo,
-		QuotaRepo:         quotaRepo,
+		ProfileStore:      profileStore,
+		CareerStore:       careerStore,
+		PresetStore:       presetStore,
+		TemplateStore:     templateStore,
+		BranchStore:       branchStore,
+		PDFJobStore:       pdfJobStore,
+		QuotaStore:        quotaStore,
 		BranchService:     branchSvc,
 		ProfileService:    profileSvc,
 		PDFExtractor:      pdfExtractor,
@@ -281,7 +278,7 @@ func (s *Server) Run(ctx context.Context) error {
 		Admin:             s.cfg.Admin,
 		AuthProvider:      authProvider,
 		TokenVerifier:     authProvider,
-		UserRepo:          store.User(),
+		UserStore:         userStore,
 		Store:             store,
 		DailyRequestLimit: s.cfg.LLMDailyRequestLimit,
 		MonthlyTokenLimit: s.cfg.LLMMonthlyTokenLimit,
@@ -296,11 +293,12 @@ func (s *Server) Run(ctx context.Context) error {
 			ProfileService:        profileSvc,
 			BranchService:         branchSvc,
 			TemplateRenderer:      templateRenderer,
-			ProfileRepo:           profileRepo,
-			BranchRepo:            branchRepo,
-			TemplateRepo:          templateRepo,
-			PresetRepo:            presetRepo,
-			UserRepo:              store.User(),
+			ProfileStore:          profileStore,
+			CareerStore:           careerStore,
+			BranchStore:           branchStore,
+			TemplateStore:         templateStore,
+			PresetStore:           presetStore,
+			UserStore:             userStore,
 			ResumeExtractor:       resumeExtractor,
 			JobEnqueuer:           workerPool,
 			DefaultUserID:         s.cfg.DefaultUserID,
@@ -379,15 +377,7 @@ func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
 	}
 
 	for _, c := range s.llmClients {
-		opts := c.opts
-		if len(opts) == 0 {
-			opts = []llm.Option{llm.WithTimeout(s.cfg.LLMTimeout)}
-		}
-		reg.RegisterClient(c.client, opts...)
-	}
-
-	for _, p := range s.llmProviders {
-		reg.Register(p)
+		reg.Register(c)
 	}
 
 	return reg

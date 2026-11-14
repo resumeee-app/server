@@ -41,11 +41,12 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -54,7 +55,7 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	newTenantID := "tenant-lazy-123"
 
 	// Verify tenant is initially unprovisioned in the repository
-	initialProf, _ := store.GetProfile(ctx, newTenantID)
+	initialProf, _ := store.Profile(ctx, newTenantID)
 	if initialProf != nil {
 		t.Fatalf("expected new tenant to be unprovisioned initially")
 	}
@@ -75,7 +76,7 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	}
 
 	// Verify that profile and default branch were created for the tenant
-	provProf, err := store.GetProfile(ctx, newTenantID)
+	provProf, err := store.Profile(ctx, newTenantID)
 	if err != nil || provProf == nil {
 		t.Fatalf("expected tenant profile to be provisioned, err: %v", err)
 	}
@@ -100,11 +101,12 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -145,7 +147,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("unexpected name: %q", createdPreset.Name)
 	}
 
-	persistedPreset, err := store.GetPreset(ctx, "user-1", createdPreset.ID)
+	persistedPreset, err := store.Preset(ctx, "user-1", createdPreset.ID)
 	if err != nil || persistedPreset == nil {
 		t.Fatalf("expected preset %q to be in store: %v", createdPreset.ID, err)
 	}
@@ -177,7 +179,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("expected default language %q, got %q", core.DefaultLanguage, defaultLangPreset.Language)
 	}
 
-	persistedDefaultPreset, err := store.GetPreset(ctx, "user-1", defaultLangPreset.ID)
+	persistedDefaultPreset, err := store.Preset(ctx, "user-1", defaultLangPreset.ID)
 	if err != nil || persistedDefaultPreset == nil {
 		t.Fatalf("expected default preset %q to be in store: %v", defaultLangPreset.ID, err)
 	}
@@ -240,7 +242,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("expected language 'French', got %q", updatedPreset.Language)
 	}
 
-	persistedUpdatedPreset, err := store.GetPreset(ctx, "user-1", createdPreset.ID)
+	persistedUpdatedPreset, err := store.Preset(ctx, "user-1", createdPreset.ID)
 	if err != nil || persistedUpdatedPreset == nil {
 		t.Fatalf("expected updated preset to be in store: %v", err)
 	}
@@ -327,11 +329,12 @@ func TestMCP_Resources_LanguagesAndPresets(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -402,11 +405,12 @@ func TestMCP_SkillsTools(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -442,7 +446,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 		t.Errorf("unexpected added skill fields: %+v", addedSkill)
 	}
 
-	persistedSkill, err := store.GetSkill(ctx, "user-1", addedSkill.ID)
+	persistedSkill, err := store.Skill(ctx, "user-1", addedSkill.ID)
 	if err != nil || persistedSkill == nil {
 		t.Fatalf("expected skill %q to be in store: %v", addedSkill.ID, err)
 	}
@@ -506,7 +510,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 		t.Errorf("expected proficiency 'Expert', got %q", updatedSkill.Proficiency)
 	}
 
-	persistedUpdSkill, err := store.GetSkill(ctx, "user-1", addedSkill.ID)
+	persistedUpdSkill, err := store.Skill(ctx, "user-1", addedSkill.ID)
 	if err != nil || persistedUpdSkill == nil {
 		t.Fatalf("expected updated skill in store: %v", err)
 	}
@@ -523,11 +527,12 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:           store,
-		BranchRepo:            store,
-		TemplateRepo:          store,
-		PresetRepo:            store,
-		UserRepo:              store,
+		ProfileStore:          store,
+		CareerStore:           store,
+		BranchStore:           store,
+		TemplateStore:         store,
+		PresetStore:           store,
+		UserStore:             store,
 		DefaultUserID:         "user-1",
 		RESTTimeout:           5 * time.Second,
 		MaxConnectionsPerUser: 5,
@@ -541,7 +546,7 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	handler := resumeeeMCP.NewHTTPHandler(mcpServer, cfg)
 
 	// Verify tenant is initially unprovisioned
-	if p, _ := store.GetProfile(ctx, "tenant-http-456"); p != nil {
+	if p, _ := store.Profile(ctx, "tenant-http-456"); p != nil {
 		t.Fatal("expected tenant to be initially unprovisioned")
 	}
 
@@ -564,7 +569,7 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify tenant has been provisioned
-	provProf, err := store.GetProfile(ctx, "tenant-http-456")
+	provProf, err := store.Profile(ctx, "tenant-http-456")
 	if err != nil || provProf == nil {
 		t.Fatalf("expected tenant profile to be provisioned via HTTP auth, err: %v", err)
 	}

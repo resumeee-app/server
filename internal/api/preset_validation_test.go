@@ -14,7 +14,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
-func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepository) {
+func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -27,7 +27,7 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepositor
 	presetRepo := store
 
 	router := api.NewRouter(api.RouterConfig{
-		PresetRepo:    presetRepo,
+		PresetStore:   presetRepo,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})

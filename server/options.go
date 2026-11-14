@@ -1,16 +1,38 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
+
+// TemplateRenderer defines the template rendering and validation contract required by Server.
+type TemplateRenderer interface {
+	renderer.TemplateRenderer
+	Validate(tmpl *core.TemplateSet) error
+}
+
+// ProvenanceValidator defines the provenance validation contract required by branch and worker services.
+type ProvenanceValidator interface {
+	branch.ProvenanceValidator
+	worker.ProvenanceValidator
+}
+
+// PDFTextExtractor defines the PDF text extraction contract required by Server.
+type PDFTextExtractor interface {
+	ExtractText(ctx context.Context, r io.ReaderAt, size int64) (string, error)
+}
 
 // Option configures a Server instance during construction.
 type Option func(*Server) error
@@ -188,33 +210,19 @@ func WithLLMRegistry(reg *llm.Registry) Option {
 	}
 }
 
-// WithLLMClient registers a configured core.LLMClient (wrapped via llm.NewClientProvider) into the server's LLM registry.
-func WithLLMClient(client core.LLMClient, opts ...llm.Option) Option {
+// WithLLMClient registers a configured llm.Client into the server's LLM registry.
+func WithLLMClient(client llm.Client) Option {
 	return func(s *Server) error {
 		if client == nil {
 			return errors.New("server: LLMClient cannot be nil")
 		}
-		s.llmClients = append(s.llmClients, registeredLLMClient{
-			client: client,
-			opts:   opts,
-		})
+		s.llmClients = append(s.llmClients, client)
 		return nil
 	}
 }
 
-// WithLLMProvider registers a configured core.LLMProvider implementation into the server's LLM registry.
-func WithLLMProvider(provider core.LLMProvider) Option {
-	return func(s *Server) error {
-		if provider == nil {
-			return errors.New("server: LLMProvider cannot be nil")
-		}
-		s.llmProviders = append(s.llmProviders, provider)
-		return nil
-	}
-}
-
-// WithTemplateRenderer injects a custom core.TemplateRenderer implementation.
-func WithTemplateRenderer(r core.TemplateRenderer) Option {
+// WithTemplateRenderer injects a custom TemplateRenderer implementation.
+func WithTemplateRenderer(r TemplateRenderer) Option {
 	return func(s *Server) error {
 		if r == nil {
 			return errors.New("server: TemplateRenderer cannot be nil")
@@ -224,8 +232,8 @@ func WithTemplateRenderer(r core.TemplateRenderer) Option {
 	}
 }
 
-// WithValidator injects a custom core.ProvenanceValidator implementation.
-func WithValidator(v core.ProvenanceValidator) Option {
+// WithValidator injects a custom ProvenanceValidator implementation.
+func WithValidator(v ProvenanceValidator) Option {
 	return func(s *Server) error {
 		if v == nil {
 			return errors.New("server: ProvenanceValidator cannot be nil")
@@ -235,8 +243,8 @@ func WithValidator(v core.ProvenanceValidator) Option {
 	}
 }
 
-// WithPDFExtractor injects a custom core.PDFTextExtractor implementation.
-func WithPDFExtractor(extractor core.PDFTextExtractor) Option {
+// WithPDFExtractor injects a custom PDFTextExtractor implementation.
+func WithPDFExtractor(extractor PDFTextExtractor) Option {
 	return func(s *Server) error {
 		if extractor == nil {
 			return errors.New("server: PDFTextExtractor cannot be nil")
@@ -246,8 +254,8 @@ func WithPDFExtractor(extractor core.PDFTextExtractor) Option {
 	}
 }
 
-// WithResumeExtractor injects a custom core.ResumeExtractor implementation.
-func WithResumeExtractor(extractor core.ResumeExtractor) Option {
+// WithResumeExtractor injects a custom worker.ResumeExtractor implementation.
+func WithResumeExtractor(extractor worker.ResumeExtractor) Option {
 	return func(s *Server) error {
 		if extractor == nil {
 			return errors.New("server: ResumeExtractor cannot be nil")
@@ -257,8 +265,8 @@ func WithResumeExtractor(extractor core.ResumeExtractor) Option {
 	}
 }
 
-// WithPromptCompiler injects a custom core.PromptCompiler implementation.
-func WithPromptCompiler(compiler core.PromptCompiler) Option {
+// WithPromptCompiler injects a custom branch.PromptCompiler implementation.
+func WithPromptCompiler(compiler branch.PromptCompiler) Option {
 	return func(s *Server) error {
 		if compiler == nil {
 			return errors.New("server: PromptCompiler cannot be nil")

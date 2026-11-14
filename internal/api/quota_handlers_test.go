@@ -15,6 +15,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 func TestGetQuota_DefaultsAndRemaining(t *testing.T) {
@@ -26,7 +27,7 @@ func TestGetQuota_DefaultsAndRemaining(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaRepo:         store,
+		QuotaStore:        store,
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 30,
@@ -102,7 +103,7 @@ func TestGetQuota_AfterUsageReservation(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaRepo:         store,
+		QuotaStore:        store,
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 50,
@@ -155,7 +156,7 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaRepo:         store,
+		QuotaStore:        store,
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 1,
@@ -205,16 +206,10 @@ type mockUsageResumeExtractor struct {
 	err    error
 }
 
-// Compile-time assertion ensuring mockUsageResumeExtractor satisfies core.UsageResumeExtractor,
-// which is checked via runtime type assertion in llm.ExtractResumeWithTokenUsage even though
-// RouterConfig.ResumeExtractor only requires the base core.ResumeExtractor interface.
-var _ core.UsageResumeExtractor = (*mockUsageResumeExtractor)(nil)
+// Compile-time assertion ensuring mockUsageResumeExtractor satisfies worker.ResumeExtractor.
+var _ worker.ResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
-func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*core.JSONResume, error) {
-	return m.resume, m.err
-}
-
-func (m *mockUsageResumeExtractor) ExtractResumeWithUsage(ctx context.Context, text string, provider string, model string) (*core.JSONResume, core.TokenUsage, error) {
+func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*core.JSONResume, core.TokenUsage, error) {
 	return m.resume, m.usage, m.err
 }
 
@@ -241,7 +236,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaRepo:         store,
+		QuotaStore:        store,
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		ResumeExtractor:   extractor,
@@ -278,7 +273,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	// Verify quota was committed: daily used should be 1, monthly tokens should be 500 (not 1000)
-	quota, err := store.GetQuota(ctx, defaultUserID)
+	quota, err := store.Quota(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to get quota: %v", err)
 	}
@@ -303,7 +298,7 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaRepo:         store,
+		QuotaStore:        store,
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		ResumeExtractor:   extractor,
@@ -340,7 +335,7 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	// Verify quota was released: daily used should be refunded to 0, monthly tokens should be 0
-	quota, err := store.GetQuota(ctx, defaultUserID)
+	quota, err := store.Quota(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to get quota: %v", err)
 	}
@@ -355,8 +350,8 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 func TestGetQuota_UnauthorizedWhenNotAdmin(t *testing.T) {
 	memStore := memory.New()
 	prodRouter := api.NewRouter(api.RouterConfig{
-		QuotaRepo: memStore,
-		Admin:     false,
+		QuotaStore: memStore,
+		Admin:      false,
 	})
 	server := httptest.NewServer(prodRouter)
 	defer server.Close()

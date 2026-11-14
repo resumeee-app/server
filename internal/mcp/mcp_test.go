@@ -19,11 +19,11 @@ import (
 
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 type dummyJobEnqueuer struct {
@@ -60,6 +60,15 @@ func (d *dummyLLMService) GenerateGapAnalysis(ctx context.Context, req core.Gene
 	}, nil
 }
 
+func (d *dummyLLMService) SimulateATS(ctx context.Context, req core.ATSSimulationRequest) (*core.ATSSimulationResponse, error) {
+	return &core.ATSSimulationResponse{
+		Score: core.ATSScore{
+			ExtractionConfidenceScore: 92,
+			JobMatchingScore:          88,
+		},
+	}, nil
+}
+
 type jsonRPCResponse struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      any    `json:"id"`
@@ -78,13 +87,14 @@ type jsonRPCResponse struct {
 
 type testEnv struct {
 	db               any
-	profileRepo      core.ProfileRepository
-	branchRepo       core.BranchRepository
-	presetRepo       core.PresetRepository
-	templateRepo     core.TemplateRepository
-	profileSvc       profile.Service
-	branchSvc        branch.Service
-	templateRenderer core.TemplateRenderer
+	profileRepo      core.ProfileStore
+	careerStore      core.CareerStore
+	branchRepo       core.BranchStore
+	presetRepo       core.PresetStore
+	templateRepo     core.TemplateStore
+	profileSvc       *profile.Service
+	branchSvc        *branch.Service
+	templateRenderer renderer.TemplateRenderer
 	jobEnqueuer      *dummyJobEnqueuer
 	logger           *slog.Logger
 	cfg              resumeeeMCP.ServerConfig
@@ -105,33 +115,34 @@ func setupTestEnv(t *testing.T) *testEnv {
 	branchRepo := store
 	presetRepo := store
 	templateRepo := store
-	templateRenderer := renderer.NewTemplateRenderer()
-	provValidator := validator.New()
+	templateRenderer := renderer.New()
+	provValidator := provenance.New()
 	jobEnq := &dummyJobEnqueuer{}
 	llmSvc := &dummyLLMService{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	profileSvc := profile.NewService(profileRepo, branchRepo)
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:   branchRepo,
-		ProfileRepo:  profileRepo,
-		PresetRepo:   presetRepo,
-		TemplateRepo: templateRepo,
-		JobEnqueuer:  jobEnq,
-		Validator:    provValidator,
-		Renderer:     templateRenderer,
-		LLMService:   llmSvc,
-		Logger:       logger,
+	profileSvc := profile.New(profileRepo, branchRepo, profileRepo)
+	branchSvc := branch.New(branch.Config{
+		Branches:    branchRepo,
+		Profiles:    profileRepo,
+		Presets:     presetRepo,
+		Templates:   templateRepo,
+		JobEnqueuer: jobEnq,
+		Validator:   provValidator,
+		Renderer:    templateRenderer,
+		Generator:   llmSvc,
+		Logger:      logger,
 	})
 
 	cfg := resumeeeMCP.ServerConfig{
 		ProfileService:        profileSvc,
 		BranchService:         branchSvc,
 		TemplateRenderer:      templateRenderer,
-		ProfileRepo:           profileRepo,
-		BranchRepo:            branchRepo,
-		TemplateRepo:          templateRepo,
-		PresetRepo:            presetRepo,
+		ProfileStore:          profileRepo,
+		CareerStore:           store,
+		BranchStore:           branchRepo,
+		TemplateStore:         templateRepo,
+		PresetStore:           presetRepo,
 		JobEnqueuer:           jobEnq,
 		DefaultUserID:         "user-1",
 		Logger:                logger,
@@ -151,6 +162,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	return &testEnv{
 		db:               store,
 		profileRepo:      profileRepo,
+		careerStore:      store,
 		branchRepo:       branchRepo,
 		presetRepo:       presetRepo,
 		templateRepo:     templateRepo,
@@ -308,7 +320,7 @@ func TestTool_AddExperience(t *testing.T) {
 		}
 
 		// Verify in repository
-		exps, err := env.profileRepo.ListExperiences(ctx, "user-1")
+		exps, err := env.careerStore.ListExperiences(ctx, "user-1")
 		if err != nil || len(exps) == 0 {
 			t.Fatalf("expected experience to be in repo, err: %v", err)
 		}
@@ -335,7 +347,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 		RoleTitle: "Backend Engineer",
 		StartDate: core.NewDate(2021, 1, 1),
 	}
-	if err := env.profileRepo.CreateExperience(ctx, exp); err != nil {
+	if err := env.careerStore.CreateExperience(ctx, exp); err != nil {
 		t.Fatalf("failed to create seed experience: %v", err)
 	}
 
@@ -366,7 +378,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 			RoleTitle: "Dev",
 			StartDate: core.NewDate(2020, 1, 1),
 		}
-		if err := env.profileRepo.CreateExperience(context.Background(), foreignExp); err != nil {
+		if err := env.careerStore.CreateExperience(context.Background(), foreignExp); err != nil {
 			t.Fatalf("failed to create foreign experience: %v", err)
 		}
 
@@ -408,7 +420,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", result)
 		}
 
-		facts, err := env.profileRepo.ListFactsByOwner(ctx, "user-1", "work_experience", "exp-123")
+		facts, err := env.careerStore.ListFactsByOwner(ctx, "user-1", "work_experience", "exp-123")
 		if err != nil || len(facts) == 0 {
 			t.Fatalf("expected fact to be stored, err: %v", err)
 		}
@@ -526,7 +538,7 @@ func TestTool_CreateBranch(t *testing.T) {
 		}
 
 		// Verify persistence in repository
-		savedBranch, err := env.branchRepo.GetBranch(ctx, "user-1", created.ID)
+		savedBranch, err := env.branchRepo.Branch(ctx, "user-1", created.ID)
 		if err != nil || savedBranch == nil {
 			t.Fatalf("expected created branch to exist in repository, err: %v", err)
 		}
@@ -604,7 +616,7 @@ func TestTool_CreateBranch(t *testing.T) {
 			t.Errorf("expected reasoning_level 'high', got %q", created.ReasoningLevel)
 		}
 
-		saved, err := env.branchRepo.GetBranch(ctx, "user-1", created.ID)
+		saved, err := env.branchRepo.Branch(ctx, "user-1", created.ID)
 		if err != nil || saved == nil {
 			t.Fatalf("failed to retrieve saved branch: %v", err)
 		}
@@ -778,7 +790,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 			t.Errorf("expected reasoning_level 'medium', got %q", updated.ReasoningLevel)
 		}
 
-		saved, err := env.branchRepo.GetBranch(ctx, "user-1", "br-update-1")
+		saved, err := env.branchRepo.Branch(ctx, "user-1", "br-update-1")
 		if err != nil || saved == nil {
 			t.Fatalf("failed to retrieve updated branch: %v", err)
 		}
@@ -830,7 +842,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 	}
 
 	// Verify branch requirements were updated with XML boundary fencing
-	updatedBranch, err := env.branchRepo.GetBranch(ctx, "user-1", "br-tailor-1")
+	updatedBranch, err := env.branchRepo.Branch(ctx, "user-1", "br-tailor-1")
 	if err != nil {
 		t.Fatalf("failed to get updated branch: %v", err)
 	}
@@ -889,7 +901,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", res)
 		}
 
-		tailoredBranch, err := env.branchRepo.GetBranch(ctx, "user-1", "br-tailor-1")
+		tailoredBranch, err := env.branchRepo.Branch(ctx, "user-1", "br-tailor-1")
 		if err != nil || tailoredBranch == nil {
 			t.Fatalf("failed to get tailored branch: %v", err)
 		}

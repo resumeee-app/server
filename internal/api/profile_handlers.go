@@ -249,7 +249,7 @@ func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -268,7 +268,7 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prof, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {
 			prof = &core.Profile{
@@ -310,12 +310,12 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		prof.Metadata = req.Metadata
 	}
 
-	if err := h.cfg.ProfileRepo.UpsertProfile(ctx, prof); err != nil {
+	if err := h.cfg.ProfileStore.UpsertProfile(ctx, prof); err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	updated, err := h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	updated, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -329,7 +329,7 @@ func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	snap, err := h.cfg.ProfileRepo.GetSnapshot(ctx, userID)
+	snap, err := h.cfg.ProfileStore.Snapshot(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -405,10 +405,10 @@ type AsyncPDFJobResponse struct {
 
 // reserveQuota reserves quota for an LLM operation, writing error responses directly and returning (reservationID, ok).
 func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter, userID string, op core.LLMOperationType, estimatedTokens, dailyLimit, monthlyLimit int) (string, bool) {
-	if h.cfg.QuotaRepo == nil {
+	if h.cfg.QuotaStore == nil {
 		return "", true
 	}
-	rec, qErr := h.cfg.QuotaRepo.ReserveQuota(ctx, userID, op, estimatedTokens, dailyLimit, monthlyLimit)
+	rec, qErr := h.cfg.QuotaStore.ReserveQuota(ctx, userID, op, estimatedTokens, dailyLimit, monthlyLimit)
 	if qErr != nil {
 		if errors.Is(qErr, core.ErrQuotaExceeded) {
 			writeQuotaError(w, 3600, "llm operation quota exceeded", qErr.Error())
@@ -545,8 +545,8 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 
 		extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, provider, model, 1000)
 		if err != nil {
-			if h.cfg.QuotaRepo != nil && reservationID != "" {
-				_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, err.Error())
+			if h.cfg.QuotaStore != nil && reservationID != "" {
+				_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, err.Error())
 			}
 
 			logLevel := slog.LevelError
@@ -615,8 +615,8 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		if h.cfg.QuotaRepo != nil && reservationID != "" {
-			_ = h.cfg.QuotaRepo.CommitUsage(ctx, reservationID, usage)
+		if h.cfg.QuotaStore != nil && reservationID != "" {
+			_ = h.cfg.QuotaStore.CommitUsage(ctx, reservationID, usage)
 		}
 
 		if h.cfg.Logger != nil {
@@ -627,7 +627,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Asynchronous mode (default): enqueue and return 202 Accepted
-	if h.cfg.PDFJobRepo == nil {
+	if h.cfg.PDFJobStore == nil {
 		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
 		return
 	}
@@ -658,9 +658,9 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		UpdatedAt: now,
 	}
 
-	if err := h.cfg.PDFJobRepo.CreateJob(ctx, job); err != nil {
-		if h.cfg.QuotaRepo != nil && reservationID != "" {
-			_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
+	if err := h.cfg.PDFJobStore.CreateJob(ctx, job); err != nil {
+		if h.cfg.QuotaStore != nil && reservationID != "" {
+			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
 		}
 		writeDomainError(w, err)
 		return
@@ -676,8 +676,8 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
-		if h.cfg.QuotaRepo != nil && reservationID != "" {
-			_ = h.cfg.QuotaRepo.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
+		if h.cfg.QuotaStore != nil && reservationID != "" {
+			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
 		}
 		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
@@ -708,12 +708,12 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if h.cfg.PDFJobRepo == nil {
+	if h.cfg.PDFJobStore == nil {
 		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
 		return
 	}
 
-	job, err := h.cfg.PDFJobRepo.GetJob(ctx, userID, jobID)
+	job, err := h.cfg.PDFJobStore.Job(ctx, userID, jobID)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
@@ -777,12 +777,12 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	skillType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
 	switch skillType {
 	case "", "all":
-		skills, err = h.cfg.ProfileRepo.ListSkills(ctx, userID)
+		skills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
 	case "global":
-		skills, err = h.cfg.ProfileRepo.ListGlobalSkills(ctx)
+		skills, err = h.cfg.CareerStore.ListGlobalSkills(ctx)
 	case "custom":
 		var allSkills []core.Skill
-		allSkills, err = h.cfg.ProfileRepo.ListSkills(ctx, userID)
+		allSkills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
 		if err == nil {
 			skills = make([]core.Skill, 0, len(allSkills))
 			for _, s := range allSkills {
@@ -839,7 +839,7 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 		Metadata:        req.Metadata,
 	}
 
-	if err := h.cfg.ProfileRepo.CreateSkill(ctx, &skill); err != nil {
+	if err := h.cfg.CareerStore.CreateSkill(ctx, &skill); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -853,7 +853,7 @@ func (h *profileHandler) getSkill(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	skill, err := h.cfg.ProfileRepo.GetSkill(ctx, userID, id)
+	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -869,7 +869,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	skill, err := h.cfg.ProfileRepo.GetSkill(ctx, userID, id)
+	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -902,7 +902,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 		skill.Metadata = req.Metadata
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateSkill(ctx, skill); err != nil {
+	if err := h.cfg.CareerStore.UpdateSkill(ctx, skill); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -916,7 +916,7 @@ func (h *profileHandler) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteSkill(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteSkill(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -931,7 +931,7 @@ func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	exps, err := h.cfg.ProfileRepo.ListExperiences(ctx, userID)
+	exps, err := h.cfg.CareerStore.ListExperiences(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -998,7 +998,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 		exp.CompanyContact = req.CompanyContact
 	}
 
-	if err := h.cfg.ProfileRepo.CreateExperience(ctx, &exp); err != nil {
+	if err := h.cfg.CareerStore.CreateExperience(ctx, &exp); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1012,7 +1012,7 @@ func (h *profileHandler) getExperience(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	exp, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, id)
+	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1028,7 +1028,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	exp, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, id)
+	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1100,7 +1100,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 		exp.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateExperience(ctx, exp); err != nil {
+	if err := h.cfg.CareerStore.UpdateExperience(ctx, exp); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1114,7 +1114,7 @@ func (h *profileHandler) deleteExperience(w http.ResponseWriter, r *http.Request
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteExperience(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteExperience(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1129,7 +1129,7 @@ func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	projs, err := h.cfg.ProfileRepo.ListProjects(ctx, userID)
+	projs, err := h.cfg.CareerStore.ListProjects(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1189,7 +1189,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 		Metadata:  req.Metadata,
 	}
 
-	if err := h.cfg.ProfileRepo.CreateProject(ctx, &proj); err != nil {
+	if err := h.cfg.CareerStore.CreateProject(ctx, &proj); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1203,7 +1203,7 @@ func (h *profileHandler) getProject(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	proj, err := h.cfg.ProfileRepo.GetProject(ctx, userID, id)
+	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1219,7 +1219,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	proj, err := h.cfg.ProfileRepo.GetProject(ctx, userID, id)
+	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1266,7 +1266,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 		proj.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateProject(ctx, proj); err != nil {
+	if err := h.cfg.CareerStore.UpdateProject(ctx, proj); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1280,7 +1280,7 @@ func (h *profileHandler) deleteProject(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteProject(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteProject(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1295,7 +1295,7 @@ func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	edus, err := h.cfg.ProfileRepo.ListEducation(ctx, userID)
+	edus, err := h.cfg.CareerStore.ListEducation(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1350,7 +1350,7 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 		Metadata:    req.Metadata,
 	}
 
-	if err := h.cfg.ProfileRepo.CreateEducation(ctx, &edu); err != nil {
+	if err := h.cfg.CareerStore.CreateEducation(ctx, &edu); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1364,7 +1364,7 @@ func (h *profileHandler) getEducation(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	edu, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, id)
+	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1380,7 +1380,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	edu, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, id)
+	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1427,7 +1427,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 		edu.Metadata = req.Metadata
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateEducation(ctx, edu); err != nil {
+	if err := h.cfg.CareerStore.UpdateEducation(ctx, edu); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1441,7 +1441,7 @@ func (h *profileHandler) deleteEducation(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteEducation(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteEducation(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1456,7 +1456,7 @@ func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	certs, err := h.cfg.ProfileRepo.ListCertifications(ctx, userID)
+	certs, err := h.cfg.CareerStore.ListCertifications(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1505,7 +1505,7 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 		Metadata: req.Metadata,
 	}
 
-	if err := h.cfg.ProfileRepo.CreateCertification(ctx, &cert); err != nil {
+	if err := h.cfg.CareerStore.CreateCertification(ctx, &cert); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1519,7 +1519,7 @@ func (h *profileHandler) getCertification(w http.ResponseWriter, r *http.Request
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	cert, err := h.cfg.ProfileRepo.GetCertification(ctx, userID, id)
+	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1535,7 +1535,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	cert, err := h.cfg.ProfileRepo.GetCertification(ctx, userID, id)
+	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1572,7 +1572,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 		cert.Metadata = req.Metadata
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateCertification(ctx, cert); err != nil {
+	if err := h.cfg.CareerStore.UpdateCertification(ctx, cert); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1586,7 +1586,7 @@ func (h *profileHandler) deleteCertification(w http.ResponseWriter, r *http.Requ
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteCertification(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteCertification(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1609,7 +1609,7 @@ func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	facts, err := h.cfg.ProfileRepo.ListFactsByOwner(ctx, userID, ownerType, ownerID)
+	facts, err := h.cfg.CareerStore.ListFactsByOwner(ctx, userID, ownerType, ownerID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1639,21 +1639,21 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 	var canonicalOwnerID string
 	switch req.OwnerType {
 	case core.OwnerTypeWorkExperience:
-		exp, err := h.cfg.ProfileRepo.GetExperience(ctx, userID, req.OwnerID)
+		exp, err := h.cfg.CareerStore.Experience(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
 			return
 		}
 		canonicalOwnerID = exp.ID
 	case core.OwnerTypeProject:
-		proj, err := h.cfg.ProfileRepo.GetProject(ctx, userID, req.OwnerID)
+		proj, err := h.cfg.CareerStore.Project(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
 			return
 		}
 		canonicalOwnerID = proj.ID
 	case core.OwnerTypeEducation:
-		edu, err := h.cfg.ProfileRepo.GetEducation(ctx, userID, req.OwnerID)
+		edu, err := h.cfg.CareerStore.Education(ctx, userID, req.OwnerID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
 			return
@@ -1685,7 +1685,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 		Skills:    skills,
 	}
 
-	if err := h.cfg.ProfileRepo.CreateFact(ctx, &fact); err != nil {
+	if err := h.cfg.CareerStore.CreateFact(ctx, &fact); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1699,7 +1699,7 @@ func (h *profileHandler) getFact(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	fact, err := h.cfg.ProfileRepo.GetFact(ctx, userID, id)
+	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1715,7 +1715,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	fact, err := h.cfg.ProfileRepo.GetFact(ctx, userID, id)
+	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -1739,7 +1739,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 		fact.Skills = parseSkillsInput(req.SkillIDs)
 	}
 
-	if err := h.cfg.ProfileRepo.UpdateFact(ctx, fact); err != nil {
+	if err := h.cfg.CareerStore.UpdateFact(ctx, fact); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -1753,7 +1753,7 @@ func (h *profileHandler) deleteFact(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if err := h.cfg.ProfileRepo.DeleteFact(ctx, userID, id); err != nil {
+	if err := h.cfg.CareerStore.DeleteFact(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
