@@ -3079,6 +3079,74 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		}
 	})
 
+	t.Run("partial routers return 500 JSON error without panic across unconfigured domains", func(t *testing.T) {
+		assertInternalErr := func(t *testing.T, method, url string, body any, wantMsg string) {
+			t.Helper()
+			resp, respBody := doRequest(t, http.DefaultClient, method, url, body, nil)
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Errorf("%s %s: expected 500, got %d (%s)", method, url, resp.StatusCode, string(respBody))
+				return
+			}
+			var errResp api.ErrorResponse
+			if err := json.Unmarshal(respBody, &errResp); err != nil {
+				t.Errorf("%s %s: decode error response: %v", method, url, err)
+				return
+			}
+			if errResp.Error.Code != api.CodeInternalError {
+				t.Errorf("%s %s: expected code %q, got %q", method, url, api.CodeInternalError, errResp.Error.Code)
+			}
+			if errResp.Error.Message != wantMsg {
+				t.Errorf("%s %s: expected message %q, got %q", method, url, wantMsg, errResp.Error.Message)
+			}
+		}
+
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		profileOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			ProfileStore:  memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer profileOnlySrv.Close()
+
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/profile/jsonresume/export", nil, "profile service unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/branches", nil, "branch service unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/presets", nil, "preset store unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/templates", nil, "template store unavailable")
+		assertInternalErr(t, http.MethodPost, profileOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
+
+		careerOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			CareerStore:   memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer careerOnlySrv.Close()
+
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile", nil, "profile store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile/full", nil, "profile store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile/jsonresume/export", nil, "profile service unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/branches", nil, "branch service unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/presets", nil, "preset store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/templates", nil, "template store unavailable")
+		assertInternalErr(t, http.MethodPost, careerOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
+
+		presetNoTemplateSrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			PresetStore:   memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer presetNoTemplateSrv.Close()
+
+		assertInternalErr(t, http.MethodPost, presetNoTemplateSrv.URL+"/api/v1/presets", api.CreatePresetRequest{
+			Name:               "Blocked Preset",
+			SystemInstructions: "Keep concise",
+			TemplateSetID:      core.TemplateStandardCleanID,
+		}, "template store unavailable")
+	})
+
 	t.Run("Store default populates CareerStore and ProfileService", func(t *testing.T) {
 		memStore, err := memory.NewSeeded(ctx, "user-1")
 		if err != nil {
@@ -3102,6 +3170,11 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		snapResp, snapBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/full", nil, nil)
 		if snapResp.StatusCode != http.StatusOK {
 			t.Fatalf("GET /api/v1/profile/full: expected 200, got %d: %s", snapResp.StatusCode, string(snapBody))
+		}
+
+		exportResp, exportBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/jsonresume/export", nil, nil)
+		if exportResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/profile/jsonresume/export: expected 200, got %d: %s", exportResp.StatusCode, string(exportBody))
 		}
 	})
 }

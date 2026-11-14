@@ -211,6 +211,8 @@ func WithLLMRegistry(reg *llm.Registry) Option {
 }
 
 // WithLLMClient registers a configured llm.Client into the server's LLM registry.
+// Caller-constructed clients are registered as-is and should configure their own request timeout
+// (for example, via the provider's WithTimeout option).
 func WithLLMClient(client llm.Client) Option {
 	return func(s *Server) error {
 		if client == nil {

@@ -208,18 +208,17 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.TemplateStore == nil {
-			return nil, errors.New("template store unavailable")
-		}
-
 		templateID := strings.TrimPrefix(req.Params.URI, "resumeee://templates/")
 		templateID = strings.TrimSpace(templateID)
 		if templateID == "" {
 			return nil, errors.New("invalid template URI: missing template ID")
 		}
 
-		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateID)
+		if err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
 			return nil, errors.New("template not found or access denied")
 		}
@@ -249,12 +248,11 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid preset URI: missing preset ID")
 		}
 
-		if cfg.PresetStore == nil {
-			return nil, errors.New("preset store unavailable")
-		}
-
-		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
+		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		if err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)
 			return nil, errors.New("preset not found or access denied")
 		}

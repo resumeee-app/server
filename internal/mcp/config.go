@@ -20,7 +20,7 @@ type contextKey string
 // userIDContextKey is the context key under which authenticated user IDs are stored.
 const userIDContextKey contextKey = "mcp_user_id"
 
-// ServerConfig encapsulates all dependencies, repositories, services, timeouts, and authorization
+// ServerConfig encapsulates all dependencies, stores, services, timeouts, and authorization
 // parameters required by the MCP server subsystem across both stdio and SSE HTTP transports.
 type ServerConfig struct {
 	// ProfileService provides main career profile snapshot retrieval and mutation operations.

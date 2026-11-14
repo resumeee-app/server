@@ -275,7 +275,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		TokenVerifier:         authProvider,
 		Logger:                logger,
 		RESTTimeout:           cfg.RESTTimeout,
-		TailoringTimeout:      10 * time.Minute,
+		TailoringTimeout:      cfg.LLMTimeout,
 		MaxConnectionsPerUser: 5,
 		MaxTotalConnections:   100,
 	}

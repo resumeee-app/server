@@ -25,9 +25,11 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 	}
 
 	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
 
 	router := api.NewRouter(api.RouterConfig{
 		PresetStore:   presetStore,
+		TemplateStore: templateStore,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})

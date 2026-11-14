@@ -1067,8 +1067,9 @@ func TestEnvironmentTemplates_CleanDocHeaders(t *testing.T) {
 }
 
 func TestConfig_NewLLMRegistry(t *testing.T) {
-	t.Run("nil config returns empty registry", func(t *testing.T) {
+	t.Run("handles nil Config and nil registry safely", func(t *testing.T) {
 		var nilCfg *config.Config
+		nilCfg.RegisterLLMClients(nil)
 		reg := nilCfg.NewLLMRegistry(nil)
 		if reg == nil {
 			t.Fatal("expected non-nil registry for nil Config")
@@ -1076,6 +1077,7 @@ func TestConfig_NewLLMRegistry(t *testing.T) {
 		if models := reg.AvailableModels(); len(models) != 0 {
 			t.Errorf("expected 0 models for nil Config, got %d", len(models))
 		}
+		(&config.Config{GeminiAPIKey: "gem-key", LLMTimeout: 45 * time.Second}).RegisterLLMClients(nil)
 	})
 
 	t.Run("registers all configured providers", func(t *testing.T) {
@@ -1085,6 +1087,7 @@ func TestConfig_NewLLMRegistry(t *testing.T) {
 			AnthropicAPIKey:     "ant-key",
 			OpenAICompatBaseURL: "http://localhost:11434/v1",
 			OpenAICompatAPIKey:  "compat-key",
+			LLMTimeout:          45 * time.Second,
 		}
 		reg := cfg.NewLLMRegistry(nil)
 		models := reg.AvailableModels()

@@ -26,12 +26,16 @@ type profileHandler struct {
 func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &profileHandler{cfg: cfg}
 
+	profileGuard := routeGuard{ok: cfg.ProfileStore != nil, msg: "profile store unavailable"}
+	serviceGuard := routeGuard{ok: cfg.ProfileService != nil, msg: "profile service unavailable"}
+	careerGuard := routeGuard{ok: cfg.CareerStore != nil, msg: "career store unavailable"}
+
 	// Main Profile
-	mux.HandleFunc("GET /api/v1/profile", h.getProfile)
-	mux.HandleFunc("PUT /api/v1/profile", h.updateProfile)
-	mux.HandleFunc("GET /api/v1/profile/full", h.getFullProfile)
+	mux.HandleFunc("GET /api/v1/profile", withRouteGuards(h.getProfile, profileGuard))
+	mux.HandleFunc("PUT /api/v1/profile", withRouteGuards(h.updateProfile, profileGuard))
+	mux.HandleFunc("GET /api/v1/profile/full", withRouteGuards(h.getFullProfile, profileGuard))
 	mux.HandleFunc("POST /api/v1/profile/jsonresume/import", h.importJSONResume)
-	mux.HandleFunc("GET /api/v1/profile/jsonresume/export", h.exportJSONResume)
+	mux.HandleFunc("GET /api/v1/profile/jsonresume/export", withRouteGuards(h.exportJSONResume, serviceGuard))
 	mux.HandleFunc("POST /api/v1/profile/pdf/parse", h.parsePDFResume)
 	mux.HandleFunc("GET /api/v1/profile/pdf/jobs/{id}", h.getPDFParseJob)
 	mux.HandleFunc("GET /profile/pdf/jobs/{id}", h.getPDFParseJob)
@@ -39,13 +43,7 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("POST /api/v1/profile/pdf/commit", h.commitPDFResume)
 
 	handleCareer := func(pattern string, fn http.HandlerFunc) {
-		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			if h.cfg.CareerStore == nil {
-				writeError(w, http.StatusInternalServerError, CodeInternalError, "career store unavailable", "")
-				return
-			}
-			fn(w, r)
-		})
+		mux.HandleFunc(pattern, withRouteGuards(fn, careerGuard))
 	}
 
 	// Skills
@@ -254,6 +252,15 @@ func parseSkillsInput(skillIDs []string) []core.Skill {
 
 // --- Main Profile Handlers ---
 
+// ensureProfileService checks that ProfileService is configured and writes a 500 JSON error otherwise.
+func (h *profileHandler) ensureProfileService(w http.ResponseWriter) bool {
+	if h.cfg.ProfileService == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+		return false
+	}
+	return true
+}
+
 // getProfile retrieves basic profile fields for the authenticated user.
 func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -371,8 +378,7 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if h.cfg.ProfileService == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+	if !h.ensureProfileService(w) {
 		return
 	}
 
@@ -397,11 +403,6 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 	var versionIDPtr *string
 	if v := strings.TrimSpace(r.URL.Query().Get("version_id")); v != "" {
 		versionIDPtr = &v
-	}
-
-	if h.cfg.ProfileService == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
-		return
 	}
 
 	resume, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, versionIDPtr)
@@ -769,8 +770,7 @@ func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if h.cfg.ProfileService == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+	if !h.ensureProfileService(w) {
 		return
 	}
 

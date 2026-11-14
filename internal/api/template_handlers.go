@@ -21,13 +21,16 @@ type templateHandler struct {
 func registerTemplateRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &templateHandler{cfg: cfg}
 
-	mux.HandleFunc("GET /api/v1/templates", h.listTemplates)
-	mux.HandleFunc("POST /api/v1/templates", h.createTemplate)
-	mux.HandleFunc("POST /api/v1/templates/preview", h.renderPreview)
-	mux.HandleFunc("GET /api/v1/templates/{id}", h.getTemplate)
-	mux.HandleFunc("GET /api/v1/templates/{id}/preview", h.previewTemplate)
-	mux.HandleFunc("PUT /api/v1/templates/{id}", h.updateTemplate)
-	mux.HandleFunc("DELETE /api/v1/templates/{id}", h.deleteTemplate)
+	storeGuard := routeGuard{ok: cfg.TemplateStore != nil, msg: "template store unavailable"}
+	renderGuard := routeGuard{ok: cfg.Renderer != nil, msg: "renderer unavailable"}
+
+	mux.HandleFunc("GET /api/v1/templates", withRouteGuards(h.listTemplates, storeGuard))
+	mux.HandleFunc("POST /api/v1/templates", withRouteGuards(h.createTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("POST /api/v1/templates/preview", withRouteGuards(h.renderPreview, renderGuard))
+	mux.HandleFunc("GET /api/v1/templates/{id}", withRouteGuards(h.getTemplate, storeGuard))
+	mux.HandleFunc("GET /api/v1/templates/{id}/preview", withRouteGuards(h.previewTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("PUT /api/v1/templates/{id}", withRouteGuards(h.updateTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("DELETE /api/v1/templates/{id}", withRouteGuards(h.deleteTemplate, storeGuard))
 }
 
 // RenderTemplatePreviewRequest defines parameters for rendering arbitrary Go template snippets on the server.
@@ -143,7 +146,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
 		return
 	}
@@ -206,7 +209,7 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
 		return
 	}
@@ -276,7 +279,11 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	txtTmpl := req.TextTemplate
 
 	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
-		if orig, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateID); err == nil && orig != nil {
+		if h.cfg.TemplateStore == nil {
+			writeError(w, http.StatusInternalServerError, CodeInternalError, "template store unavailable", "")
+			return
+		}
+		if orig, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateID); err == nil && orig != nil && (orig.UserID == userID || orig.IsBuiltIn || orig.UserID == core.SystemUserID) {
 			htmlTmpl = orig.HTMLTemplate
 			cssStyles = orig.CSSStyles
 			mdTmpl = orig.MarkdownTemplate

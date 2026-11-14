@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -27,6 +28,7 @@ func StripScriptTags(html string) string {
 	return stripScriptTags(html)
 }
 
+// stripScriptTags delegates script tag sanitization to the renderer package.
 func stripScriptTags(html string) string {
 	return renderer.StripScriptTags(html)
 }
@@ -43,6 +45,7 @@ func SanitizeXMLFence(content, tagName string) string {
 	return sanitizeXMLFence(content, tagName)
 }
 
+// sanitizeXMLFence escapes conflicting prompt boundary XML tags in untrusted inputs.
 func sanitizeXMLFence(content, tagName string) string {
 	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions|resume_document|extracted_candidate_data|ats_extraction_rules|ats_matching_rules|response_schema)\b[^>]*>`, regexp.QuoteMeta(tagName)))
 	safe := tagRegex.ReplaceAllStringFunc(content, func(m string) string {
@@ -83,7 +86,68 @@ func extractFormatOutput(format core.OutputFormat, html, md, text string) string
 	}
 }
 
-// registerTools registers all 8 domain tools onto the provided MCPServer instance.
+// toolDepCheck pairs a dependency availability condition with the MCP tool error returned when missing.
+type toolDepCheck struct {
+	ok  bool
+	msg string
+}
+
+// withToolDeps wraps handler with precondition checks returning an MCP tool error if a dependency is nil.
+func withToolDeps(handler serverSDK.ToolHandlerFunc, checks ...toolDepCheck) serverSDK.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
+		for _, c := range checks {
+			if !c.ok {
+				return mcpSDK.NewToolResultError(c.msg), nil
+			}
+		}
+		return handler(ctx, req)
+	}
+}
+
+// careerStoreDep verifies CareerStore is configured.
+func careerStoreDep(cfg ServerConfig) toolDepCheck {
+	return toolDepCheck{ok: cfg.CareerStore != nil, msg: "career store unavailable"}
+}
+
+// branchStoreDep verifies BranchStore is configured.
+func branchStoreDep(cfg ServerConfig) toolDepCheck {
+	return toolDepCheck{ok: cfg.BranchStore != nil, msg: "branch store unavailable"}
+}
+
+// branchServiceDep verifies BranchService is configured.
+func branchServiceDep(cfg ServerConfig) toolDepCheck {
+	return toolDepCheck{ok: cfg.BranchService != nil, msg: "branch service unavailable"}
+}
+
+// templateStoreDep verifies TemplateStore is configured.
+func templateStoreDep(cfg ServerConfig) toolDepCheck {
+	return toolDepCheck{ok: cfg.TemplateStore != nil, msg: "template store unavailable"}
+}
+
+// presetStoreDep verifies PresetStore is configured.
+func presetStoreDep(cfg ServerConfig) toolDepCheck {
+	return toolDepCheck{ok: cfg.PresetStore != nil, msg: "preset store unavailable"}
+}
+
+// mcpDomainErrorMessage maps known domain sentinels to client-safe error text while hiding internal/upstream errors.
+func mcpDomainErrorMessage(action string, err error) string {
+	switch {
+	case errors.Is(err, core.ErrValidation):
+		return fmt.Sprintf("invalid request to %s", action)
+	case errors.Is(err, core.ErrDefaultBranchImmutable):
+		return "default branch cannot be modified (immutable)"
+	case errors.Is(err, core.ErrConflict):
+		return fmt.Sprintf("conflict while trying to %s", action)
+	case errors.Is(err, core.ErrNotFound):
+		return fmt.Sprintf("target resource not found to %s", action)
+	case errors.Is(err, core.ErrForbidden):
+		return fmt.Sprintf("access denied to %s", action)
+	default:
+		return fmt.Sprintf("failed to %s due to an internal error", action)
+	}
+}
+
+// registerTools registers all 18 domain tools onto the provided MCPServer instance.
 //
 // Parameters:
 //   - s: Pointer to the MCPServer instance.
@@ -92,12 +156,15 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	// 1. get_main_profile
 	s.AddTool(mcpSDK.NewTool("get_main_profile",
 		mcpSDK.WithDescription("Retrieves the canonical main career profile snapshot (experiences, bullet facts, skills, education, certifications) for the authenticated user."),
-	), handleGetMainProfile(cfg))
+	), withToolDeps(handleGetMainProfile(cfg), toolDepCheck{
+		ok:  cfg.ProfileService != nil || cfg.ProfileStore != nil,
+		msg: "profile service and store unavailable",
+	}))
 
 	// 2. list_branches
 	s.AddTool(mcpSDK.NewTool("list_branches",
 		mcpSDK.WithDescription("Lists all tailored resume branches and their active version status for the authenticated user."),
-	), handleListBranches(cfg))
+	), withToolDeps(handleListBranches(cfg), branchStoreDep(cfg)))
 
 	// 3. render_resume
 	s.AddTool(mcpSDK.NewTool("render_resume",
@@ -107,7 +174,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithInteger("version_number", mcpSDK.Description("Sequential version number (e.g., 1, 2). If omitted, renders active version.")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional template set ID to override branch/version template")),
 		mcpSDK.WithString("template_id", mcpSDK.Description("Alias for template_set_id")),
-	), handleRenderResume(cfg))
+	), withToolDeps(handleRenderResume(cfg), branchStoreDep(cfg), templateStoreDep(cfg)))
 
 	// 4. add_experience
 	s.AddTool(mcpSDK.NewTool("add_experience",
@@ -119,7 +186,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithBoolean("is_current", mcpSDK.Description("Whether this is the candidate's current employment")),
 		mcpSDK.WithString("location", mcpSDK.Description("Geographical location (e.g., 'San Francisco, CA' or 'Remote')")),
 		mcpSDK.WithString("summary", mcpSDK.Description("Summary of core duties and responsibilities")),
-	), handleAddExperience(cfg))
+	), withToolDeps(handleAddExperience(cfg), careerStoreDep(cfg)))
 
 	// 5. add_achievement_bullet
 	s.AddTool(mcpSDK.NewTool("add_achievement_bullet",
@@ -127,7 +194,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("owner_id", mcpSDK.Required(), mcpSDK.Description("ID of the parent entity (work_experience, project, or education)")),
 		mcpSDK.WithString("owner_type", mcpSDK.Required(), mcpSDK.Description("Parent entity type: strictly 'work_experience', 'project', or 'education'")),
 		mcpSDK.WithString("statement", mcpSDK.Required(), mcpSDK.Description("Verifiable factual achievement or metric statement")),
-	), handleAddAchievementBullet(cfg))
+	), withToolDeps(handleAddAchievementBullet(cfg), careerStoreDep(cfg)))
 
 	// 6. create_branch
 	s.AddTool(mcpSDK.NewTool("create_branch",
@@ -141,7 +208,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional AI provider override (e.g., 'gemini', 'anthropic', 'openai')")),
 		mcpSDK.WithString("model_override", mcpSDK.Description("Optional LLM model override")),
 		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
-	), handleCreateBranch(cfg))
+	), withToolDeps(handleCreateBranch(cfg), branchServiceDep(cfg), templateStoreDep(cfg)))
 
 	// 7. update_branch
 	s.AddTool(mcpSDK.NewTool("update_branch",
@@ -158,7 +225,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("provider_override", mcpSDK.Description("Updated LLM provider override (e.g. 'gemini', 'anthropic', 'openai')")),
 		mcpSDK.WithString("model_override", mcpSDK.Description("Updated model identifier override")),
 		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Updated reasoning effort constraint: 'none', 'low', 'medium', 'high'")),
-	), handleUpdateBranch(cfg))
+	), withToolDeps(handleUpdateBranch(cfg), branchStoreDep(cfg), branchServiceDep(cfg)))
 
 	// 8. tailor_resume
 	s.AddTool(mcpSDK.NewTool("tailor_resume",
@@ -169,36 +236,36 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional LLM provider override")),
 		mcpSDK.WithString("model_override", mcpSDK.Description("Optional LLM model override")),
 		mcpSDK.WithString("reasoning_level", mcpSDK.Description("Optional reasoning effort constraint for thinking models: 'none', 'low', 'medium', 'high'")),
-	), handleTailorResume(cfg))
+	), withToolDeps(handleTailorResume(cfg), branchStoreDep(cfg), branchServiceDep(cfg)))
 
-	// 8. run_gap_analysis
+	// 9. run_gap_analysis
 	s.AddTool(mcpSDK.NewTool("run_gap_analysis",
 		mcpSDK.WithDescription("Executes a decoupled ATS keyword and qualification gap analysis between the candidate's career profile and target job description."),
 		mcpSDK.WithString("job_description", mcpSDK.Required(), mcpSDK.Description("Target job description or requirements text")),
 		mcpSDK.WithString("branch_id", mcpSDK.Description("Optional branch ID to contextually align analysis against")),
-	), handleRunGapAnalysis(cfg))
+	), withToolDeps(handleRunGapAnalysis(cfg), branchStoreDep(cfg), branchServiceDep(cfg)))
 
-	// 8b. simulate_ats
+	// 10. simulate_ats
 	s.AddTool(mcpSDK.NewTool("simulate_ats",
 		mcpSDK.WithDescription("Executes on-demand ATS extraction confidence and job matching score simulation for a completed tailored branch version."),
 		mcpSDK.WithString("branch_id", mcpSDK.Required(), mcpSDK.Description("ID of the target tailored resume branch")),
 		mcpSDK.WithString("version_id", mcpSDK.Description("Optional version ID or sequential version number (defaults to the active version)")),
 		mcpSDK.WithString("format", mcpSDK.Description("Optional text resume format to parse: 'markdown', 'html', or 'text' (defaults to 'markdown')")),
-	), handleSimulateATS(cfg))
+	), withToolDeps(handleSimulateATS(cfg), branchServiceDep(cfg)))
 
-	// 9. list_presets
+	// 11. list_presets
 	s.AddTool(mcpSDK.NewTool("list_presets",
 		mcpSDK.WithDescription("Lists all tailoring strategy presets accessible to the authenticated user, including system built-in presets and custom tenant presets."),
 		mcpSDK.WithString("language", mcpSDK.Description("Optional filter by target language (e.g., 'English', 'Spanish')")),
-	), handleListPresets(cfg))
+	), withToolDeps(handleListPresets(cfg), presetStoreDep(cfg)))
 
-	// 10. get_preset
+	// 12. get_preset
 	s.AddTool(mcpSDK.NewTool("get_preset",
 		mcpSDK.WithDescription("Retrieves the full configuration and system instructions for a specific tailoring strategy preset."),
 		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target tailoring preset")),
-	), handleGetPreset(cfg))
+	), withToolDeps(handleGetPreset(cfg), presetStoreDep(cfg)))
 
-	// 11. create_preset
+	// 13. create_preset
 	s.AddTool(mcpSDK.NewTool("create_preset",
 		mcpSDK.WithDescription("Creates a new custom tailoring strategy preset for the authenticated user with customizable prompt instructions and language."),
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the preset")),
@@ -207,9 +274,9 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional default template set ID to suggest with this preset")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
 		mcpSDK.WithString("language", mcpSDK.Description("Target output language for contextual translation (e.g. 'English', 'Spanish', 'French'). Defaults to 'English'. RTL languages are rejected.")),
-	), handleCreatePreset(cfg))
+	), withToolDeps(handleCreatePreset(cfg), presetStoreDep(cfg)))
 
-	// 12. update_preset
+	// 14. update_preset
 	s.AddTool(mcpSDK.NewTool("update_preset",
 		mcpSDK.WithDescription("Updates mutable fields on an existing custom tailoring strategy preset. Built-in presets are immutable and cannot be updated."),
 		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target preset to update")),
@@ -219,20 +286,20 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated default template set ID")),
 		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
 		mcpSDK.WithString("language", mcpSDK.Description("Updated target output language (validated, RTL languages rejected)")),
-	), handleUpdatePreset(cfg))
+	), withToolDeps(handleUpdatePreset(cfg), presetStoreDep(cfg)))
 
-	// 13. list_supported_languages
+	// 15. list_supported_languages
 	s.AddTool(mcpSDK.NewTool("list_supported_languages",
 		mcpSDK.WithDescription("Lists all supported left-to-right output languages and the default language ('English') for resume tailoring and presets."),
 	), handleListSupportedLanguages(cfg))
 
-	// 14. list_skills
+	// 16. list_skills
 	s.AddTool(mcpSDK.NewTool("list_skills",
 		mcpSDK.WithDescription("Lists skills registered in the candidate career profile and global system catalog, with optional type filtering ('all', 'global', 'custom')."),
 		mcpSDK.WithString("type", mcpSDK.Description("Filter by skill origin: 'all', 'global', or 'custom'")),
-	), handleListSkills(cfg))
+	), withToolDeps(handleListSkills(cfg), careerStoreDep(cfg)))
 
-	// 15. add_skill
+	// 17. add_skill
 	s.AddTool(mcpSDK.NewTool("add_skill",
 		mcpSDK.WithDescription("Adds a custom skill to the authenticated candidate's career profile."),
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Name of the skill")),
@@ -240,9 +307,9 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("proficiency", mcpSDK.Description("Skill proficiency level (e.g. 'Familiar', 'Proficient', 'Expert')")),
 		mcpSDK.WithNumber("years_experience", mcpSDK.Description("Number of years experience with this skill")),
 		mcpSDK.WithString("keywords", mcpSDK.Description("Comma-separated list of searchable skill keywords")),
-	), handleAddSkill(cfg))
+	), withToolDeps(handleAddSkill(cfg), careerStoreDep(cfg)))
 
-	// 16. update_skill
+	// 18. update_skill
 	s.AddTool(mcpSDK.NewTool("update_skill",
 		mcpSDK.WithDescription("Updates properties of an existing custom skill in the authenticated candidate's profile."),
 		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target skill to update")),
@@ -251,7 +318,7 @@ func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("proficiency", mcpSDK.Description("Updated skill proficiency level")),
 		mcpSDK.WithNumber("years_experience", mcpSDK.Description("Updated number of years experience")),
 		mcpSDK.WithString("keywords", mcpSDK.Description("Updated comma-separated list of searchable skill keywords")),
-	), handleUpdateSkill(cfg))
+	), withToolDeps(handleUpdateSkill(cfg), careerStoreDep(cfg)))
 }
 
 // handleGetMainProfile handles tool 'get_main_profile', returning the authenticated user's profile snapshot.
@@ -267,10 +334,8 @@ func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		var err error
 		if cfg.ProfileService != nil {
 			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
-		} else if cfg.ProfileStore != nil {
-			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
-			return mcpSDK.NewToolResultError("profile service and store unavailable"), nil
+			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		}
 
 		if err != nil {
@@ -389,8 +454,11 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			templateSetID = "builtin-standard-clean"
 		}
 
-		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID)
+		if err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return mcpSDK.NewToolResultError(msg), nil
+			}
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -426,10 +494,6 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.CareerStore == nil {
-			return mcpSDK.NewToolResultError("career store unavailable"), nil
-		}
 
 		args := parseArguments(req)
 
@@ -501,10 +565,6 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.CareerStore == nil {
-			return mcpSDK.NewToolResultError("career store unavailable"), nil
-		}
 
 		args := parseArguments(req)
 
@@ -608,14 +668,10 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		// Verify multi-tenant access to tailoring_strategy_id if provided
 		var stratPtr *string
 		if strategyID != "" {
-			preset, err := cfg.PresetStore.Preset(ctx, userID, strategyID)
-			if err != nil && (strings.HasPrefix(strategyID, "builtin-") || cfg.DefaultUserID != "") {
-				if p, pErr := cfg.PresetStore.Preset(ctx, cfg.DefaultUserID, strategyID); pErr == nil && p != nil {
-					preset = p
-					err = nil
+			if _, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, strategyID); err != nil {
+				if msg, ok := unavailableErrorMessage(err); ok {
+					return mcpSDK.NewToolResultError(msg), nil
 				}
-			}
-			if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 				return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strategyID)), nil
 			}
 			stratPtr = &strategyID
@@ -625,8 +681,10 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if templateSetID == "" {
 			templateSetID = "builtin-standard-clean"
 		}
-		tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return mcpSDK.NewToolResultError(msg), nil
+			}
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
 		}
 
@@ -720,14 +778,10 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if strat, ok := args["tailoring_strategy_id"].(string); ok {
 			strat = strings.TrimSpace(strat)
 			if strat != "" {
-				preset, err := cfg.PresetStore.Preset(ctx, userID, strat)
-				if err != nil && (strings.HasPrefix(strat, "builtin-") || cfg.DefaultUserID != "") {
-					if p, pErr := cfg.PresetStore.Preset(ctx, cfg.DefaultUserID, strat); pErr == nil && p != nil {
-						preset = p
-						err = nil
+				if _, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, strat); err != nil {
+					if msg, ok := unavailableErrorMessage(err); ok {
+						return mcpSDK.NewToolResultError(msg), nil
 					}
-				}
-				if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
 					return mcpSDK.NewToolResultError(fmt.Sprintf("tailoring strategy %q not found or access denied", strat)), nil
 				}
 				branch.TailoringStrategyID = &strat
@@ -740,8 +794,10 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if tmplID, ok := args["template_set_id"].(string); ok {
 			tmplID = strings.TrimSpace(tmplID)
 			if tmplID != "" {
-				tmpl, err := cfg.TemplateStore.Template(ctx, userID, tmplID)
-				if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+				if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, tmplID); err != nil {
+					if msg, ok := unavailableErrorMessage(err); ok {
+						return mcpSDK.NewToolResultError(msg), nil
+					}
 					return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", tmplID)), nil
 				}
 				branch.TemplateSetID = tmplID
@@ -769,7 +825,7 @@ func handleUpdateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		updatedBranch, err := cfg.BranchService.UpdateBranch(ctx, branch)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update branch", "branch_id", branchID, "err", err)
-			return mcpSDK.NewToolResultError(fmt.Sprintf("failed to update branch: %v", err)), nil
+			return mcpSDK.NewToolResultError(mcpDomainErrorMessage("update branch", err)), nil
 		}
 
 		res, err := jsonToolResult(updatedBranch)
@@ -945,7 +1001,7 @@ func handleSimulateATS(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		})
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to simulate ATS score", "branch_id", branchID, "err", err)
-			return mcpSDK.NewToolResultError(fmt.Sprintf("failed to simulate ATS score: %v", err)), nil
+			return mcpSDK.NewToolResultError(mcpDomainErrorMessage("simulate ATS score", err)), nil
 		}
 
 		res, err := jsonToolResult(score)
@@ -964,10 +1020,6 @@ func handleListPresets(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset store unavailable"), nil
-		}
 
 		presets, err := cfg.PresetStore.ListPresets(ctx, userID)
 		if err != nil {
@@ -1003,10 +1055,6 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset store unavailable"), nil
-		}
-
 		args := parseArguments(req)
 		presetID, _ := args["id"].(string)
 		presetID = strings.TrimSpace(presetID)
@@ -1014,8 +1062,8 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
+		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		if err != nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
 
@@ -1031,10 +1079,6 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset store unavailable"), nil
-		}
 
 		args := parseArguments(req)
 		name, _ := args["name"].(string)
@@ -1052,9 +1096,11 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 		templateSetID = strings.TrimSpace(templateSetID)
 
-		if templateSetID != "" && cfg.TemplateStore != nil {
-			tmpl, err := cfg.TemplateStore.Template(ctx, userID, templateSetID)
-			if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		if templateSetID != "" {
+			if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
+				if msg, ok := unavailableErrorMessage(err); ok {
+					return mcpSDK.NewToolResultError(msg), nil
+				}
 				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
 			}
 		}
@@ -1099,10 +1145,6 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset store unavailable"), nil
-		}
-
 		args := parseArguments(req)
 		presetID, _ := args["id"].(string)
 		presetID = strings.TrimSpace(presetID)
@@ -1110,8 +1152,8 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
+		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		if err != nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
 
@@ -1135,11 +1177,11 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			rawTemplateID = strings.TrimSpace(themeID)
 		}
 		if rawTemplateID != "" {
-			if cfg.TemplateStore != nil {
-				tmpl, tErr := cfg.TemplateStore.Template(ctx, userID, rawTemplateID)
-				if tErr != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
-					return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)), nil
+			if _, tErr := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, rawTemplateID); tErr != nil {
+				if msg, ok := unavailableErrorMessage(tErr); ok {
+					return mcpSDK.NewToolResultError(msg), nil
 				}
+				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)), nil
 			}
 			preset.TemplateSetID = rawTemplateID
 			preset.SuggestedThemeID = &rawTemplateID
@@ -1179,10 +1221,6 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.CareerStore == nil {
-			return mcpSDK.NewToolResultError("career store unavailable"), nil
-		}
 
 		args := parseArguments(req)
 		skillType, _ := args["type"].(string)
@@ -1285,10 +1323,6 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.CareerStore == nil {
-			return mcpSDK.NewToolResultError("career store unavailable"), nil
-		}
-
 		args := parseArguments(req)
 		name, _ := args["name"].(string)
 		name = strings.TrimSpace(name)
@@ -1337,10 +1371,6 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
-
-		if cfg.CareerStore == nil {
-			return mcpSDK.NewToolResultError("career store unavailable"), nil
-		}
 
 		args := parseArguments(req)
 		id, _ := args["id"].(string)

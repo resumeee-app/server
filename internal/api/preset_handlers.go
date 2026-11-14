@@ -17,13 +17,18 @@ type presetHandler struct {
 func registerPresetRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &presetHandler{cfg: cfg}
 
+	storeGuard := routeGuard{ok: cfg.PresetStore != nil, msg: "preset store unavailable"}
+	handlePreset := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, withRouteGuards(fn, storeGuard))
+	}
+
 	routes := []string{"/api/v1/presets", "/api/v1/tailoring-strategies", "/api/v1/strategies"}
 	for _, base := range routes {
-		mux.HandleFunc("GET "+base, h.listPresets)
-		mux.HandleFunc("POST "+base, h.createPreset)
-		mux.HandleFunc("GET "+base+"/{id}", h.getPreset)
-		mux.HandleFunc("PUT "+base+"/{id}", h.updatePreset)
-		mux.HandleFunc("DELETE "+base+"/{id}", h.deletePreset)
+		handlePreset("GET "+base, h.listPresets)
+		handlePreset("POST "+base, h.createPreset)
+		handlePreset("GET "+base+"/{id}", h.getPreset)
+		handlePreset("PUT "+base+"/{id}", h.updatePreset)
+		handlePreset("DELETE "+base+"/{id}", h.deletePreset)
 	}
 }
 
@@ -59,14 +64,11 @@ func validateModelOverride(enumerator core.ModelEnumerator, providerOverride, mo
 
 // validateTemplateAccess verifies that the target template exists and is accessible by the user.
 func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID string, userID string) error {
-	if templateID == "" || h.cfg.TemplateStore == nil {
+	if templateID == "" {
 		return nil
 	}
-	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, templateID)
-	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
-		return core.ErrForbidden
-	}
-	return nil
+	_, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, templateID)
+	return err
 }
 
 // listPresets retrieves all user and built-in tailoring presets.
@@ -107,13 +109,13 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 
 	if themeID != nil && *themeID != "" {
 		if err := h.validateTemplateAccess(ctx, *themeID, userID); err != nil {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return
 		}
 	}
 	if req.TemplateSetID != "" && (themeID == nil || *themeID != req.TemplateSetID) {
 		if err := h.validateTemplateAccess(ctx, req.TemplateSetID, userID); err != nil {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return
 		}
 	}
@@ -198,7 +200,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	if req.SuggestedThemeID != nil {
 		if *req.SuggestedThemeID != "" {
 			if err := h.validateTemplateAccess(ctx, *req.SuggestedThemeID, userID); err != nil {
-				writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+				writeAccessError(w, err, "cannot access foreign template")
 				return
 			}
 		}
@@ -210,7 +212,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	if req.TemplateSetID != nil {
 		if *req.TemplateSetID != "" {
 			if err := h.validateTemplateAccess(ctx, *req.TemplateSetID, userID); err != nil {
-				writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+				writeAccessError(w, err, "cannot access foreign template")
 				return
 			}
 		}
