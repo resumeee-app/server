@@ -1,7 +1,7 @@
 // Package server provides a configurable, dependency-injected HTTP REST and Model Context Protocol (MCP)
 // server for Resumeee.
 //
-// External dependencies (such as core.Store, core.AuthProvider, and core.LLMClient / core.LLMProvider)
+// External dependencies (such as core.Store, core.AuthProvider, and llm.Client / *llm.Registry)
 // are configured in their respective packages and injected into Server using functional With<Option> constructors.
 package server
 
@@ -368,6 +368,8 @@ func (s *Server) resolveAuthProvider(logger *slog.Logger) (auth.Provider, error)
 	return nil, errors.New("multi-tenant mode requires an injected AuthProvider (WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)")
 }
 
+// resolveLLMRegistry returns the configured llm.Registry (or constructs a new one)
+// and registers all explicitly injected llm.Client backends.
 func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
 	reg := s.llmRegistry
 	if reg == nil {

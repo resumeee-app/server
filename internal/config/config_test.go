@@ -1065,3 +1065,40 @@ func TestEnvironmentTemplates_CleanDocHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_NewLLMRegistry(t *testing.T) {
+	t.Run("nil config returns empty registry", func(t *testing.T) {
+		var nilCfg *config.Config
+		reg := nilCfg.NewLLMRegistry(nil)
+		if reg == nil {
+			t.Fatal("expected non-nil registry for nil Config")
+		}
+		if models := reg.AvailableModels(); len(models) != 0 {
+			t.Errorf("expected 0 models for nil Config, got %d", len(models))
+		}
+	})
+
+	t.Run("registers all configured providers", func(t *testing.T) {
+		cfg := &config.Config{
+			GeminiAPIKey:        "gem-key",
+			OpenAIAPIKey:        "oai-key",
+			AnthropicAPIKey:     "ant-key",
+			OpenAICompatBaseURL: "http://localhost:11434/v1",
+			OpenAICompatAPIKey:  "compat-key",
+		}
+		reg := cfg.NewLLMRegistry(nil)
+		models := reg.AvailableModels()
+		if len(models) == 0 {
+			t.Fatal("expected models from registered providers, got 0")
+		}
+		seen := make(map[string]bool)
+		for _, m := range models {
+			seen[m.Provider] = true
+		}
+		for _, want := range []string{"gemini", "openai", "anthropic", "compat"} {
+			if !seen[want] {
+				t.Errorf("expected provider %q in registered models, got providers %+v", want, seen)
+			}
+		}
+	})
+}

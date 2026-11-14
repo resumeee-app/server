@@ -24,10 +24,10 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	presetRepo := store
+	var presetStore core.PresetStore = store
 
 	router := api.NewRouter(api.RouterConfig{
-		PresetStore:   presetRepo,
+		PresetStore:   presetStore,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})
@@ -37,7 +37,7 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 		server.Close()
 	})
 
-	return server, presetRepo
+	return server, presetStore
 }
 
 func TestPresetImmutability_BuiltInPresets(t *testing.T) {

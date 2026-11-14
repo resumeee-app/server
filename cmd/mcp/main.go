@@ -21,10 +21,6 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/llm/anthropic"
-	"github.com/resumeee-app/resumeee-core/llm/gemini"
-	"github.com/resumeee-app/resumeee-core/llm/openai"
-	"github.com/resumeee-app/resumeee-core/llm/openaicompat"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
 	"github.com/resumeee-app/resumeee-core/renderer"
@@ -32,7 +28,7 @@ import (
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
-// StoreInitializer is a factory function initializing domain repositories and storage resources for the MCP server.
+// StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
 type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
 // defaultSQLiteInitializer creates a SQLite persistence backend and seeds default records.
@@ -83,7 +79,7 @@ func run(parent context.Context, in io.Reader, out io.Writer, args ...string) er
 //
 // Parameters:
 //   - parent: Cancellation context for process lifecycle.
-//   - storeInit: Storage backend initializer injecting repository implementations.
+//   - storeInit: Storage backend initializer injecting store implementations.
 //   - in: Standard input reader for incoming JSON-RPC requests.
 //   - out: Standard output writer for outgoing JSON-RPC responses.
 //   - args: Command-line arguments passed to flag parsing.
@@ -165,21 +161,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 
 	profileSvc := profile.New(profileStore, careerStore, branchStore)
 
-	llmRegistry := llm.NewRegistry(
-		llm.WithLogger(logger),
-	)
-	if cfg.GeminiAPIKey != "" {
-		llmRegistry.Register(gemini.New(cfg.GeminiAPIKey, gemini.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.OpenAIAPIKey != "" {
-		llmRegistry.Register(openai.New(cfg.OpenAIAPIKey, openai.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.AnthropicAPIKey != "" {
-		llmRegistry.Register(anthropic.New(cfg.AnthropicAPIKey, anthropic.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.OpenAICompatBaseURL != "" {
-		llmRegistry.Register(openaicompat.New(cfg.OpenAICompatBaseURL, cfg.OpenAICompatAPIKey, openaicompat.WithTimeout(cfg.LLMTimeout)))
-	}
+	llmRegistry := cfg.NewLLMRegistry(logger)
 	llmService := llm.NewService(llmRegistry)
 	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 

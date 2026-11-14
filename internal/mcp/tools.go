@@ -87,7 +87,7 @@ func extractFormatOutput(format core.OutputFormat, html, md, text string) string
 //
 // Parameters:
 //   - s: Pointer to the MCPServer instance.
-//   - cfg: ServerConfig providing dependencies, repositories, and timeouts.
+//   - cfg: ServerConfig providing dependencies, stores, and timeouts.
 func registerTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	// 1. get_main_profile
 	s.AddTool(mcpSDK.NewTool("get_main_profile",
@@ -270,12 +270,12 @@ func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		} else if cfg.ProfileStore != nil {
 			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
-			return mcpSDK.NewToolResultError("profile service and repository unavailable"), nil
+			return mcpSDK.NewToolResultError("profile service and store unavailable"), nil
 		}
 
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to get profile snapshot", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to retrieve main profile due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to retrieve main profile due to an internal store error"), nil
 		}
 
 		res, err := jsonToolResult(snapshot)
@@ -299,7 +299,7 @@ func handleListBranches(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		branches, err := cfg.BranchStore.ListBranches(ctx, userID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to list branches", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to list branches due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to list branches due to an internal store error"), nil
 		}
 
 		res, err := jsonToolResult(branches)
@@ -395,7 +395,10 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		var output string
-		prof, _ := cfg.ProfileStore.Profile(ctx, userID)
+		var prof *core.Profile
+		if cfg.ProfileStore != nil {
+			prof, _ = cfg.ProfileStore.Profile(ctx, userID)
+		}
 		if cfg.TemplateRenderer != nil && prof != nil && ver.TailoredContent != nil {
 			rendered, rErr := cfg.TemplateRenderer.Render(ctx, tmpl, prof, ver.TailoredContent)
 			if rErr == nil && rendered != nil {
@@ -423,6 +426,11 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.CareerStore == nil {
+			return mcpSDK.NewToolResultError("career store unavailable"), nil
+		}
+
 		args := parseArguments(req)
 
 		company, _ := args["company"].(string)
@@ -478,7 +486,7 @@ func handleAddExperience(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.CareerStore.CreateExperience(ctx, exp); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create experience", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create work experience due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to create work experience due to an internal store error"), nil
 		}
 
 		return mcpSDK.NewToolResultText(fmt.Sprintf("Experience created successfully with ID: %s", exp.EffectiveShortID())), nil
@@ -493,6 +501,11 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.CareerStore == nil {
+			return mcpSDK.NewToolResultError("career store unavailable"), nil
+		}
+
 		args := parseArguments(req)
 
 		ownerID, _ := args["owner_id"].(string)
@@ -544,7 +557,7 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.CareerStore.CreateFact(ctx, fact); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create achievement fact", "user_id", userID, "owner_id", ownerID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create achievement fact due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to create achievement fact due to an internal store error"), nil
 		}
 
 		return mcpSDK.NewToolResultText(fmt.Sprintf("Achievement bullet created successfully with ID: %s", fact.EffectiveShortID())), nil
@@ -641,7 +654,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		createdBranch, err := cfg.BranchService.CreateBranch(ctx, branch)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create branch", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create branch due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to create branch due to an internal store error"), nil
 		}
 
 		res, err := jsonToolResult(createdBranch)
@@ -953,13 +966,13 @@ func handleListPresets(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		_ = cfg.EnsureTenant(ctx, userID)
 
 		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+			return mcpSDK.NewToolResultError("preset store unavailable"), nil
 		}
 
 		presets, err := cfg.PresetStore.ListPresets(ctx, userID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to list presets", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to list presets due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to list presets due to an internal store error"), nil
 		}
 		if presets == nil {
 			presets = []core.Preset{}
@@ -991,7 +1004,7 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		_ = cfg.EnsureTenant(ctx, userID)
 
 		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+			return mcpSDK.NewToolResultError("preset store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1020,7 +1033,7 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		_ = cfg.EnsureTenant(ctx, userID)
 
 		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+			return mcpSDK.NewToolResultError("preset store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1070,7 +1083,7 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.PresetStore.CreatePreset(ctx, &preset); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create preset", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create preset due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to create preset due to an internal store error"), nil
 		}
 
 		return jsonToolResult(preset)
@@ -1087,7 +1100,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		_ = cfg.EnsureTenant(ctx, userID)
 
 		if cfg.PresetStore == nil {
-			return mcpSDK.NewToolResultError("preset repository unavailable"), nil
+			return mcpSDK.NewToolResultError("preset store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1141,7 +1154,7 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.PresetStore.UpdatePreset(ctx, preset); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update preset", "preset_id", presetID, "err", err)
-			return mcpSDK.NewToolResultError("failed to update preset due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to update preset due to an internal store error"), nil
 		}
 
 		return jsonToolResult(preset)
@@ -1167,8 +1180,8 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileStore == nil {
-			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		if cfg.CareerStore == nil {
+			return mcpSDK.NewToolResultError("career store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1197,7 +1210,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to list skills", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to list skills due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to list skills due to an internal store error"), nil
 		}
 		if skills == nil {
 			skills = []core.Skill{}
@@ -1272,8 +1285,8 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileStore == nil {
-			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		if cfg.CareerStore == nil {
+			return mcpSDK.NewToolResultError("career store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1309,7 +1322,7 @@ func handleAddSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.CareerStore.CreateSkill(ctx, &skill); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create skill", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create skill due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to create skill due to an internal store error"), nil
 		}
 
 		return jsonToolResult(skill)
@@ -1325,8 +1338,8 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		if cfg.ProfileStore == nil {
-			return mcpSDK.NewToolResultError("profile repository unavailable"), nil
+		if cfg.CareerStore == nil {
+			return mcpSDK.NewToolResultError("career store unavailable"), nil
 		}
 
 		args := parseArguments(req)
@@ -1359,7 +1372,7 @@ func handleUpdateSkill(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		if err := cfg.CareerStore.UpdateSkill(ctx, skill); err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to update skill", "id", id, "err", err)
-			return mcpSDK.NewToolResultError("failed to update skill due to an internal repository error"), nil
+			return mcpSDK.NewToolResultError("failed to update skill due to an internal store error"), nil
 		}
 
 		return jsonToolResult(skill)

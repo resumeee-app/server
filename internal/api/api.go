@@ -67,10 +67,12 @@ func (q *ChannelQueue[T]) Channel() <-chan T {
 	return q.ch
 }
 
-// ChannelJobEnqueuer implements JobEnqueuer backed by ChannelQueue[core.GenerationJob].
+// ChannelJobEnqueuer implements branch.JobEnqueuer backed by ChannelQueue[core.GenerationJob].
 type ChannelJobEnqueuer struct {
 	queue *ChannelQueue[core.GenerationJob]
 }
+
+var _ branch.JobEnqueuer = (*ChannelJobEnqueuer)(nil)
 
 // NewChannelJobEnqueuer creates a new ChannelJobEnqueuer with the given buffer capacity.
 func NewChannelJobEnqueuer(capacity int) *ChannelJobEnqueuer {
@@ -89,10 +91,12 @@ func (e *ChannelJobEnqueuer) Channel() <-chan core.GenerationJob {
 	return e.queue.Channel()
 }
 
-// ChannelPDFJobEnqueuer implements PDFJobEnqueuer backed by ChannelQueue[core.PDFParseJobTask].
+// ChannelPDFJobEnqueuer implements core.PDFJobEnqueuer backed by ChannelQueue[core.PDFParseJobTask].
 type ChannelPDFJobEnqueuer struct {
 	queue *ChannelQueue[core.PDFParseJobTask]
 }
+
+var _ core.PDFJobEnqueuer = (*ChannelPDFJobEnqueuer)(nil)
 
 // NewChannelPDFJobEnqueuer creates a new ChannelPDFJobEnqueuer with the given buffer capacity.
 func NewChannelPDFJobEnqueuer(capacity int) *ChannelPDFJobEnqueuer {
@@ -156,6 +160,7 @@ type RouterConfig struct {
 	MonthlyTokenLimit int
 }
 
+// defaultTenantProvisioner lazily seeds default tenant data on first authenticated request.
 type defaultTenantProvisioner struct {
 	store         core.Store
 	profileStore  core.ProfileStore
@@ -165,6 +170,9 @@ type defaultTenantProvisioner struct {
 	provisioned   sync.Map
 }
 
+var _ TenantProvisioner = (*defaultTenantProvisioner)(nil)
+
+// EnsureTenantProvisioned idempotently provisions default tenant records for userID if not already cached.
 func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error {
 	if _, ok := p.provisioned.Load(userID); ok {
 		return nil
@@ -192,8 +200,40 @@ func getUserID(r *http.Request, defaultID string) string {
 	return "default"
 }
 
+// resolveStoreDefaults populates any unset individual store fields from cfg.Store.
+func resolveStoreDefaults(cfg *RouterConfig) {
+	if cfg.Store == nil {
+		return
+	}
+	if cfg.ProfileStore == nil {
+		cfg.ProfileStore = cfg.Store.Profiles()
+	}
+	if cfg.CareerStore == nil {
+		cfg.CareerStore = cfg.Store.Career()
+	}
+	if cfg.PresetStore == nil {
+		cfg.PresetStore = cfg.Store.Presets()
+	}
+	if cfg.TemplateStore == nil {
+		cfg.TemplateStore = cfg.Store.Templates()
+	}
+	if cfg.BranchStore == nil {
+		cfg.BranchStore = cfg.Store.Branches()
+	}
+	if cfg.PDFJobStore == nil {
+		cfg.PDFJobStore = cfg.Store.PDFJobs()
+	}
+	if cfg.QuotaStore == nil {
+		cfg.QuotaStore = cfg.Store.Quotas()
+	}
+	if cfg.UserStore == nil {
+		cfg.UserStore = cfg.Store.Users()
+	}
+}
+
 // NewRouter constructs a net/http router and registers all OpenAPI routes under /api/v1.
 func NewRouter(cfg RouterConfig) http.Handler {
+	resolveStoreDefaults(&cfg)
 	if cfg.DefaultUserID == "" {
 		cfg.DefaultUserID = "default"
 	}
@@ -226,6 +266,10 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	if cfg.PromptCompiler == nil {
 		cfg.PromptCompiler = llm.NewPromptCompiler()
+	}
+
+	if cfg.ProfileService == nil && cfg.ProfileStore != nil && cfg.CareerStore != nil && cfg.BranchStore != nil {
+		cfg.ProfileService = profile.New(cfg.ProfileStore, cfg.CareerStore, cfg.BranchStore)
 	}
 
 	if cfg.BranchService == nil && cfg.BranchStore != nil {

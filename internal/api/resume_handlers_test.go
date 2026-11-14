@@ -29,13 +29,13 @@ func (m *mockLLMProvider) GenerateTailoredResume(_ context.Context, _ core.Gener
 }
 
 type resumeTestEnv struct {
-	server       *httptest.Server
-	db           any
-	branchRepo   core.BranchStore
-	profileRepo  core.ProfileStore
-	presetRepo   core.PresetStore
-	templateRepo core.TemplateStore
-	mockProvider *mockLLMProvider
+	server        *httptest.Server
+	db            any
+	branchStore   core.BranchStore
+	profileStore  core.ProfileStore
+	presetStore   core.PresetStore
+	templateStore core.TemplateStore
+	mockProvider  *mockLLMProvider
 }
 
 func setupResumeTestServer(t *testing.T) *resumeTestEnv {
@@ -48,27 +48,27 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
+	var profileStore core.ProfileStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
 	mockProv := &mockLLMProvider{}
 	rend := renderer.New()
 
 	branchSvc := branch.New(branch.Config{
-		Branches:  branchRepo,
-		Profiles:  profileRepo,
-		Presets:   presetRepo,
-		Templates: templateRepo,
+		Branches:  branchStore,
+		Profiles:  profileStore,
+		Presets:   presetStore,
+		Templates: templateStore,
 		Validator: provenance.New(),
 		Renderer:  rend,
 	})
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:  profileRepo,
-		PresetStore:   presetRepo,
-		TemplateStore: templateRepo,
-		BranchStore:   branchRepo,
+		ProfileStore:  profileStore,
+		PresetStore:   presetStore,
+		TemplateStore: templateStore,
+		BranchStore:   branchStore,
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
@@ -81,13 +81,13 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 	})
 
 	return &resumeTestEnv{
-		server:       server,
-		db:           store,
-		branchRepo:   branchRepo,
-		profileRepo:  profileRepo,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
-		mockProvider: mockProv,
+		server:        server,
+		db:            store,
+		branchStore:   branchStore,
+		profileStore:  profileStore,
+		presetStore:   presetStore,
+		templateStore: templateStore,
+		mockProvider:  mockProv,
 	}
 }
 
@@ -105,7 +105,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		Name:          "Stripe - Staff Backend",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, targetResume); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, targetResume); err != nil {
 		t.Fatalf("failed to create target resume: %v", err)
 	}
 
@@ -145,10 +145,10 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		CreatedAt:         now,
 		CompletedAt:       &now,
 	}
-	if err := env.branchRepo.CreateVersion(ctx, vCompleted); err != nil {
+	if err := env.branchStore.CreateVersion(ctx, vCompleted); err != nil {
 		t.Fatalf("failed to create completed version: %v", err)
 	}
-	_ = env.branchRepo.CompleteVersion(ctx, vCompleted)
+	_ = env.branchStore.CompleteVersion(ctx, vCompleted)
 
 	// Create alternative custom template for user
 	userTemplate := &core.TemplateSet{
@@ -163,7 +163,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := env.templateRepo.CreateTemplate(ctx, userTemplate); err != nil {
+	if err := env.templateStore.CreateTemplate(ctx, userTemplate); err != nil {
 		t.Fatalf("failed to create user template: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := env.templateRepo.CreateTemplate(ctx, foreignTemplate); err != nil {
+	if err := env.templateStore.CreateTemplate(ctx, foreignTemplate); err != nil {
 		t.Fatalf("failed to create foreign template: %v", err)
 	}
 
@@ -238,7 +238,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		}
 
 		// 3. Assert version immutability: check historical version in DB is unchanged
-		freshVersion, err := env.branchRepo.Version(ctx, targetResume.ID, vCompleted.ID)
+		freshVersion, err := env.branchStore.Version(ctx, targetResume.ID, vCompleted.ID)
 		if err != nil {
 			t.Fatalf("failed to retrieve version from DB: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 			TailoredContent:   tailoredContent,
 			CreatedAt:         time.Now().UTC(),
 		}
-		if err := env.branchRepo.CreateVersion(ctx, vPending); err != nil {
+		if err := env.branchStore.CreateVersion(ctx, vPending); err != nil {
 			t.Fatalf("failed to create pending version: %v", err)
 		}
 
@@ -301,7 +301,7 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 			ErrorMessage:      "LLM failed to respond",
 			CreatedAt:         time.Now().UTC(),
 		}
-		if err := env.branchRepo.CreateVersion(ctx, vFailed); err != nil {
+		if err := env.branchStore.CreateVersion(ctx, vFailed); err != nil {
 			t.Fatalf("failed to create failed version: %v", err)
 		}
 
@@ -362,7 +362,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		TextTemplate:     "Forbidden",
 		IsBuiltIn:        false,
 	}
-	if err := env.templateRepo.CreateTemplate(ctx, foreignTmpl); err != nil {
+	if err := env.templateStore.CreateTemplate(ctx, foreignTmpl); err != nil {
 		t.Fatalf("failed to create attacker template: %v", err)
 	}
 
@@ -374,7 +374,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		SystemInstructions: "Strictly confidential attacker directives",
 		TemplateSetID:      "builtin-standard-clean",
 	}
-	if err := env.presetRepo.CreatePreset(ctx, foreignStrat); err != nil {
+	if err := env.presetStore.CreatePreset(ctx, foreignStrat); err != nil {
 		t.Fatalf("failed to create attacker strategy: %v", err)
 	}
 
@@ -457,7 +457,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		Name:          "Legitimate Branch",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, legitBranch); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, legitBranch); err != nil {
 		t.Fatalf("failed to create legit branch: %v", err)
 	}
 
@@ -529,7 +529,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 		Name:          "Site Reliability Lead",
 		TemplateSetID: core.TemplateStandardCleanID,
 	}
-	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -547,10 +547,10 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			},
 		},
 	}
-	if err := env.branchRepo.CreateVersion(ctx, v); err != nil {
+	if err := env.branchStore.CreateVersion(ctx, v); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
-	if err := env.branchRepo.CompleteVersion(ctx, v); err != nil {
+	if err := env.branchStore.CompleteVersion(ctx, v); err != nil {
 		t.Fatalf("failed to complete version: %v", err)
 	}
 
@@ -657,10 +657,10 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 				},
 			},
 		}
-		if err := env.branchRepo.CreateVersion(ctx, v2); err != nil {
+		if err := env.branchStore.CreateVersion(ctx, v2); err != nil {
 			t.Fatalf("failed to create version 2: %v", err)
 		}
-		if err := env.branchRepo.CompleteVersion(ctx, v2); err != nil {
+		if err := env.branchStore.CompleteVersion(ctx, v2); err != nil {
 			t.Fatalf("failed to complete version 2: %v", err)
 		}
 
@@ -736,7 +736,7 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			Name:          "Legacy Infrastructure Engineer",
 			TemplateSetID: core.TemplateStandardCleanID,
 		}
-		if err := env.branchRepo.CreateBranch(ctx, bLegacy); err != nil {
+		if err := env.branchStore.CreateBranch(ctx, bLegacy); err != nil {
 			t.Fatalf("failed to create legacy branch: %v", err)
 		}
 
@@ -753,15 +753,15 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 				},
 			},
 		}
-		if err := env.branchRepo.CreateVersion(ctx, vLegacy); err != nil {
+		if err := env.branchStore.CreateVersion(ctx, vLegacy); err != nil {
 			t.Fatalf("failed to create legacy version: %v", err)
 		}
 
 		// Directly set ActiveVersionID without gap_report in store (simulating legacy data)
 		bLegacy.ActiveVersionID = &vLegacy.ID
 		bLegacy.GapReport = nil
-		if err := env.branchRepo.UpdateBranch(ctx, bLegacy); err != nil {
-			t.Fatalf("failed to update legacy branch in repo: %v", err)
+		if err := env.branchStore.UpdateBranch(ctx, bLegacy); err != nil {
+			t.Fatalf("failed to update legacy branch in store: %v", err)
 		}
 
 		// Verify GET /api/v1/branches/{id} fallback resolution
@@ -834,7 +834,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 
 	// 1. Default Main Branch must be rejected
 	t.Run("POST /api/v1/branches/{id}/ats-score rejects default branch with 400 Bad Request", func(t *testing.T) {
-		branches, err := env.branchRepo.ListBranches(ctx, userID)
+		branches, err := env.branchStore.ListBranches(ctx, userID)
 		if err != nil {
 			t.Fatalf("ListBranches failed: %v", err)
 		}
@@ -869,7 +869,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			TargetRequirements: "",
 			TemplateSetID:      core.TemplateStandardCleanID,
 		}
-		if err := env.branchRepo.CreateBranch(ctx, bNoJD); err != nil {
+		if err := env.branchStore.CreateBranch(ctx, bNoJD); err != nil {
 			t.Fatalf("CreateBranch failed: %v", err)
 		}
 
@@ -896,7 +896,7 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			TargetRequirements: "5+ years Go, Kubernetes, and distributed consensus experience.",
 			TemplateSetID:      core.TemplateStandardCleanID,
 		}
-		if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+		if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 			t.Fatalf("CreateBranch failed: %v", err)
 		}
 
@@ -907,10 +907,10 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			Status:           core.VersionStatusCompleted,
 			MarkdownOutput:   "# Jane Doe\n## Summary\nDistributed systems engineer skilled in Go and Kubernetes.\n## Experience\n- Built high-availability services.",
 		}
-		if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
+		if err := env.branchStore.CreateVersion(ctx, v1); err != nil {
 			t.Fatalf("CreateVersion failed: %v", err)
 		}
-		if err := env.branchRepo.CompleteVersion(ctx, v1); err != nil {
+		if err := env.branchStore.CompleteVersion(ctx, v1); err != nil {
 			t.Fatalf("CompleteVersion failed: %v", err)
 		}
 

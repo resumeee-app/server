@@ -54,7 +54,7 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	server := resumeeeMCP.NewServer(cfg)
 	newTenantID := "tenant-lazy-123"
 
-	// Verify tenant is initially unprovisioned in the repository
+	// Verify tenant is initially unprovisioned in the store
 	initialProf, _ := store.Profile(ctx, newTenantID)
 	if initialProf != nil {
 		t.Fatalf("expected new tenant to be unprovisioned initially")
@@ -583,4 +583,108 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for handler to terminate after cancellation")
 	}
+}
+
+func TestMCP_CareerStoreSeparation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil CareerStore returns career store unavailable error", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		cfg := resumeeeMCP.ServerConfig{
+			ProfileStore:  store,
+			BranchStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+		}
+		server := resumeeeMCP.NewServer(cfg)
+		userCtx := resumeeeMCP.WithUserID(ctx, "user-1")
+
+		cases := []struct {
+			name string
+			args map[string]any
+		}{
+			{
+				name: "list_skills",
+				args: map[string]any{"type": "custom"},
+			},
+			{
+				name: "add_skill",
+				args: map[string]any{"name": "Rust", "category": "Languages", "proficiency": "Proficient"},
+			},
+			{
+				name: "update_skill",
+				args: map[string]any{"id": "skill-1", "proficiency": "Expert"},
+			},
+			{
+				name: "add_experience",
+				args: map[string]any{"company": "Acme Corp", "role_title": "Lead Engineer", "start_date": "2023-01-01"},
+			},
+			{
+				name: "add_achievement_bullet",
+				args: map[string]any{"owner_id": "exp-1", "owner_type": "experience", "statement": "Shipped v2"},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				tool := server.GetTool(tc.name)
+				if tool == nil {
+					t.Fatalf("tool %s not registered", tc.name)
+				}
+				res, err := tool.Handler(userCtx, toolReq(tc.name, tc.args))
+				if err != nil {
+					t.Fatalf("unexpected protocol error for %s: %v", tc.name, err)
+				}
+				if !res.IsError {
+					t.Fatalf("expected tool error for %s when CareerStore is nil, got %+v", tc.name, res)
+				}
+				got := res.Content[0].(mcpSDK.TextContent).Text
+				if got != "career store unavailable" {
+					t.Errorf("expected %q, got %q", "career store unavailable", got)
+				}
+			})
+		}
+	})
+
+	t.Run("CareerStore without ProfileStore serves skill tools", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		cfg := resumeeeMCP.ServerConfig{
+			CareerStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+		}
+		server := resumeeeMCP.NewServer(cfg)
+		userCtx := resumeeeMCP.WithUserID(ctx, "user-1")
+
+		addTool := server.GetTool("add_skill")
+		addRes, err := addTool.Handler(userCtx, toolReq("add_skill", map[string]any{
+			"name":        "Go",
+			"category":    "Languages",
+			"proficiency": "Expert",
+		}))
+		if err != nil || addRes.IsError {
+			t.Fatalf("expected add_skill success without ProfileStore, got: %+v, err: %v", addRes, err)
+		}
+
+		listTool := server.GetTool("list_skills")
+		listRes, err := listTool.Handler(userCtx, toolReq("list_skills", map[string]any{"type": "custom"}))
+		if err != nil || listRes.IsError {
+			t.Fatalf("expected list_skills success without ProfileStore, got: %+v, err: %v", listRes, err)
+		}
+		var skills []core.Skill
+		if err := json.Unmarshal([]byte(listRes.Content[0].(mcpSDK.TextContent).Text), &skills); err != nil {
+			t.Fatalf("failed to unmarshal skills: %v", err)
+		}
+		if len(skills) == 0 {
+			t.Fatal("expected added skill to be listed")
+		}
+	})
 }

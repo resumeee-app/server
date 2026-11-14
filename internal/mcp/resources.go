@@ -109,12 +109,12 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 		} else if cfg.ProfileStore != nil {
 			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
-			return nil, errors.New("profile service and repository unavailable")
+			return nil, errors.New("profile service and store unavailable")
 		}
 
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to read main profile resource", "user_id", userID, "err", err)
-			return nil, errors.New("failed to retrieve profile due to an internal repository error")
+			return nil, errors.New("failed to retrieve profile due to an internal store error")
 		}
 
 		contents, err := jsonResourceContents("resumeee://profile/main", snapshot)
@@ -142,7 +142,7 @@ func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerF
 // by identifier, checks multi-tenant user ownership, attaches active version details, and returns JSON.
 //
 // Parameters:
-//   - cfg: ServerConfig providing branch repository access and REST timeout bounds.
+//   - cfg: ServerConfig providing branch store access and REST timeout bounds.
 //
 // Returns:
 //   - ResourceTemplateHandlerFunc compatible with the MCP SDK.
@@ -153,6 +153,10 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.BranchStore == nil {
+			return nil, errors.New("branch store unavailable")
+		}
 
 		branchID := strings.TrimPrefix(req.Params.URI, "resumeee://branches/")
 		branchID = strings.TrimSpace(branchID)
@@ -192,7 +196,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 // definition by identifier, checking multi-tenant ownership and built-in visibility.
 //
 // Parameters:
-//   - cfg: ServerConfig providing template repository access and REST timeout bounds.
+//   - cfg: ServerConfig providing template store access and REST timeout bounds.
 //
 // Returns:
 //   - ResourceTemplateHandlerFunc compatible with the MCP SDK.
@@ -203,6 +207,10 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
+
+		if cfg.TemplateStore == nil {
+			return nil, errors.New("template store unavailable")
+		}
 
 		templateID := strings.TrimPrefix(req.Params.URI, "resumeee://templates/")
 		templateID = strings.TrimSpace(templateID)
@@ -242,7 +250,7 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 		}
 
 		if cfg.PresetStore == nil {
-			return nil, errors.New("preset repository unavailable")
+			return nil, errors.New("preset store unavailable")
 		}
 
 		preset, err := cfg.PresetStore.Preset(ctx, userID, presetID)

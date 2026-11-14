@@ -26,26 +26,26 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
+	var profileStore core.ProfileStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
 	rend := renderer.New()
 
 	branchSvc := branch.New(branch.Config{
-		Branches:  branchRepo,
-		Profiles:  profileRepo,
-		Presets:   presetRepo,
-		Templates: templateRepo,
+		Branches:  branchStore,
+		Profiles:  profileStore,
+		Presets:   presetStore,
+		Templates: templateStore,
 		Validator: provenance.New(),
 		Renderer:  rend,
 	})
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:  profileRepo,
-		PresetStore:   presetRepo,
-		TemplateStore: templateRepo,
-		BranchStore:   branchRepo,
+		ProfileStore:  profileStore,
+		PresetStore:   presetStore,
+		TemplateStore: templateStore,
+		BranchStore:   branchStore,
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
@@ -70,7 +70,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := templateRepo.CreateTemplate(ctx, classicTemplate); err != nil {
+	if err := templateStore.CreateTemplate(ctx, classicTemplate); err != nil {
 		t.Fatalf("failed to create classic template: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := templateRepo.CreateTemplate(ctx, modernTemplate); err != nil {
+	if err := templateStore.CreateTemplate(ctx, modernTemplate); err != nil {
 		t.Fatalf("failed to create modern template: %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		Name:          "Frontend Architect",
 		TemplateSetID: "tmpl-classic-theme",
 	}
-	if err := branchRepo.CreateBranch(ctx, targetBranch); err != nil {
+	if err := branchStore.CreateBranch(ctx, targetBranch); err != nil {
 		t.Fatalf("failed to create target branch: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		TailoredContent:   &core.TailoredContent{Summary: "Lead developer"},
 		CreatedAt:         now,
 	}
-	if err := branchRepo.CreateVersion(ctx, v1); err != nil {
+	if err := branchStore.CreateVersion(ctx, v1); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 
@@ -201,9 +201,9 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	}
 
 	// 8. Verify database version immutability
-	dbVer, err := branchRepo.Version(ctx, targetBranch.ID, v1.ID)
+	dbVer, err := branchStore.Version(ctx, targetBranch.ID, v1.ID)
 	if err != nil {
-		t.Fatalf("failed to fetch version from repo: %v", err)
+		t.Fatalf("failed to fetch version from store: %v", err)
 	}
 	if dbVer.TemplateSetIDUsed != "tmpl-classic-theme" {
 		t.Errorf("version TemplateSetIDUsed mutated in DB: expected 'tmpl-classic-theme', got '%s'", dbVer.TemplateSetIDUsed)

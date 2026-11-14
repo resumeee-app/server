@@ -38,47 +38,57 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("GET /api/v1/profile/pdf/parse/{id}", h.getPDFParseJob)
 	mux.HandleFunc("POST /api/v1/profile/pdf/commit", h.commitPDFResume)
 
+	handleCareer := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			if h.cfg.CareerStore == nil {
+				writeError(w, http.StatusInternalServerError, CodeInternalError, "career store unavailable", "")
+				return
+			}
+			fn(w, r)
+		})
+	}
+
 	// Skills
-	mux.HandleFunc("GET /api/v1/skills", h.listSkills)
-	mux.HandleFunc("POST /api/v1/skills", h.createSkill)
-	mux.HandleFunc("GET /api/v1/skills/{id}", h.getSkill)
-	mux.HandleFunc("PUT /api/v1/skills/{id}", h.updateSkill)
-	mux.HandleFunc("DELETE /api/v1/skills/{id}", h.deleteSkill)
+	handleCareer("GET /api/v1/skills", h.listSkills)
+	handleCareer("POST /api/v1/skills", h.createSkill)
+	handleCareer("GET /api/v1/skills/{id}", h.getSkill)
+	handleCareer("PUT /api/v1/skills/{id}", h.updateSkill)
+	handleCareer("DELETE /api/v1/skills/{id}", h.deleteSkill)
 
 	// Work Experiences
-	mux.HandleFunc("GET /api/v1/experiences", h.listExperiences)
-	mux.HandleFunc("POST /api/v1/experiences", h.createExperience)
-	mux.HandleFunc("GET /api/v1/experiences/{id}", h.getExperience)
-	mux.HandleFunc("PUT /api/v1/experiences/{id}", h.updateExperience)
-	mux.HandleFunc("DELETE /api/v1/experiences/{id}", h.deleteExperience)
+	handleCareer("GET /api/v1/experiences", h.listExperiences)
+	handleCareer("POST /api/v1/experiences", h.createExperience)
+	handleCareer("GET /api/v1/experiences/{id}", h.getExperience)
+	handleCareer("PUT /api/v1/experiences/{id}", h.updateExperience)
+	handleCareer("DELETE /api/v1/experiences/{id}", h.deleteExperience)
 
 	// Projects
-	mux.HandleFunc("GET /api/v1/projects", h.listProjects)
-	mux.HandleFunc("POST /api/v1/projects", h.createProject)
-	mux.HandleFunc("GET /api/v1/projects/{id}", h.getProject)
-	mux.HandleFunc("PUT /api/v1/projects/{id}", h.updateProject)
-	mux.HandleFunc("DELETE /api/v1/projects/{id}", h.deleteProject)
+	handleCareer("GET /api/v1/projects", h.listProjects)
+	handleCareer("POST /api/v1/projects", h.createProject)
+	handleCareer("GET /api/v1/projects/{id}", h.getProject)
+	handleCareer("PUT /api/v1/projects/{id}", h.updateProject)
+	handleCareer("DELETE /api/v1/projects/{id}", h.deleteProject)
 
 	// Education
-	mux.HandleFunc("GET /api/v1/education", h.listEducation)
-	mux.HandleFunc("POST /api/v1/education", h.createEducation)
-	mux.HandleFunc("GET /api/v1/education/{id}", h.getEducation)
-	mux.HandleFunc("PUT /api/v1/education/{id}", h.updateEducation)
-	mux.HandleFunc("DELETE /api/v1/education/{id}", h.deleteEducation)
+	handleCareer("GET /api/v1/education", h.listEducation)
+	handleCareer("POST /api/v1/education", h.createEducation)
+	handleCareer("GET /api/v1/education/{id}", h.getEducation)
+	handleCareer("PUT /api/v1/education/{id}", h.updateEducation)
+	handleCareer("DELETE /api/v1/education/{id}", h.deleteEducation)
 
 	// Certifications
-	mux.HandleFunc("GET /api/v1/certifications", h.listCertifications)
-	mux.HandleFunc("POST /api/v1/certifications", h.createCertification)
-	mux.HandleFunc("GET /api/v1/certifications/{id}", h.getCertification)
-	mux.HandleFunc("PUT /api/v1/certifications/{id}", h.updateCertification)
-	mux.HandleFunc("DELETE /api/v1/certifications/{id}", h.deleteCertification)
+	handleCareer("GET /api/v1/certifications", h.listCertifications)
+	handleCareer("POST /api/v1/certifications", h.createCertification)
+	handleCareer("GET /api/v1/certifications/{id}", h.getCertification)
+	handleCareer("PUT /api/v1/certifications/{id}", h.updateCertification)
+	handleCareer("DELETE /api/v1/certifications/{id}", h.deleteCertification)
 
 	// Facts
-	mux.HandleFunc("GET /api/v1/facts", h.listFacts)
-	mux.HandleFunc("POST /api/v1/facts", h.createFact)
-	mux.HandleFunc("GET /api/v1/facts/{id}", h.getFact)
-	mux.HandleFunc("PUT /api/v1/facts/{id}", h.updateFact)
-	mux.HandleFunc("DELETE /api/v1/facts/{id}", h.deleteFact)
+	handleCareer("GET /api/v1/facts", h.listFacts)
+	handleCareer("POST /api/v1/facts", h.createFact)
+	handleCareer("GET /api/v1/facts/{id}", h.getFact)
+	handleCareer("PUT /api/v1/facts/{id}", h.updateFact)
+	handleCareer("DELETE /api/v1/facts/{id}", h.deleteFact)
 }
 
 // --- Request DTOs ---
@@ -361,6 +371,11 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if h.cfg.ProfileService == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+		return
+	}
+
 	snap, err := h.cfg.ProfileService.ImportJSONResume(ctx, userID, payload)
 	if err != nil {
 		if errors.Is(err, core.ErrValidation) {
@@ -382,6 +397,11 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 	var versionIDPtr *string
 	if v := strings.TrimSpace(r.URL.Query().Get("version_id")); v != "" {
 		versionIDPtr = &v
+	}
+
+	if h.cfg.ProfileService == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
+		return
 	}
 
 	resume, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, versionIDPtr)
@@ -628,7 +648,7 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 
 	// Asynchronous mode (default): enqueue and return 202 Accepted
 	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
 		return
 	}
 
@@ -709,7 +729,7 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job repository not configured", "")
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
 		return
 	}
 
@@ -746,6 +766,11 @@ func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request)
 	var testMap map[string]any
 	if err := json.Unmarshal(payload, &testMap); err != nil {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed JSON payload", err.Error())
+		return
+	}
+
+	if h.cfg.ProfileService == nil {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
 		return
 	}
 

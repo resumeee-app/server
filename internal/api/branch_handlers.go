@@ -773,7 +773,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Template Access Authorization
 	if h.cfg.TemplateStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "template repository unavailable", "")
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "template store unavailable", "")
 		return
 	}
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateSetID)

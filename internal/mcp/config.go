@@ -121,7 +121,7 @@ func (c *ServerConfig) setDefaults() {
 	}
 }
 
-// EnsureTenant lazily provisions a tenant in the repository if unprovisioned.
+// EnsureTenant lazily provisions a tenant in the configured stores if unprovisioned.
 // It ensures default profile, branch, and templates exist for the given user.
 func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
 	if userID == "" || c.ProfileStore == nil || c.BranchStore == nil || c.TemplateStore == nil {

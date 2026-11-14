@@ -23,10 +23,6 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/llm/anthropic"
-	"github.com/resumeee-app/resumeee-core/llm/gemini"
-	"github.com/resumeee-app/resumeee-core/llm/openai"
-	"github.com/resumeee-app/resumeee-core/llm/openaicompat"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
@@ -86,7 +82,7 @@ func run(parent context.Context, args ...string) error {
 //
 // Parameters:
 //   - parent: The parent context governing server lifecycle and cancellation signals.
-//   - storeInit: Storage backend initializer injecting repository implementations.
+//   - storeInit: Storage backend initializer injecting store implementations.
 //   - args: Command line arguments passed to flag parsing.
 //
 // Returns:
@@ -144,7 +140,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 		logger.Info("cleaned up interrupted generation versions")
 	}
 
-	// 2. Initialize repositories and domain services
+	// 2. Initialize stores and domain services
 	profileStore := store.Profiles()
 	careerStore := store.Career()
 	presetStore := store.Presets()
@@ -183,21 +179,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	}
 
 	// 4. Initialize LLM registry and service
-	llmRegistry := llm.NewRegistry(
-		llm.WithLogger(logger),
-	)
-	if cfg.GeminiAPIKey != "" {
-		llmRegistry.Register(gemini.New(cfg.GeminiAPIKey, gemini.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.OpenAIAPIKey != "" {
-		llmRegistry.Register(openai.New(cfg.OpenAIAPIKey, openai.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.AnthropicAPIKey != "" {
-		llmRegistry.Register(anthropic.New(cfg.AnthropicAPIKey, anthropic.WithTimeout(cfg.LLMTimeout)))
-	}
-	if cfg.OpenAICompatBaseURL != "" {
-		llmRegistry.Register(openaicompat.New(cfg.OpenAICompatBaseURL, cfg.OpenAICompatAPIKey, openaicompat.WithTimeout(cfg.LLMTimeout)))
-	}
+	llmRegistry := cfg.NewLLMRegistry(logger)
 	llmService := llm.NewService(llmRegistry)
 	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 

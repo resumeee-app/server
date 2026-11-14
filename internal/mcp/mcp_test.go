@@ -87,11 +87,11 @@ type jsonRPCResponse struct {
 
 type testEnv struct {
 	db               any
-	profileRepo      core.ProfileStore
+	profileStore     core.ProfileStore
 	careerStore      core.CareerStore
-	branchRepo       core.BranchStore
-	presetRepo       core.PresetStore
-	templateRepo     core.TemplateStore
+	branchStore      core.BranchStore
+	presetStore      core.PresetStore
+	templateStore    core.TemplateStore
 	profileSvc       *profile.Service
 	branchSvc        *branch.Service
 	templateRenderer renderer.TemplateRenderer
@@ -111,22 +111,23 @@ func setupTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("failed to seed store in memory: %v", err)
 	}
 
-	profileRepo := store
-	branchRepo := store
-	presetRepo := store
-	templateRepo := store
+	var profileStore core.ProfileStore = store
+	var careerStore core.CareerStore = store
+	var branchStore core.BranchStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
 	jobEnq := &dummyJobEnqueuer{}
 	llmSvc := &dummyLLMService{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	profileSvc := profile.New(profileRepo, branchRepo, profileRepo)
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 	branchSvc := branch.New(branch.Config{
-		Branches:    branchRepo,
-		Profiles:    profileRepo,
-		Presets:     presetRepo,
-		Templates:   templateRepo,
+		Branches:    branchStore,
+		Profiles:    profileStore,
+		Presets:     presetStore,
+		Templates:   templateStore,
 		JobEnqueuer: jobEnq,
 		Validator:   provValidator,
 		Renderer:    templateRenderer,
@@ -138,11 +139,11 @@ func setupTestEnv(t *testing.T) *testEnv {
 		ProfileService:        profileSvc,
 		BranchService:         branchSvc,
 		TemplateRenderer:      templateRenderer,
-		ProfileStore:          profileRepo,
-		CareerStore:           store,
-		BranchStore:           branchRepo,
-		TemplateStore:         templateRepo,
-		PresetStore:           presetRepo,
+		ProfileStore:          profileStore,
+		CareerStore:           careerStore,
+		BranchStore:           branchStore,
+		TemplateStore:         templateStore,
+		PresetStore:           presetStore,
 		JobEnqueuer:           jobEnq,
 		DefaultUserID:         "user-1",
 		Logger:                logger,
@@ -161,11 +162,11 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	return &testEnv{
 		db:               store,
-		profileRepo:      profileRepo,
+		profileStore:     profileStore,
 		careerStore:      store,
-		branchRepo:       branchRepo,
-		presetRepo:       presetRepo,
-		templateRepo:     templateRepo,
+		branchStore:      branchStore,
+		presetStore:      presetStore,
+		templateStore:    templateStore,
 		profileSvc:       profileSvc,
 		branchSvc:        branchSvc,
 		templateRenderer: templateRenderer,
@@ -319,10 +320,10 @@ func TestTool_AddExperience(t *testing.T) {
 			t.Errorf("expected creation text, got: %s", text)
 		}
 
-		// Verify in repository
+		// Verify in store
 		exps, err := env.careerStore.ListExperiences(ctx, "user-1")
 		if err != nil || len(exps) == 0 {
-			t.Fatalf("expected experience to be in repo, err: %v", err)
+			t.Fatalf("expected experience to be in store, err: %v", err)
 		}
 		if exps[0].Company != "Acme Corp" || exps[0].RoleTitle != "Lead Engineer" {
 			t.Errorf("unexpected experience details: %+v", exps[0])
@@ -466,7 +467,7 @@ func TestTool_CreateBranch(t *testing.T) {
 			MarkdownTemplate: "# {{.Summary}}",
 			TextTemplate:     "{{.Summary}}",
 		}
-		if err := env.templateRepo.CreateTemplate(context.Background(), foreignTmpl); err != nil {
+		if err := env.templateStore.CreateTemplate(context.Background(), foreignTmpl); err != nil {
 			t.Fatalf("failed to create foreign template: %v", err)
 		}
 
@@ -537,18 +538,18 @@ func TestTool_CreateBranch(t *testing.T) {
 			t.Errorf("expected template set 'builtin-standard-clean', got %q", created.TemplateSetID)
 		}
 
-		// Verify persistence in repository
-		savedBranch, err := env.branchRepo.Branch(ctx, "user-1", created.ID)
+		// Verify persistence in store
+		savedBranch, err := env.branchStore.Branch(ctx, "user-1", created.ID)
 		if err != nil || savedBranch == nil {
-			t.Fatalf("expected created branch to exist in repository, err: %v", err)
+			t.Fatalf("expected created branch to exist in store, err: %v", err)
 		}
 		if savedBranch.Name != created.Name || savedBranch.TargetRole != created.TargetRole {
-			t.Errorf("repository branch does not match created branch: %+v vs %+v", savedBranch, created)
+			t.Errorf("store branch does not match created branch: %+v vs %+v", savedBranch, created)
 		}
 
-		branches, err := env.branchRepo.ListBranches(ctx, "user-1")
+		branches, err := env.branchStore.ListBranches(ctx, "user-1")
 		if err != nil || len(branches) < 2 {
-			t.Fatalf("expected new branch to be created in repository, count: %d", len(branches))
+			t.Fatalf("expected new branch to be created in store, count: %d", len(branches))
 		}
 	})
 
@@ -616,7 +617,7 @@ func TestTool_CreateBranch(t *testing.T) {
 			t.Errorf("expected reasoning_level 'high', got %q", created.ReasoningLevel)
 		}
 
-		saved, err := env.branchRepo.Branch(ctx, "user-1", created.ID)
+		saved, err := env.branchStore.Branch(ctx, "user-1", created.ID)
 		if err != nil || saved == nil {
 			t.Fatalf("failed to retrieve saved branch: %v", err)
 		}
@@ -662,7 +663,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 		TargetRole:    "Engineer",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, initBranch); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, initBranch); err != nil {
 		t.Fatalf("failed to seed branch: %v", err)
 	}
 
@@ -790,7 +791,7 @@ func TestTool_UpdateBranch(t *testing.T) {
 			t.Errorf("expected reasoning_level 'medium', got %q", updated.ReasoningLevel)
 		}
 
-		saved, err := env.branchRepo.Branch(ctx, "user-1", "br-update-1")
+		saved, err := env.branchStore.Branch(ctx, "user-1", "br-update-1")
 		if err != nil || saved == nil {
 			t.Fatalf("failed to retrieve updated branch: %v", err)
 		}
@@ -813,7 +814,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 		TargetRole:    "Backend Engineer",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -842,7 +843,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 	}
 
 	// Verify branch requirements were updated with XML boundary fencing
-	updatedBranch, err := env.branchRepo.Branch(ctx, "user-1", "br-tailor-1")
+	updatedBranch, err := env.branchStore.Branch(ctx, "user-1", "br-tailor-1")
 	if err != nil {
 		t.Fatalf("failed to get updated branch: %v", err)
 	}
@@ -901,7 +902,7 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", res)
 		}
 
-		tailoredBranch, err := env.branchRepo.Branch(ctx, "user-1", "br-tailor-1")
+		tailoredBranch, err := env.branchStore.Branch(ctx, "user-1", "br-tailor-1")
 		if err != nil || tailoredBranch == nil {
 			t.Fatalf("failed to get tailored branch: %v", err)
 		}
@@ -965,7 +966,7 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 		Name:          "Render Branch",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -984,11 +985,11 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 		CreatedAt:         now,
 		CompletedAt:       &now,
 	}
-	if err := env.branchRepo.CreateVersion(ctx, ver); err != nil {
+	if err := env.branchStore.CreateVersion(ctx, ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 	b.ActiveVersionID = &ver.ID
-	_ = env.branchRepo.UpdateBranch(ctx, b)
+	_ = env.branchStore.UpdateBranch(ctx, b)
 
 	tool := env.mcpServer.GetTool("render_resume")
 	if tool == nil {
@@ -1064,7 +1065,7 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 
 	t.Run("Standalone unclosed script tag is stripped", func(t *testing.T) {
 		ver.HTMLOutput = `<div class="resume"><h1>John Doe</h1><script src="evil.js"><p>Engineer</p></div>`
-		_ = env.branchRepo.CompleteVersion(ctx, ver)
+		_ = env.branchStore.CompleteVersion(ctx, ver)
 
 		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
@@ -1430,7 +1431,7 @@ func TestResources_BranchDetails(t *testing.T) {
 		Name:          "Resource Branch",
 		TemplateSetID: "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -1748,7 +1749,7 @@ func TestTools_SimulateATS(t *testing.T) {
 		TargetRequirements: "Go, Kubernetes, and AWS infrastructure.",
 		TemplateSetID:      "builtin-standard-clean",
 	}
-	if err := env.branchRepo.CreateBranch(ctx, b); err != nil {
+	if err := env.branchStore.CreateBranch(ctx, b); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 	v1 := &core.BranchVersion{
@@ -1758,10 +1759,10 @@ func TestTools_SimulateATS(t *testing.T) {
 		Status:           core.VersionStatusCompleted,
 		MarkdownOutput:   "# Candidate\n## Summary\nCloud Engineer experienced in Go, Kubernetes, and AWS.",
 	}
-	if err := env.branchRepo.CreateVersion(ctx, v1); err != nil {
+	if err := env.branchStore.CreateVersion(ctx, v1); err != nil {
 		t.Fatalf("CreateVersion failed: %v", err)
 	}
-	if err := env.branchRepo.CompleteVersion(ctx, v1); err != nil {
+	if err := env.branchStore.CompleteVersion(ctx, v1); err != nil {
 		t.Fatalf("CompleteVersion failed: %v", err)
 	}
 

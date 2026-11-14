@@ -27,16 +27,16 @@ import (
 )
 
 type testEnv struct {
-	server       *httptest.Server
-	db           any
-	profileRepo  core.ProfileStore
-	presetRepo   core.PresetStore
-	templateRepo core.TemplateStore
-	branchRepo   core.BranchStore
-	profileSvc   *profile.Service
-	enqueuer     *api.ChannelJobEnqueuer
-	pdfJobRepo   core.PDFJobStore
-	pdfEnqueuer  *api.ChannelPDFJobEnqueuer
+	server        *httptest.Server
+	db            any
+	profileStore  core.ProfileStore
+	presetStore   core.PresetStore
+	templateStore core.TemplateStore
+	branchStore   core.BranchStore
+	profileSvc    *profile.Service
+	enqueuer      *api.ChannelJobEnqueuer
+	pdfJobStore   core.PDFJobStore
+	pdfEnqueuer   *api.ChannelPDFJobEnqueuer
 }
 
 func setupTestServer(t *testing.T, queueCap int) *testEnv {
@@ -49,11 +49,12 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
-	profileSvc := profile.New(profileRepo, branchRepo, profileRepo)
+	var profileStore core.ProfileStore = store
+	var careerStore core.CareerStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
 
@@ -63,11 +64,11 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	enqueuer := api.NewChannelJobEnqueuer(queueCap)
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:   profileRepo,
-		CareerStore:    store,
-		PresetStore:    presetRepo,
-		TemplateStore:  templateRepo,
-		BranchStore:    branchRepo,
+		ProfileStore:   profileStore,
+		CareerStore:    careerStore,
+		PresetStore:    presetStore,
+		TemplateStore:  templateStore,
+		BranchStore:    branchStore,
 		QuotaStore:     store,
 		ProfileService: profileSvc,
 		Renderer:       templateRenderer,
@@ -83,14 +84,14 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	})
 
 	return &testEnv{
-		server:       server,
-		db:           store,
-		profileRepo:  profileRepo,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
-		branchRepo:   branchRepo,
-		profileSvc:   profileSvc,
-		enqueuer:     enqueuer,
+		server:        server,
+		db:            store,
+		profileStore:  profileStore,
+		presetStore:   presetStore,
+		templateStore: templateStore,
+		branchStore:   branchStore,
+		profileSvc:    profileSvc,
+		enqueuer:      enqueuer,
 	}
 }
 
@@ -527,7 +528,7 @@ func TestFullUserJourney(t *testing.T) {
 			},
 		},
 	}
-	v1, err := env.branchRepo.Version(context.Background(), branch.ID, jobEnqueued.VersionID)
+	v1, err := env.branchStore.Version(context.Background(), branch.ID, jobEnqueued.VersionID)
 	if err != nil {
 		t.Fatalf("failed to fetch created version: %v", err)
 	}
@@ -536,7 +537,7 @@ func TestFullUserJourney(t *testing.T) {
 	v1.MarkdownOutput = "# Default User\n" + newSummary
 	v1.PlainTextOutput = "Default User\n" + newSummary
 	v1.Status = core.VersionStatusCompleted
-	if err := env.branchRepo.CompleteVersion(context.Background(), v1); err != nil {
+	if err := env.branchStore.CompleteVersion(context.Background(), v1); err != nil {
 		t.Fatalf("failed to complete version 1: %v", err)
 	}
 
@@ -875,7 +876,7 @@ func TestErrorEnvelopes(t *testing.T) {
 			TemplateSetIDUsed: core.TemplateStandardCleanID,
 			SourceType:        core.SourceTypeLLMGeneration,
 		}
-		if err := env.branchRepo.CreateVersion(context.Background(), v1); err != nil {
+		if err := env.branchStore.CreateVersion(context.Background(), v1); err != nil {
 			t.Fatalf("failed to create v1: %v", err)
 		}
 
@@ -1108,12 +1109,13 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
-	pdfJobRepo := store
-	profileSvc := profile.New(profileRepo, branchRepo, profileRepo)
+	var profileStore core.ProfileStore = store
+	var careerStore core.CareerStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
+	var pdfJobStore core.PDFJobStore = store
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
 	enqueuer := api.NewChannelJobEnqueuer(100)
@@ -1124,13 +1126,13 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:    profileRepo,
-		CareerStore:     store,
-		PresetStore:     presetRepo,
-		TemplateStore:   templateRepo,
-		BranchStore:     branchRepo,
+		ProfileStore:    profileStore,
+		CareerStore:     careerStore,
+		PresetStore:     presetStore,
+		TemplateStore:   templateStore,
+		BranchStore:     branchStore,
 		ProfileService:  profileSvc,
-		PDFJobStore:     pdfJobRepo,
+		PDFJobStore:     pdfJobStore,
 		PDFJobEnqueuer:  enq,
 		PDFExtractor:    pdf.NewExtractor(),
 		ResumeExtractor: resumeExtractor,
@@ -1149,16 +1151,16 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 	})
 
 	return &testEnv{
-		server:       server,
-		db:           store,
-		profileRepo:  profileRepo,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
-		branchRepo:   branchRepo,
-		profileSvc:   profileSvc,
-		enqueuer:     enqueuer,
-		pdfJobRepo:   pdfJobRepo,
-		pdfEnqueuer:  pdfEnqueuer,
+		server:        server,
+		db:            store,
+		profileStore:  profileStore,
+		presetStore:   presetStore,
+		templateStore: templateStore,
+		branchStore:   branchStore,
+		profileSvc:    profileSvc,
+		enqueuer:      enqueuer,
+		pdfJobStore:   pdfJobStore,
+		pdfEnqueuer:   pdfEnqueuer,
 	}
 }
 
@@ -1437,7 +1439,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		extractedResume := &core.JSONResume{
 			Basics: core.JSONResumeBasics{Name: "Morgan BrandNew"},
 		}
-		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
+		if err := env.pdfJobStore.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
 			t.Fatalf("failed to update job status: %v", err)
 		}
 
@@ -3028,4 +3030,78 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	if user.Email != "newuser@example.com" {
 		t.Errorf("expected email 'newuser@example.com', got %q", user.Email)
 	}
+}
+
+func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil CareerStore returns 500 JSON error without panic", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		router := api.NewRouter(api.RouterConfig{
+			ProfileStore:  memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		})
+		server := httptest.NewServer(router)
+		defer server.Close()
+		client := server.Client()
+
+		endpoints := []string{
+			"/api/v1/skills",
+			"/api/v1/experiences",
+			"/api/v1/projects",
+			"/api/v1/education",
+			"/api/v1/certifications",
+			"/api/v1/facts",
+		}
+
+		for _, ep := range endpoints {
+			resp, body := doRequest(t, client, http.MethodGet, server.URL+ep, nil, nil)
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Errorf("GET %s: expected 500, got %d (%s)", ep, resp.StatusCode, string(body))
+				continue
+			}
+			var errResp api.ErrorResponse
+			if err := json.Unmarshal(body, &errResp); err != nil {
+				t.Errorf("GET %s: decode error response: %v", ep, err)
+				continue
+			}
+			if errResp.Error.Code != api.CodeInternalError {
+				t.Errorf("GET %s: expected code %q, got %q", ep, api.CodeInternalError, errResp.Error.Code)
+			}
+			if errResp.Error.Message != "career store unavailable" {
+				t.Errorf("GET %s: expected message %q, got %q", ep, "career store unavailable", errResp.Error.Message)
+			}
+		}
+	})
+
+	t.Run("Store default populates CareerStore and ProfileService", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		router := api.NewRouter(api.RouterConfig{
+			Store:         memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		})
+		server := httptest.NewServer(router)
+		defer server.Close()
+		client := server.Client()
+
+		skillsResp, skillsBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/skills", nil, nil)
+		if skillsResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/skills: expected 200, got %d: %s", skillsResp.StatusCode, string(skillsBody))
+		}
+
+		snapResp, snapBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/full", nil, nil)
+		if snapResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/profile/full: expected 200, got %d: %s", snapResp.StatusCode, string(snapBody))
+		}
+	})
 }
