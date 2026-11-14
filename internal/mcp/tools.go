@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,7 +13,6 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/privacy"
 	"github.com/resumeee-app/resumeee-core/services/renderer"
 )
 
@@ -44,7 +44,12 @@ func SanitizeXMLFence(content, tagName string) string {
 }
 
 func sanitizeXMLFence(content, tagName string) string {
-	return privacy.SanitizeXMLFence(content, tagName)
+	tagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s|rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions|resume_document|extracted_candidate_data|ats_extraction_rules|ats_matching_rules|response_schema)\b[^>]*>`, regexp.QuoteMeta(tagName)))
+	safe := tagRegex.ReplaceAllStringFunc(content, func(m string) string {
+		escaped := strings.ReplaceAll(m, "<", "&lt;")
+		return strings.ReplaceAll(escaped, ">", "&gt;")
+	})
+	return fmt.Sprintf("<%s>\n%s\n</%s>", tagName, strings.TrimSpace(safe), tagName)
 }
 
 // parseArguments extracts and casts the tool arguments map from a CallToolRequest.

@@ -11,8 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1796,108 +1794,6 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		}
 		if capturedModel != "" {
 			t.Errorf("expected empty model override, got %q", capturedModel)
-		}
-	})
-
-	t.Run("PDF upload writes prompt and output markdown files to data/llm", func(t *testing.T) {
-		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
-		debugDir := t.TempDir()
-
-		// Mock upstream HTTP server returning valid OpenAI chat completion
-		upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			resp := map[string]any{
-				"choices": []map[string]any{
-					{
-						"message": map[string]any{
-							"role":    "assistant",
-							"content": `{"basics":{"name":"Morgan BrandNew","email":"morgan@brandnew.dev"}}`,
-						},
-					},
-				},
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-		}))
-		defer upstreamServer.Close()
-
-		// Configure LLM registry with prompt debugging enabled targeting debugDir
-		registry := llm.NewRegistry(llm.WithDebugPrompts(true, debugDir))
-		llm.RegisterClients(registry, llm.ProviderConfig{
-			CompatBaseURL: upstreamServer.URL + "/v1",
-			CompatAPIKey:  "test-key",
-		})
-		extractor := llm.NewDefaultResumeExtractor(registry)
-
-		env := setupTestServerWithExtractor(t, extractor)
-		client := env.server.Client()
-		baseURL := env.server.URL
-
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		part, err := mw.CreateFormFile("file", "resume.pdf")
-		if err != nil {
-			t.Fatalf("create form file failed: %v", err)
-		}
-		_, _ = part.Write(pdfBytes)
-		_ = mw.Close()
-
-		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/profile/pdf/parse", &buf)
-		req.Header.Set("Content-Type", mw.FormDataContentType())
-
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			t.Fatalf("expected status 200, got %d (body: %s)", resp.StatusCode, string(body))
-		}
-
-		// Verify files written to debugDir (partitioned by tenant)
-		targetDir := filepath.Join(debugDir, "default")
-		entries, err := os.ReadDir(targetDir)
-		if err != nil {
-			t.Fatalf("failed to read debugDir: %v", err)
-		}
-
-		var promptFiles, outputFiles []string
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), "_output.md") {
-				outputFiles = append(outputFiles, e.Name())
-			} else if strings.HasSuffix(e.Name(), ".md") {
-				promptFiles = append(promptFiles, e.Name())
-			}
-		}
-
-		if len(promptFiles) != 1 {
-			t.Fatalf("expected exactly 1 prompt file, got %d (%v)", len(promptFiles), promptFiles)
-		}
-		if len(outputFiles) != 1 {
-			t.Fatalf("expected exactly 1 output file, got %d (%v)", len(outputFiles), outputFiles)
-		}
-
-		promptContent, err := os.ReadFile(filepath.Join(targetDir, promptFiles[0]))
-		if err != nil {
-			t.Fatalf("failed to read prompt file: %v", err)
-		}
-		if !strings.Contains(string(promptContent), "# LLM Prompt: extract") {
-			t.Errorf("expected prompt file to contain '# LLM Prompt: extract', got:\n%s", string(promptContent))
-		}
-		if !strings.Contains(string(promptContent), "Morgan BrandNew Full-Stack Engineer") {
-			t.Errorf("expected prompt file to contain extracted resume text, got:\n%s", string(promptContent))
-		}
-
-		outputContent, err := os.ReadFile(filepath.Join(targetDir, outputFiles[0]))
-		if err != nil {
-			t.Fatalf("failed to read output file: %v", err)
-		}
-		if !strings.Contains(string(outputContent), "# LLM Response: extract") {
-			t.Errorf("expected output file to contain '# LLM Response: extract', got:\n%s", string(outputContent))
-		}
-		if !strings.Contains(string(outputContent), "Morgan BrandNew") {
-			t.Errorf("expected output file to contain raw response json, got:\n%s", string(outputContent))
 		}
 	})
 }

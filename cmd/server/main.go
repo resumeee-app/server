@@ -179,7 +179,6 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	// 4. Initialize LLM registry and service adapter
 	llmRegistry := llm.NewRegistry(
 		llm.WithLogger(logger),
-		llm.WithDebugPrompts(cfg.LLMDebugPrompts, cfg.LLMDebugDir),
 	)
 	llm.RegisterClients(llmRegistry, llm.ProviderConfig{
 		GeminiAPIKey:    cfg.GeminiAPIKey,

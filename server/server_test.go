@@ -76,6 +76,10 @@ func (m *mockLLMClient) Models() []core.ModelOption {
 	}
 }
 
+func (m *mockLLMClient) SupportsStructuredOutput(_ string) bool {
+	return false
+}
+
 func (m *mockLLMClient) Complete(_ context.Context, _ core.LLMCompletionRequest) (*core.LLMCompletionResponse, error) {
 	return &core.LLMCompletionResponse{
 		Text:       `{"tailored_content":{}}`,

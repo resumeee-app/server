@@ -161,7 +161,6 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 
 	llmRegistry := llm.NewRegistry(
 		llm.WithLogger(logger),
-		llm.WithDebugPrompts(cfg.LLMDebugPrompts, cfg.LLMDebugDir),
 	)
 	llm.RegisterClients(llmRegistry, llm.ProviderConfig{
 		GeminiAPIKey:    cfg.GeminiAPIKey,

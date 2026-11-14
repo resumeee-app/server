@@ -375,7 +375,6 @@ func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
 	if reg == nil {
 		reg = llm.NewRegistry(
 			llm.WithLogger(logger),
-			llm.WithDebugPrompts(s.cfg.LLMDebugPrompts, s.cfg.LLMDebugDir),
 		)
 	}
 
