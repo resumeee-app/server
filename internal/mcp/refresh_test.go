@@ -3,6 +3,9 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,10 +13,14 @@ import (
 	"time"
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
+	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func toolReq(name string, args map[string]any) mcpSDK.CallToolRequest {
@@ -41,11 +48,12 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -53,8 +61,8 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	server := resumeeeMCP.NewServer(cfg)
 	newTenantID := "tenant-lazy-123"
 
-	// Verify tenant is initially unprovisioned in the repository
-	initialProf, _ := store.GetProfile(ctx, newTenantID)
+	// Verify tenant is initially unprovisioned in the store
+	initialProf, _ := store.Profile(ctx, newTenantID)
 	if initialProf != nil {
 		t.Fatalf("expected new tenant to be unprovisioned initially")
 	}
@@ -75,7 +83,7 @@ func TestMCP_TenantProvisioning_LazyOnboarding(t *testing.T) {
 	}
 
 	// Verify that profile and default branch were created for the tenant
-	provProf, err := store.GetProfile(ctx, newTenantID)
+	provProf, err := store.Profile(ctx, newTenantID)
 	if err != nil || provProf == nil {
 		t.Fatalf("expected tenant profile to be provisioned, err: %v", err)
 	}
@@ -100,11 +108,12 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -145,7 +154,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("unexpected name: %q", createdPreset.Name)
 	}
 
-	persistedPreset, err := store.GetPreset(ctx, "user-1", createdPreset.ID)
+	persistedPreset, err := store.Preset(ctx, "user-1", createdPreset.ID)
 	if err != nil || persistedPreset == nil {
 		t.Fatalf("expected preset %q to be in store: %v", createdPreset.ID, err)
 	}
@@ -177,7 +186,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("expected default language %q, got %q", core.DefaultLanguage, defaultLangPreset.Language)
 	}
 
-	persistedDefaultPreset, err := store.GetPreset(ctx, "user-1", defaultLangPreset.ID)
+	persistedDefaultPreset, err := store.Preset(ctx, "user-1", defaultLangPreset.ID)
 	if err != nil || persistedDefaultPreset == nil {
 		t.Fatalf("expected default preset %q to be in store: %v", defaultLangPreset.ID, err)
 	}
@@ -240,7 +249,7 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("expected language 'French', got %q", updatedPreset.Language)
 	}
 
-	persistedUpdatedPreset, err := store.GetPreset(ctx, "user-1", createdPreset.ID)
+	persistedUpdatedPreset, err := store.Preset(ctx, "user-1", createdPreset.ID)
 	if err != nil || persistedUpdatedPreset == nil {
 		t.Fatalf("expected updated preset to be in store: %v", err)
 	}
@@ -327,11 +336,12 @@ func TestMCP_Resources_LanguagesAndPresets(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -402,11 +412,12 @@ func TestMCP_SkillsTools(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:   store,
-		BranchRepo:    store,
-		TemplateRepo:  store,
-		PresetRepo:    store,
-		UserRepo:      store,
+		ProfileStore:  store,
+		CareerStore:   store,
+		BranchStore:   store,
+		TemplateStore: store,
+		PresetStore:   store,
+		UserStore:     store,
 		DefaultUserID: "user-1",
 		RESTTimeout:   5 * time.Second,
 	}
@@ -442,7 +453,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 		t.Errorf("unexpected added skill fields: %+v", addedSkill)
 	}
 
-	persistedSkill, err := store.GetSkill(ctx, "user-1", addedSkill.ID)
+	persistedSkill, err := store.Skill(ctx, "user-1", addedSkill.ID)
 	if err != nil || persistedSkill == nil {
 		t.Fatalf("expected skill %q to be in store: %v", addedSkill.ID, err)
 	}
@@ -506,7 +517,7 @@ func TestMCP_SkillsTools(t *testing.T) {
 		t.Errorf("expected proficiency 'Expert', got %q", updatedSkill.Proficiency)
 	}
 
-	persistedUpdSkill, err := store.GetSkill(ctx, "user-1", addedSkill.ID)
+	persistedUpdSkill, err := store.Skill(ctx, "user-1", addedSkill.ID)
 	if err != nil || persistedUpdSkill == nil {
 		t.Fatalf("expected updated skill in store: %v", err)
 	}
@@ -523,11 +534,12 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	}
 
 	cfg := resumeeeMCP.ServerConfig{
-		ProfileRepo:           store,
-		BranchRepo:            store,
-		TemplateRepo:          store,
-		PresetRepo:            store,
-		UserRepo:              store,
+		ProfileStore:          store,
+		CareerStore:           store,
+		BranchStore:           store,
+		TemplateStore:         store,
+		PresetStore:           store,
+		UserStore:             store,
 		DefaultUserID:         "user-1",
 		RESTTimeout:           5 * time.Second,
 		MaxConnectionsPerUser: 5,
@@ -541,7 +553,7 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	handler := resumeeeMCP.NewHTTPHandler(mcpServer, cfg)
 
 	// Verify tenant is initially unprovisioned
-	if p, _ := store.GetProfile(ctx, "tenant-http-456"); p != nil {
+	if p, _ := store.Profile(ctx, "tenant-http-456"); p != nil {
 		t.Fatal("expected tenant to be initially unprovisioned")
 	}
 
@@ -564,7 +576,7 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify tenant has been provisioned
-	provProf, err := store.GetProfile(ctx, "tenant-http-456")
+	provProf, err := store.Profile(ctx, "tenant-http-456")
 	if err != nil || provProf == nil {
 		t.Fatalf("expected tenant profile to be provisioned via HTTP auth, err: %v", err)
 	}
@@ -578,4 +590,383 @@ func TestMCP_HTTP_LazyTenantProvisioning(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for handler to terminate after cancellation")
 	}
+}
+
+func TestMCP_CareerStoreSeparation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil CareerStore returns career store unavailable error", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		cfg := resumeeeMCP.ServerConfig{
+			ProfileStore:  store,
+			BranchStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+		}
+		server := resumeeeMCP.NewServer(cfg)
+		userCtx := resumeeeMCP.WithUserID(ctx, "user-1")
+
+		cases := []struct {
+			name string
+			args map[string]any
+		}{
+			{
+				name: "list_skills",
+				args: map[string]any{"type": "custom"},
+			},
+			{
+				name: "add_skill",
+				args: map[string]any{"name": "Rust", "category": "Languages", "proficiency": "Proficient"},
+			},
+			{
+				name: "update_skill",
+				args: map[string]any{"id": "skill-1", "proficiency": "Expert"},
+			},
+			{
+				name: "add_experience",
+				args: map[string]any{"company": "Acme Corp", "role_title": "Lead Engineer", "start_date": "2023-01-01"},
+			},
+			{
+				name: "add_achievement_bullet",
+				args: map[string]any{"owner_id": "exp-1", "owner_type": "work_experience", "statement": "Shipped v2"},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				tool := server.GetTool(tc.name)
+				if tool == nil {
+					t.Fatalf("tool %s not registered", tc.name)
+				}
+				res, err := tool.Handler(userCtx, toolReq(tc.name, tc.args))
+				if err != nil {
+					t.Fatalf("unexpected protocol error for %s: %v", tc.name, err)
+				}
+				if !res.IsError {
+					t.Fatalf("expected tool error for %s when CareerStore is nil, got %+v", tc.name, res)
+				}
+				got := res.Content[0].(mcpSDK.TextContent).Text
+				if got != "career store unavailable" {
+					t.Errorf("expected %q, got %q", "career store unavailable", got)
+				}
+			})
+		}
+	})
+
+	t.Run("CareerStore without ProfileStore serves skill tools", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		cfg := resumeeeMCP.ServerConfig{
+			CareerStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+		}
+		server := resumeeeMCP.NewServer(cfg)
+		userCtx := resumeeeMCP.WithUserID(ctx, "user-1")
+
+		addTool := server.GetTool("add_skill")
+		addRes, err := addTool.Handler(userCtx, toolReq("add_skill", map[string]any{
+			"name":        "Go",
+			"category":    "Languages",
+			"proficiency": "Expert",
+		}))
+		if err != nil || addRes.IsError {
+			t.Fatalf("expected add_skill success without ProfileStore, got: %+v, err: %v", addRes, err)
+		}
+
+		listTool := server.GetTool("list_skills")
+		listRes, err := listTool.Handler(userCtx, toolReq("list_skills", map[string]any{"type": "custom"}))
+		if err != nil || listRes.IsError {
+			t.Fatalf("expected list_skills success without ProfileStore, got: %+v, err: %v", listRes, err)
+		}
+		var skills []core.Skill
+		if err := json.Unmarshal([]byte(listRes.Content[0].(mcpSDK.TextContent).Text), &skills); err != nil {
+			t.Fatalf("failed to unmarshal skills: %v", err)
+		}
+		if len(skills) == 0 {
+			t.Fatal("expected added skill to be listed")
+		}
+	})
+}
+
+type failingGetBranchStore struct {
+	core.BranchStore
+	err error
+}
+
+func (f *failingGetBranchStore) GetBranch(ctx context.Context, id string) (*core.Branch, error) {
+	return nil, f.err
+}
+
+func TestMCP_DependencyGuardsAndFailClosed(t *testing.T) {
+	ctx := context.Background()
+	userCtx := resumeeeMCP.WithUserID(ctx, "user-1")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	newBranchSvc := func(branches core.BranchStore, profiles core.ProfileStore, presets core.PresetStore, templates core.TemplateStore) *branch.Service {
+		return branch.New(branch.Config{
+			Branches:    branches,
+			Profiles:    profiles,
+			Presets:     presets,
+			Templates:   templates,
+			JobEnqueuer: &dummyJobEnqueuer{},
+			Validator:   provenance.New(),
+			Renderer:    renderer.New(),
+			Generator:   &dummyLLMService{},
+			Logger:      logger,
+		})
+	}
+
+	assertToolError := func(t *testing.T, server interface {
+		GetTool(name string) *serverSDK.ServerTool
+	}, name string, args map[string]any, wantExact string) {
+		t.Helper()
+		tool := server.GetTool(name)
+		if tool == nil {
+			t.Fatalf("tool %s not registered", name)
+		}
+		res, err := tool.Handler(userCtx, toolReq(name, args))
+		if err != nil {
+			t.Fatalf("unexpected protocol error for %s: %v", name, err)
+		}
+		if !res.IsError {
+			t.Fatalf("expected tool error for %s, got %+v", name, res)
+		}
+		got := res.Content[0].(mcpSDK.TextContent).Text
+		if wantExact != "" && got != wantExact {
+			t.Errorf("tool %s: expected %q, got %q", name, wantExact, got)
+		}
+	}
+
+	t.Run("nil dependencies return clean unavailable errors without panic", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		profileOnlyServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			ProfileStore:  store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+
+		profileOnlyCases := []struct {
+			tool string
+			args map[string]any
+			want string
+		}{
+			{tool: "list_branches", args: nil, want: "branch store unavailable"},
+			{tool: "render_resume", args: map[string]any{"branch_id": "br-1"}, want: "branch store unavailable"},
+			{tool: "create_branch", args: map[string]any{"name": "Role", "target_company": "Acme", "target_role": "SWE"}, want: "branch service unavailable"},
+			{tool: "update_branch", args: map[string]any{"id": "br-1", "name": "Updated"}, want: "branch store unavailable"},
+			{tool: "tailor_resume", args: map[string]any{"branch_id": "br-1", "target_job_description": "Go"}, want: "branch store unavailable"},
+			{tool: "run_gap_analysis", args: map[string]any{"branch_id": "br-1", "target_job_description": "Go"}, want: "branch store unavailable"},
+			{tool: "simulate_ats", args: map[string]any{"branch_id": "br-1"}, want: "branch service unavailable"},
+		}
+		for _, tc := range profileOnlyCases {
+			t.Run("profile_only/"+tc.tool, func(t *testing.T) {
+				assertToolError(t, profileOnlyServer, tc.tool, tc.args, tc.want)
+			})
+		}
+
+		branchStoreOnlyServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			BranchStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+
+		branchStoreOnlyCases := []struct {
+			tool string
+			args map[string]any
+			want string
+		}{
+			{tool: "render_resume", args: map[string]any{"branch_id": "br-1"}, want: "template store unavailable"},
+			{tool: "create_branch", args: map[string]any{"name": "Role", "target_company": "Acme", "target_role": "SWE"}, want: "branch service unavailable"},
+			{tool: "update_branch", args: map[string]any{"id": "br-1", "name": "Updated"}, want: "branch service unavailable"},
+			{tool: "tailor_resume", args: map[string]any{"branch_id": "br-1", "target_job_description": "Go"}, want: "branch service unavailable"},
+			{tool: "run_gap_analysis", args: map[string]any{"branch_id": "br-1", "target_job_description": "Go"}, want: "branch service unavailable"},
+			{tool: "simulate_ats", args: map[string]any{"branch_id": "br-1"}, want: "branch service unavailable"},
+		}
+		for _, tc := range branchStoreOnlyCases {
+			t.Run("branch_store_only/"+tc.tool, func(t *testing.T) {
+				assertToolError(t, branchStoreOnlyServer, tc.tool, tc.args, tc.want)
+			})
+		}
+	})
+
+	t.Run("preset and branch references fail closed when validation stores are nil", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+		customBranch := &core.Branch{
+			ID:     "br-custom-failclosed",
+			UserID: "user-1",
+			Name:   "Custom Role",
+		}
+		if err := store.CreateBranch(ctx, customBranch); err != nil {
+			t.Fatalf("failed to create branch: %v", err)
+		}
+		branchSvc := newBranchSvc(store, store, store, store)
+
+		presetNoTemplateServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			PresetStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+		createPresetRes, err := presetNoTemplateServer.GetTool("create_preset").Handler(userCtx, toolReq("create_preset", map[string]any{
+			"name":                "Blocked Preset",
+			"system_instructions": "Be concise",
+			"template_set_id":     core.TemplateStandardCleanID,
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !createPresetRes.IsError || createPresetRes.Content[0].(mcpSDK.TextContent).Text != "template store unavailable" {
+			t.Fatalf("expected template store unavailable on create_preset, got %+v", createPresetRes)
+		}
+
+		noPresetBranchServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			BranchService: branchSvc,
+			BranchStore:   store,
+			TemplateStore: store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+		createBranchRes, err := noPresetBranchServer.GetTool("create_branch").Handler(userCtx, toolReq("create_branch", map[string]any{
+			"name":                  "Google SWE",
+			"target_company":        "Google",
+			"target_role":           "SWE",
+			"tailoring_strategy_id": "builtin-1-page-tech-resume",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !createBranchRes.IsError || createBranchRes.Content[0].(mcpSDK.TextContent).Text != "preset store unavailable" {
+			t.Fatalf("expected preset store unavailable on create_branch, got %+v", createBranchRes)
+		}
+
+		updateBranchNoPresetRes, err := noPresetBranchServer.GetTool("update_branch").Handler(userCtx, toolReq("update_branch", map[string]any{
+			"id":                    customBranch.ID,
+			"tailoring_strategy_id": "builtin-1-page-tech-resume",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !updateBranchNoPresetRes.IsError || updateBranchNoPresetRes.Content[0].(mcpSDK.TextContent).Text != "preset store unavailable" {
+			t.Fatalf("expected preset store unavailable on update_branch, got %+v", updateBranchNoPresetRes)
+		}
+
+		noTemplateBranchServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			BranchService: branchSvc,
+			BranchStore:   store,
+			PresetStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+		updateBranchNoTmplRes, err := noTemplateBranchServer.GetTool("update_branch").Handler(userCtx, toolReq("update_branch", map[string]any{
+			"id":              customBranch.ID,
+			"template_set_id": core.TemplateStandardCleanID,
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !updateBranchNoTmplRes.IsError || updateBranchNoTmplRes.Content[0].(mcpSDK.TextContent).Text != "template store unavailable" {
+			t.Fatalf("expected template store unavailable on update_branch, got %+v", updateBranchNoTmplRes)
+		}
+	})
+
+	t.Run("update_branch and simulate_ats sanitize internal errors", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+		branches, err := store.ListBranches(ctx, "user-1")
+		if err != nil || len(branches) == 0 {
+			t.Fatalf("expected seeded default branch, err=%v", err)
+		}
+		var defaultBranchID string
+		for _, b := range branches {
+			if b.IsDefault {
+				defaultBranchID = b.ID
+				break
+			}
+		}
+		if defaultBranchID == "" {
+			t.Fatal("expected seeded default branch ID")
+		}
+
+		branchSvc := newBranchSvc(store, store, store, store)
+		server := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			BranchService: branchSvc,
+			BranchStore:   store,
+			TemplateStore: store,
+			PresetStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+
+		updRes, err := server.GetTool("update_branch").Handler(userCtx, toolReq("update_branch", map[string]any{
+			"id":   defaultBranchID,
+			"name": "Mutated Default",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !updRes.IsError {
+			t.Fatalf("expected update_branch error on default branch, got %+v", updRes)
+		}
+
+		simNotFoundRes, err := server.GetTool("simulate_ats").Handler(userCtx, toolReq("simulate_ats", map[string]any{
+			"branch_id": "nonexistent-branch-id",
+			"format":    "markdown",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !simNotFoundRes.IsError {
+			t.Fatalf("expected simulate_ats error on nonexistent branch, got %+v", simNotFoundRes)
+		}
+
+		rawLeakErr := errors.New("secret upstream dsn postgres://db.internal:5432")
+		failingBranches := &failingGetBranchStore{BranchStore: store, err: rawLeakErr}
+		failingBranchSvc := newBranchSvc(failingBranches, store, store, store)
+		failingServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
+			BranchService: failingBranchSvc,
+			BranchStore:   store,
+			TemplateStore: store,
+			PresetStore:   store,
+			DefaultUserID: "user-1",
+			RESTTimeout:   5 * time.Second,
+			Logger:        logger,
+		})
+
+		simLeakRes, err := failingServer.GetTool("simulate_ats").Handler(userCtx, toolReq("simulate_ats", map[string]any{
+			"branch_id": defaultBranchID,
+			"format":    "markdown",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if !simLeakRes.IsError {
+			t.Fatalf("expected simulate_ats error on failing store, got %+v", simLeakRes)
+		}
+		simLeakText := simLeakRes.Content[0].(mcpSDK.TextContent).Text
+		if strings.Contains(simLeakText, "db.internal") || strings.Contains(simLeakText, "postgres://") {
+			t.Errorf("expected internal store error to be sanitized, got %q", simLeakText)
+		}
+	})
 }

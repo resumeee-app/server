@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/branch"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 type branchHandler struct {
 	cfg RouterConfig
-	svc branch.Service
+	svc *branch.Service
 }
 
 // registerBranchRoutes binds REST endpoints for branch/resume creation, modification, version generation, preview rendering, and exports.
@@ -24,27 +24,32 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 		svc: cfg.BranchService,
 	}
 
+	svcGuard := routeGuard{ok: h.svc != nil, msg: "branch service unavailable"}
+	handleBranch := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, withRouteGuards(fn, svcGuard))
+	}
+
 	bases := []string{"/api/v1/branches", "/api/v1/resumes"}
 	for _, base := range bases {
-		mux.HandleFunc("GET "+base, h.listBranches)
-		mux.HandleFunc("POST "+base, h.createBranch)
-		mux.HandleFunc("POST "+base+"/sync", h.syncBranches)
-		mux.HandleFunc("GET "+base+"/{id}", h.getBranch)
-		mux.HandleFunc("PUT "+base+"/{id}", h.updateBranch)
-		mux.HandleFunc("DELETE "+base+"/{id}", h.deleteBranch)
-		mux.HandleFunc("POST "+base+"/{id}/generate", h.generateBranchVersion)
-		mux.HandleFunc("POST "+base+"/{id}/tailor", h.generateBranchVersion)
-		mux.HandleFunc("POST "+base+"/{id}/gap-analysis", h.analyzeBranchGaps)
-		mux.HandleFunc("POST "+base+"/{id}/ats-score", h.simulateBranchATSScore)
-		mux.HandleFunc("GET "+base+"/{id}/prompt-preview", h.getPromptPreview)
-		mux.HandleFunc("POST "+base+"/{id}/prompt-preview", h.previewPrompt)
-		mux.HandleFunc("GET "+base+"/{id}/versions", h.listBranchVersions)
-		mux.HandleFunc("GET "+base+"/{id}/versions/{v}", h.getBranchVersion)
-		mux.HandleFunc("GET "+base+"/{id}/versions/{v}/preview", h.previewBranchVersion)
-		mux.HandleFunc("GET "+base+"/{id}/versions/{v}/export", h.exportBranchVersion)
-		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/edit", h.editBranchVersion)
-		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/render-preview", h.renderPreview)
-		mux.HandleFunc("POST "+base+"/{id}/versions/{v}/ats-score", h.simulateBranchATSScore)
+		handleBranch("GET "+base, h.listBranches)
+		handleBranch("POST "+base, h.createBranch)
+		handleBranch("POST "+base+"/sync", h.syncBranches)
+		handleBranch("GET "+base+"/{id}", h.getBranch)
+		handleBranch("PUT "+base+"/{id}", h.updateBranch)
+		handleBranch("DELETE "+base+"/{id}", h.deleteBranch)
+		handleBranch("POST "+base+"/{id}/generate", h.generateBranchVersion)
+		handleBranch("POST "+base+"/{id}/tailor", h.generateBranchVersion)
+		handleBranch("POST "+base+"/{id}/gap-analysis", h.analyzeBranchGaps)
+		handleBranch("POST "+base+"/{id}/ats-score", h.simulateBranchATSScore)
+		handleBranch("GET "+base+"/{id}/prompt-preview", h.getPromptPreview)
+		handleBranch("POST "+base+"/{id}/prompt-preview", h.previewPrompt)
+		handleBranch("GET "+base+"/{id}/versions", h.listBranchVersions)
+		handleBranch("GET "+base+"/{id}/versions/{v}", h.getBranchVersion)
+		handleBranch("GET "+base+"/{id}/versions/{v}/preview", h.previewBranchVersion)
+		handleBranch("GET "+base+"/{id}/versions/{v}/export", h.exportBranchVersion)
+		handleBranch("POST "+base+"/{id}/versions/{v}/edit", h.editBranchVersion)
+		handleBranch("POST "+base+"/{id}/versions/{v}/render-preview", h.renderPreview)
+		handleBranch("POST "+base+"/{id}/versions/{v}/ats-score", h.simulateBranchATSScore)
 	}
 }
 
@@ -152,22 +157,18 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.cfg.TemplateRepo != nil {
-		tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
-			return
-		}
+	if _, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, req.TemplateSetID); err != nil {
+		writeAccessError(w, err, "cannot access foreign or nonexistent template")
+		return
 	}
 
 	stratID := req.TailoringStrategyID
 	if stratID == nil && req.PresetID != nil {
 		stratID = req.PresetID
 	}
-	if stratID != nil && *stratID != "" && h.cfg.PresetRepo != nil {
-		preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, *stratID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn()) {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent tailoring strategy", "")
+	if stratID != nil && *stratID != "" {
+		if _, err := fetchAuthorizedPreset(ctx, h.cfg.PresetStore, userID, *stratID); err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent tailoring strategy")
 			return
 		}
 	}
@@ -225,7 +226,7 @@ func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	b, err := h.svc.GetBranch(ctx, userID, id)
+	b, err := h.svc.Branch(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -240,7 +241,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	branch, err := h.svc.GetBranch(ctx, userID, id)
+	branch, err := h.svc.Branch(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -274,18 +275,16 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	if stratIDToValidate == nil {
 		stratIDToValidate = req.PresetID
 	}
-	if stratIDToValidate != nil && *stratIDToValidate != "" && h.cfg.PresetRepo != nil {
-		preset, err := h.cfg.PresetRepo.GetPreset(ctx, userID, *stratIDToValidate)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn()) {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent tailoring strategy", "")
+	if stratIDToValidate != nil && *stratIDToValidate != "" {
+		if _, err := fetchAuthorizedPreset(ctx, h.cfg.PresetStore, userID, *stratIDToValidate); err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent tailoring strategy")
 			return
 		}
 	}
 
-	if req.TemplateSetID != nil && *req.TemplateSetID != "" && h.cfg.TemplateRepo != nil {
-		tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, *req.TemplateSetID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn) {
-			writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign or nonexistent template", "")
+	if req.TemplateSetID != nil && *req.TemplateSetID != "" {
+		if _, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, *req.TemplateSetID); err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return
 		}
 	}
@@ -437,7 +436,7 @@ func (h *branchHandler) listBranchVersions(w http.ResponseWriter, r *http.Reques
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	if _, err := h.svc.GetBranch(ctx, userID, id); err != nil {
+	if _, err := h.svc.Branch(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -457,12 +456,12 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 	v := r.PathValue("v")
 
-	if _, err := h.svc.GetBranch(ctx, userID, id); err != nil {
+	if _, err := h.svc.Branch(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	ver, err := h.svc.GetVersion(ctx, id, v)
+	ver, err := h.svc.Version(ctx, id, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -473,7 +472,7 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 
 // getOrRenderVersionOutputs resolves or dynamically re-renders resume outputs incorporating targetTemplateID.
 func (h *branchHandler) getOrRenderVersionOutputs(ctx context.Context, userID, _, _ string, b *core.Branch, ver *core.BranchVersion, targetTemplateID string) core.RenderOutput {
-	return renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateRepo, h.cfg.ProfileRepo, userID, b, ver, targetTemplateID)
+	return renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateStore, h.cfg.ProfileStore, userID, b, ver, targetTemplateID)
 }
 
 // exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
@@ -483,13 +482,13 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 	branchID := r.PathValue("id")
 	v := r.PathValue("v")
 
-	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	ver, err := h.svc.Version(ctx, branchID, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -539,13 +538,13 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 	branchID := r.PathValue("id")
 	v := r.PathValue("v")
 
-	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	ver, err := h.svc.Version(ctx, branchID, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -662,7 +661,7 @@ func (h *branchHandler) getPromptPreview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	preview, err := h.svc.GetPromptPreview(ctx, userID, id, nil)
+	preview, err := h.svc.PromptPreview(ctx, userID, id, nil)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -702,7 +701,7 @@ func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	preview, err := h.svc.GetPromptPreview(ctx, userID, id, opts)
+	preview, err := h.svc.PromptPreview(ctx, userID, id, opts)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -722,7 +721,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	v := r.PathValue("v")
 
 	// 1. Validate Resume / Branch Ownership
-	b, err := h.svc.GetBranch(ctx, userID, branchID)
+	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -733,7 +732,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Validate Version Association
-	ver, err := h.svc.GetVersion(ctx, branchID, v)
+	ver, err := h.svc.Version(ctx, branchID, v)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -772,17 +771,9 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Template Access Authorization
-	if h.cfg.TemplateRepo == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "template repository unavailable", "")
-		return
-	}
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateSetID)
-	if err != nil || tmpl == nil {
-		writeError(w, http.StatusForbidden, CodeForbidden, "cannot access target template", "")
-		return
-	}
-	if tmpl.UserID != userID && !tmpl.IsBuiltIn {
-		writeError(w, http.StatusForbidden, CodeForbidden, "cannot access foreign template", "")
+	tmpl, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, req.TemplateSetID)
+	if err != nil {
+		writeAccessError(w, err, "cannot access target template")
 		return
 	}
 
@@ -793,8 +784,8 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var prof *core.Profile
-	if h.cfg.ProfileRepo != nil {
-		prof, _ = h.cfg.ProfileRepo.GetProfile(ctx, userID)
+	if h.cfg.ProfileStore != nil {
+		prof, _ = h.cfg.ProfileStore.Profile(ctx, userID)
 	}
 
 	rendered, err := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)

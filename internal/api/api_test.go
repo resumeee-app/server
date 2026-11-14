@@ -20,22 +20,23 @@ import (
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
-	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 type testEnv struct {
-	server       *httptest.Server
-	db           any
-	profileRepo  core.ProfileRepository
-	presetRepo   core.PresetRepository
-	templateRepo core.TemplateRepository
-	branchRepo   core.BranchRepository
-	profileSvc   profile.Service
-	enqueuer     *api.ChannelJobEnqueuer
-	pdfJobRepo   core.PDFParseJobRepository
-	pdfEnqueuer  *api.ChannelPDFJobEnqueuer
+	server        *httptest.Server
+	db            any
+	profileStore  core.ProfileStore
+	presetStore   core.PresetStore
+	templateStore core.TemplateStore
+	branchStore   core.BranchStore
+	profileSvc    *profile.Service
+	enqueuer      *api.ChannelJobEnqueuer
+	pdfJobStore   core.PDFJobStore
+	pdfEnqueuer   *api.ChannelPDFJobEnqueuer
 }
 
 func setupTestServer(t *testing.T, queueCap int) *testEnv {
@@ -48,13 +49,14 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
-	profileSvc := profile.NewService(profileRepo, branchRepo)
-	templateRenderer := renderer.NewTemplateRenderer()
-	provValidator := validator.New()
+	var profileStore core.ProfileStore = store
+	var careerStore core.CareerStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
+	templateRenderer := renderer.New()
+	provValidator := provenance.New()
 
 	if queueCap <= 0 {
 		queueCap = 100
@@ -62,11 +64,12 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	enqueuer := api.NewChannelJobEnqueuer(queueCap)
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:    profileRepo,
-		PresetRepo:     presetRepo,
-		TemplateRepo:   templateRepo,
-		BranchRepo:     branchRepo,
-		QuotaRepo:      store,
+		ProfileStore:   profileStore,
+		CareerStore:    careerStore,
+		PresetStore:    presetStore,
+		TemplateStore:  templateStore,
+		BranchStore:    branchStore,
+		QuotaStore:     store,
 		ProfileService: profileSvc,
 		Renderer:       templateRenderer,
 		Validator:      provValidator,
@@ -81,14 +84,14 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	})
 
 	return &testEnv{
-		server:       server,
-		db:           store,
-		profileRepo:  profileRepo,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
-		branchRepo:   branchRepo,
-		profileSvc:   profileSvc,
-		enqueuer:     enqueuer,
+		server:        server,
+		db:            store,
+		profileStore:  profileStore,
+		presetStore:   presetStore,
+		templateStore: templateStore,
+		branchStore:   branchStore,
+		profileSvc:    profileSvc,
+		enqueuer:      enqueuer,
 	}
 }
 
@@ -525,7 +528,7 @@ func TestFullUserJourney(t *testing.T) {
 			},
 		},
 	}
-	v1, err := env.branchRepo.GetVersion(context.Background(), branch.ID, jobEnqueued.VersionID)
+	v1, err := env.branchStore.Version(context.Background(), branch.ID, jobEnqueued.VersionID)
 	if err != nil {
 		t.Fatalf("failed to fetch created version: %v", err)
 	}
@@ -534,7 +537,7 @@ func TestFullUserJourney(t *testing.T) {
 	v1.MarkdownOutput = "# Default User\n" + newSummary
 	v1.PlainTextOutput = "Default User\n" + newSummary
 	v1.Status = core.VersionStatusCompleted
-	if err := env.branchRepo.CompleteVersion(context.Background(), v1); err != nil {
+	if err := env.branchStore.CompleteVersion(context.Background(), v1); err != nil {
 		t.Fatalf("failed to complete version 1: %v", err)
 	}
 
@@ -873,7 +876,7 @@ func TestErrorEnvelopes(t *testing.T) {
 			TemplateSetIDUsed: core.TemplateStandardCleanID,
 			SourceType:        core.SourceTypeLLMGeneration,
 		}
-		if err := env.branchRepo.CreateVersion(context.Background(), v1); err != nil {
+		if err := env.branchStore.CreateVersion(context.Background(), v1); err != nil {
 			t.Fatalf("failed to create v1: %v", err)
 		}
 
@@ -1084,19 +1087,19 @@ func buildTestPDF(text string) []byte {
 	return []byte(body + xrefAndTrailer)
 }
 
-func setupTestServerWithExtractor(t *testing.T, resumeExtractor core.ResumeExtractor) *testEnv {
+func setupTestServerWithExtractor(t *testing.T, resumeExtractor worker.ResumeExtractor) *testEnv {
 	return setupTestServerWithExtractorAndLogger(t, resumeExtractor, nil)
 }
 
-func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor core.ResumeExtractor, logger *slog.Logger) *testEnv {
+func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor worker.ResumeExtractor, logger *slog.Logger) *testEnv {
 	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, logger, nil)
 }
 
-func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor core.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor worker.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, nil, pdfEnqueuer)
 }
 
-func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor core.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor worker.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
 	t.Helper()
 
 	ctx := context.Background()
@@ -1106,14 +1109,15 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	profileRepo := store
-	presetRepo := store
-	templateRepo := store
-	branchRepo := store
-	pdfJobRepo := store
-	profileSvc := profile.NewService(profileRepo, branchRepo)
-	templateRenderer := renderer.NewTemplateRenderer()
-	provValidator := validator.New()
+	var profileStore core.ProfileStore = store
+	var careerStore core.CareerStore = store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
+	var branchStore core.BranchStore = store
+	var pdfJobStore core.PDFJobStore = store
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
+	templateRenderer := renderer.New()
+	provValidator := provenance.New()
 	enqueuer := api.NewChannelJobEnqueuer(100)
 
 	var enq core.PDFJobEnqueuer
@@ -1122,12 +1126,13 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:     profileRepo,
-		PresetRepo:      presetRepo,
-		TemplateRepo:    templateRepo,
-		BranchRepo:      branchRepo,
+		ProfileStore:    profileStore,
+		CareerStore:     careerStore,
+		PresetStore:     presetStore,
+		TemplateStore:   templateStore,
+		BranchStore:     branchStore,
 		ProfileService:  profileSvc,
-		PDFJobRepo:      pdfJobRepo,
+		PDFJobStore:     pdfJobStore,
 		PDFJobEnqueuer:  enq,
 		PDFExtractor:    pdf.NewExtractor(),
 		ResumeExtractor: resumeExtractor,
@@ -1136,7 +1141,7 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 		JobEnqueuer:     enqueuer,
 		DefaultUserID:   defaultUserID,
 		Admin:           true,
-		QuotaRepo:       store,
+		QuotaStore:      store,
 		Logger:          logger,
 	})
 
@@ -1146,16 +1151,16 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 	})
 
 	return &testEnv{
-		server:       server,
-		db:           store,
-		profileRepo:  profileRepo,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
-		branchRepo:   branchRepo,
-		profileSvc:   profileSvc,
-		enqueuer:     enqueuer,
-		pdfJobRepo:   pdfJobRepo,
-		pdfEnqueuer:  pdfEnqueuer,
+		server:        server,
+		db:            store,
+		profileStore:  profileStore,
+		presetStore:   presetStore,
+		templateStore: templateStore,
+		branchStore:   branchStore,
+		profileSvc:    profileSvc,
+		enqueuer:      enqueuer,
+		pdfJobStore:   pdfJobStore,
+		pdfEnqueuer:   pdfEnqueuer,
 	}
 }
 
@@ -1181,7 +1186,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 		},
 	}
 
-	mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+	mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 		data, _ := json.Marshal(mockResume)
 		return string(data), nil
 	}))
@@ -1290,7 +1295,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 		if len(parsed.Skills) != 2 {
 			t.Errorf("expected 2 skills, got: %d", len(parsed.Skills))
 		}
-		if len(parsed.Work) != 1 || parsed.Work[0].GetCompany() != "BrandNew Tech" {
+		if len(parsed.Work) != 1 || parsed.Work[0].CompanyName() != "BrandNew Tech" {
 			t.Errorf("expected 1 work at BrandNew Tech, got: %+v", parsed.Work)
 		}
 	})
@@ -1300,7 +1305,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 		var capturedDeadline time.Time
 		var hasDeadline bool
 
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			capturedDeadline, hasDeadline = ctx.Deadline()
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 		}))
@@ -1346,7 +1351,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 
 	t.Run("Enqueue job, verify 202 Accepted, and poll status through completion", func(t *testing.T) {
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 		}))
 
@@ -1434,7 +1439,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		extractedResume := &core.JSONResume{
 			Basics: core.JSONResumeBasics{Name: "Morgan BrandNew"},
 		}
-		if err := env.pdfJobRepo.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
+		if err := env.pdfJobStore.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
 			t.Fatalf("failed to update job status: %v", err)
 		}
 
@@ -1456,18 +1461,13 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		if completedJob.Result == nil {
 			t.Fatalf("expected non-nil completed job result")
 		}
-		resMap, ok := completedJob.Result.(map[string]any)
-		if !ok {
-			t.Fatalf("expected map[string]any result, got %T", completedJob.Result)
-		}
-		basics, ok := resMap["basics"].(map[string]any)
-		if !ok || basics["name"] != "Morgan BrandNew" {
-			t.Errorf("expected result with name Morgan BrandNew, got %+v", resMap)
+		if completedJob.Result.Basics.Name != "Morgan BrandNew" {
+			t.Errorf("expected result with name Morgan BrandNew, got %+v", completedJob.Result)
 		}
 	})
 
 	t.Run("Queue full returns 503 SERVICE_UNAVAILABLE", func(t *testing.T) {
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return `{}`, nil
 		}))
 
@@ -1501,7 +1501,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 	})
 
 	t.Run("Non-existent job returns 404 NOT_FOUND", func(t *testing.T) {
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return `{}`, nil
 		}))
 		env := setupTestServerWithExtractor(t, mockExtractor)
@@ -1525,7 +1525,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 
 	t.Run("Oversized payload returns 413 Payload Too Large", func(t *testing.T) {
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return `{}`, nil
 		}))
 		env := setupTestServerWithExtractor(t, mockExtractor)
@@ -1626,7 +1626,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 				return "", tc.extractorErr
 			}))
 
@@ -1671,7 +1671,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		var logBuf bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return "", errors.New("unexpected catastrophic failure")
 		}))
 
@@ -1714,7 +1714,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		var logBuf bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			return "", llm.ErrProviderNotFound
 		}))
 
@@ -1757,7 +1757,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 		var capturedProvider, capturedModel string
 
-		mockExtractor := llm.NewResumeExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
 			capturedProvider = prov
 			capturedModel = model
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
@@ -2716,8 +2716,8 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 
 	t.Run("unauthenticated request returns 401 Unauthorized in production mode", func(t *testing.T) {
 		prodRouter := api.NewRouter(api.RouterConfig{
-			ProfileRepo: memStore,
-			Admin:       false, // production mode with verifier == nil
+			ProfileStore: memStore,
+			Admin:        false, // production mode with verifier == nil
 		})
 		prodServer := httptest.NewServer(prodRouter)
 		defer prodServer.Close()
@@ -2747,7 +2747,8 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	ctx := context.Background()
 	memStore := memory.New()
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:   memStore,
+		ProfileStore:  memStore,
+		CareerStore:   memStore,
 		Admin:         true,
 		DefaultUserID: "default",
 	})
@@ -2962,19 +2963,20 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 		},
 	}
 
-	profileSvc := profile.NewService(store, store)
+	profileSvc := profile.New(store, store, store)
 	enqueuer := api.NewChannelJobEnqueuer(10)
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:    store,
-		PresetRepo:     store,
-		TemplateRepo:   store,
-		BranchRepo:     store,
-		QuotaRepo:      store,
-		UserRepo:       store,
+		ProfileStore:   store,
+		CareerStore:    store,
+		PresetStore:    store,
+		TemplateStore:  store,
+		BranchStore:    store,
+		QuotaStore:     store,
+		UserStore:      store,
 		Store:          store,
 		ProfileService: profileSvc,
-		Renderer:       renderer.NewTemplateRenderer(),
-		Validator:      validator.New(),
+		Renderer:       renderer.New(),
+		Validator:      provenance.New(),
 		JobEnqueuer:    enqueuer,
 		Admin:          false,
 		TokenVerifier:  verifier,
@@ -3020,12 +3022,159 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 		t.Fatalf("expected 1 default branch, got %+v", branches)
 	}
 
-	// 4. Verify user record in UserRepo
-	user, err := store.User().GetUser(ctx, "firebase-new-user-123")
+	// 4. Verify user record in UserStore
+	user, err := store.User(ctx, "firebase-new-user-123")
 	if err != nil {
 		t.Fatalf("failed to retrieve provisioned user: %v", err)
 	}
 	if user.Email != "newuser@example.com" {
 		t.Errorf("expected email 'newuser@example.com', got %q", user.Email)
 	}
+}
+
+func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil CareerStore returns 500 JSON error without panic", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		router := api.NewRouter(api.RouterConfig{
+			ProfileStore:  memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		})
+		server := httptest.NewServer(router)
+		defer server.Close()
+		client := server.Client()
+
+		endpoints := []string{
+			"/api/v1/skills",
+			"/api/v1/experiences",
+			"/api/v1/projects",
+			"/api/v1/education",
+			"/api/v1/certifications",
+			"/api/v1/facts",
+		}
+
+		for _, ep := range endpoints {
+			resp, body := doRequest(t, client, http.MethodGet, server.URL+ep, nil, nil)
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Errorf("GET %s: expected 500, got %d (%s)", ep, resp.StatusCode, string(body))
+				continue
+			}
+			var errResp api.ErrorResponse
+			if err := json.Unmarshal(body, &errResp); err != nil {
+				t.Errorf("GET %s: decode error response: %v", ep, err)
+				continue
+			}
+			if errResp.Error.Code != api.CodeInternalError {
+				t.Errorf("GET %s: expected code %q, got %q", ep, api.CodeInternalError, errResp.Error.Code)
+			}
+			if errResp.Error.Message != "career store unavailable" {
+				t.Errorf("GET %s: expected message %q, got %q", ep, "career store unavailable", errResp.Error.Message)
+			}
+		}
+	})
+
+	t.Run("partial routers return 500 JSON error without panic across unconfigured domains", func(t *testing.T) {
+		assertInternalErr := func(t *testing.T, method, url string, body any, wantMsg string) {
+			t.Helper()
+			resp, respBody := doRequest(t, http.DefaultClient, method, url, body, nil)
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Errorf("%s %s: expected 500, got %d (%s)", method, url, resp.StatusCode, string(respBody))
+				return
+			}
+			var errResp api.ErrorResponse
+			if err := json.Unmarshal(respBody, &errResp); err != nil {
+				t.Errorf("%s %s: decode error response: %v", method, url, err)
+				return
+			}
+			if errResp.Error.Code != api.CodeInternalError {
+				t.Errorf("%s %s: expected code %q, got %q", method, url, api.CodeInternalError, errResp.Error.Code)
+			}
+			if errResp.Error.Message != wantMsg {
+				t.Errorf("%s %s: expected message %q, got %q", method, url, wantMsg, errResp.Error.Message)
+			}
+		}
+
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		profileOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			ProfileStore:  memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer profileOnlySrv.Close()
+
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/profile/jsonresume/export", nil, "profile service unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/branches", nil, "branch service unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/presets", nil, "preset store unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/templates", nil, "template store unavailable")
+		assertInternalErr(t, http.MethodPost, profileOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
+
+		careerOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			CareerStore:   memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer careerOnlySrv.Close()
+
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile", nil, "profile store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile/full", nil, "profile store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/profile/jsonresume/export", nil, "profile service unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/branches", nil, "branch service unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/presets", nil, "preset store unavailable")
+		assertInternalErr(t, http.MethodGet, careerOnlySrv.URL+"/api/v1/templates", nil, "template store unavailable")
+		assertInternalErr(t, http.MethodPost, careerOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
+
+		presetNoTemplateSrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
+			PresetStore:   memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		}))
+		defer presetNoTemplateSrv.Close()
+
+		assertInternalErr(t, http.MethodPost, presetNoTemplateSrv.URL+"/api/v1/presets", api.CreatePresetRequest{
+			Name:               "Blocked Preset",
+			SystemInstructions: "Keep concise",
+			TemplateSetID:      core.TemplateStandardCleanID,
+		}, "template store unavailable")
+	})
+
+	t.Run("Store default populates CareerStore and ProfileService", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(ctx, "user-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		router := api.NewRouter(api.RouterConfig{
+			Store:         memStore,
+			Admin:         true,
+			DefaultUserID: "user-1",
+		})
+		server := httptest.NewServer(router)
+		defer server.Close()
+		client := server.Client()
+
+		skillsResp, skillsBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/skills", nil, nil)
+		if skillsResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/skills: expected 200, got %d: %s", skillsResp.StatusCode, string(skillsBody))
+		}
+
+		snapResp, snapBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/full", nil, nil)
+		if snapResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/profile/full: expected 200, got %d: %s", snapResp.StatusCode, string(snapBody))
+		}
+
+		exportResp, exportBody := doRequest(t, client, http.MethodGet, server.URL+"/api/v1/profile/jsonresume/export", nil, nil)
+		if exportResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/v1/profile/jsonresume/export: expected 200, got %d: %s", exportResp.StatusCode, string(exportBody))
+		}
+	})
 }

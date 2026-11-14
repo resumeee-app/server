@@ -6,8 +6,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v1.5.0
 	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112064701-762c32f45922
-	github.com/resumeee-app/resumeee-core v0.0.0-20261114060124-26f4e04b441f
-	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261112064743-dbcc6b8081d0
+	github.com/resumeee-app/resumeee-core v0.0.0-20261114210326-7401737feb72
+	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261114212115-7614e1876d06
 )
 
 require (

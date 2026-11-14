@@ -11,7 +11,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func TestBranch_PromptPreviewEndpoint(t *testing.T) {
@@ -217,12 +217,12 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileRepo:   store,
-		PresetRepo:    store,
-		TemplateRepo:  store,
-		BranchRepo:    store,
-		QuotaRepo:     store,
-		Renderer:      renderer.NewTemplateRenderer(),
+		ProfileStore:  store,
+		PresetStore:   store,
+		TemplateStore: store,
+		BranchStore:   store,
+		QuotaStore:    store,
+		Renderer:      renderer.New(),
 		DefaultUserID: defaultUserID,
 		Admin:         false,
 		TokenVerifier: verifier,
@@ -323,12 +323,12 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 
 	t.Run("ADMIN_MODE=true allows prompt-preview without token", func(t *testing.T) {
 		adminRouter := api.NewRouter(api.RouterConfig{
-			ProfileRepo:   store,
-			PresetRepo:    store,
-			TemplateRepo:  store,
-			BranchRepo:    store,
-			QuotaRepo:     store,
-			Renderer:      renderer.NewTemplateRenderer(),
+			ProfileStore:  store,
+			PresetStore:   store,
+			TemplateStore: store,
+			BranchStore:   store,
+			QuotaStore:    store,
+			Renderer:      renderer.New(),
 			DefaultUserID: defaultUserID,
 			Admin:         true,
 		})

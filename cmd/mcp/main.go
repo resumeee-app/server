@@ -19,16 +19,16 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
-	"github.com/resumeee-app/resumeee-core/services/worker"
-	"github.com/resumeee-app/resumeee-core/validator"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/worker"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
-// StoreInitializer is a factory function initializing domain repositories and storage resources for the MCP server.
+// StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
 type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
 // defaultSQLiteInitializer creates a SQLite persistence backend and seeds default records.
@@ -79,7 +79,7 @@ func run(parent context.Context, in io.Reader, out io.Writer, args ...string) er
 //
 // Parameters:
 //   - parent: Cancellation context for process lifecycle.
-//   - storeInit: Storage backend initializer injecting repository implementations.
+//   - storeInit: Storage backend initializer injecting store implementations.
 //   - in: Standard input reader for incoming JSON-RPC requests.
 //   - out: Standard output writer for outgoing JSON-RPC responses.
 //   - args: Command-line arguments passed to flag parsing.
@@ -150,39 +150,32 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		}
 	}()
 
-	profileRepo := store.Profile()
-	presetRepo := store.Preset()
-	templateRepo := store.Template()
-	branchRepo := store.Branch()
-	templateRenderer := renderer.NewTemplateRenderer()
-	provValidator := validator.New()
+	profileStore := store.Profiles()
+	careerStore := store.Career()
+	presetStore := store.Presets()
+	templateStore := store.Templates()
+	branchStore := store.Branches()
+	userStore := store.Users()
+	templateRenderer := renderer.New()
+	provValidator := provenance.New()
 
-	profileSvc := profile.NewService(profileRepo, branchRepo)
+	profileSvc := profile.New(profileStore, careerStore, branchStore)
 
-	llmRegistry := llm.NewRegistry(
-		llm.WithLogger(logger),
-	)
-	llm.RegisterClients(llmRegistry, llm.ProviderConfig{
-		GeminiAPIKey:    cfg.GeminiAPIKey,
-		OpenAIAPIKey:    cfg.OpenAIAPIKey,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		CompatBaseURL:   cfg.OpenAICompatBaseURL,
-		CompatAPIKey:    cfg.OpenAICompatAPIKey,
-	}, llm.WithTimeout(cfg.LLMTimeout))
-	llmAdapter := llm.NewServiceAdapter(llmRegistry)
-	resumeExtractor := llm.NewDefaultResumeExtractor(llmRegistry)
+	llmRegistry := cfg.NewLLMRegistry(logger)
+	llmService := llm.NewService(llmRegistry)
+	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 
-	workerPool := worker.NewPool(worker.PoolConfig{
+	workerPool := worker.New(worker.Config{
 		Concurrency:     2,
 		QueueSize:       50,
-		BranchRepo:      branchRepo,
-		ProfileRepo:     profileRepo,
-		PresetRepo:      presetRepo,
-		TemplateRepo:    templateRepo,
-		QuotaRepo:       store.Quota(),
+		Branches:        branchStore,
+		Profiles:        profileStore,
+		Presets:         presetStore,
+		Templates:       templateStore,
+		Quotas:          store.Quotas(),
 		ResumeExtractor: resumeExtractor,
 		LLMTimeout:      cfg.LLMTimeout,
-		LLMService:      llmAdapter,
+		Generator:       llmService,
 		Validator:       provValidator,
 		Renderer:        templateRenderer,
 		Logger:          logger,
@@ -190,16 +183,16 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	workerPool.Start(parent)
 	defer workerPool.Stop()
 
-	branchSvc := branch.NewService(branch.Config{
-		BranchRepo:     branchRepo,
-		ProfileRepo:    profileRepo,
-		PresetRepo:     presetRepo,
-		TemplateRepo:   templateRepo,
-		QuotaRepo:      store.Quota(),
+	branchSvc := branch.New(branch.Config{
+		Branches:       branchStore,
+		Profiles:       profileStore,
+		Presets:        presetStore,
+		Templates:      templateStore,
+		Quotas:         store.Quotas(),
 		JobEnqueuer:    workerPool,
 		Validator:      provValidator,
 		Renderer:       templateRenderer,
-		LLMService:     llmAdapter,
+		Generator:      llmService,
 		PromptCompiler: llm.NewPromptCompiler(),
 		Logger:         logger,
 	})
@@ -208,11 +201,12 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		ProfileService:   profileSvc,
 		BranchService:    branchSvc,
 		TemplateRenderer: templateRenderer,
-		ProfileRepo:      profileRepo,
-		BranchRepo:       branchRepo,
-		TemplateRepo:     templateRepo,
-		PresetRepo:       presetRepo,
-		UserRepo:         store.User(),
+		ProfileStore:     profileStore,
+		CareerStore:      careerStore,
+		BranchStore:      branchStore,
+		TemplateStore:    templateStore,
+		PresetStore:      presetStore,
+		UserStore:        userStore,
 		ResumeExtractor:  resumeExtractor,
 		JobEnqueuer:      workerPool,
 		DefaultUserID:    cfg.DefaultUserID,

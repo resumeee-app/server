@@ -19,7 +19,7 @@ import (
 // resume branch creation, tailoring, ATS gap analysis, and template rendering.
 //
 // Parameters:
-//   - cfg: ServerConfig specifying service dependencies, repositories, timeouts, and logger.
+//   - cfg: ServerConfig specifying service dependencies, stores, timeouts, and logger.
 //
 // Returns:
 //   - Configured *serverSDK.MCPServer ready to serve over stdio or HTTP SSE.
@@ -29,6 +29,7 @@ func NewServer(cfg ServerConfig) *serverSDK.MCPServer {
 	mcpServer := serverSDK.NewMCPServer(
 		"Resumeee Career & Resume Engine",
 		"1.0.0",
+		serverSDK.WithRecovery(),
 		serverSDK.WithToolCapabilities(true),
 		serverSDK.WithResourceCapabilities(true, false),
 		serverSDK.WithPromptCapabilities(true),

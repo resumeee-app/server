@@ -43,8 +43,8 @@ func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var quota *core.TenantQuota
-	if h.cfg.QuotaRepo != nil {
-		q, err := h.cfg.QuotaRepo.GetQuota(ctx, userID)
+	if h.cfg.QuotaStore != nil {
+		q, err := h.cfg.QuotaStore.Quota(ctx, userID)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			writeDomainError(w, err)
 			return

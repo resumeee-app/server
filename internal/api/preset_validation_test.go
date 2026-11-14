@@ -14,7 +14,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
-func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepository) {
+func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -24,10 +24,12 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepositor
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	presetRepo := store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
 
 	router := api.NewRouter(api.RouterConfig{
-		PresetRepo:    presetRepo,
+		PresetStore:   presetStore,
+		TemplateStore: templateStore,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})
@@ -37,7 +39,7 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetRepositor
 		server.Close()
 	})
 
-	return server, presetRepo
+	return server, presetStore
 }
 
 func TestPresetImmutability_BuiltInPresets(t *testing.T) {

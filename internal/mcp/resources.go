@@ -105,16 +105,16 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 		var snapshot *core.MainProfileSnapshot
 		var err error
 		if cfg.ProfileService != nil {
-			snapshot, err = cfg.ProfileService.GetSnapshot(ctx, userID)
-		} else if cfg.ProfileRepo != nil {
-			snapshot, err = cfg.ProfileRepo.GetSnapshot(ctx, userID)
+			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
+		} else if cfg.ProfileStore != nil {
+			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
 		} else {
-			return nil, errors.New("profile service and repository unavailable")
+			return nil, errors.New("profile service and store unavailable")
 		}
 
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to read main profile resource", "user_id", userID, "err", err)
-			return nil, errors.New("failed to retrieve profile due to an internal repository error")
+			return nil, errors.New("failed to retrieve profile due to an internal store error")
 		}
 
 		contents, err := jsonResourceContents("resumeee://profile/main", snapshot)
@@ -142,7 +142,7 @@ func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerF
 // by identifier, checks multi-tenant user ownership, attaches active version details, and returns JSON.
 //
 // Parameters:
-//   - cfg: ServerConfig providing branch repository access and REST timeout bounds.
+//   - cfg: ServerConfig providing branch store access and REST timeout bounds.
 //
 // Returns:
 //   - ResourceTemplateHandlerFunc compatible with the MCP SDK.
@@ -154,13 +154,17 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
+		if cfg.BranchStore == nil {
+			return nil, errors.New("branch store unavailable")
+		}
+
 		branchID := strings.TrimPrefix(req.Params.URI, "resumeee://branches/")
 		branchID = strings.TrimSpace(branchID)
 		if branchID == "" {
 			return nil, errors.New("invalid branch URI: missing branch ID")
 		}
 
-		branch, err := cfg.BranchRepo.GetBranch(ctx, userID, branchID)
+		branch, err := cfg.BranchStore.Branch(ctx, userID, branchID)
 		if err != nil || branch == nil {
 			cfg.Logger.WarnContext(ctx, "branch resource not found or access denied", "branch_id", branchID, "user_id", userID)
 			return nil, errors.New("branch not found or access denied")
@@ -168,7 +172,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 
 		var activeVer any
 		if branch.ActiveVersionID != nil && *branch.ActiveVersionID != "" {
-			if v, vErr := cfg.BranchRepo.GetVersion(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
+			if v, vErr := cfg.BranchStore.Version(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
 				activeVer = v
 			}
 		}
@@ -192,7 +196,7 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 // definition by identifier, checking multi-tenant ownership and built-in visibility.
 //
 // Parameters:
-//   - cfg: ServerConfig providing template repository access and REST timeout bounds.
+//   - cfg: ServerConfig providing template store access and REST timeout bounds.
 //
 // Returns:
 //   - ResourceTemplateHandlerFunc compatible with the MCP SDK.
@@ -210,8 +214,11 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 			return nil, errors.New("invalid template URI: missing template ID")
 		}
 
-		tmpl, err := cfg.TemplateRepo.GetTemplate(ctx, userID, templateID)
-		if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateID)
+		if err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
 			return nil, errors.New("template not found or access denied")
 		}
@@ -241,12 +248,11 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid preset URI: missing preset ID")
 		}
 
-		if cfg.PresetRepo == nil {
-			return nil, errors.New("preset repository unavailable")
-		}
-
-		preset, err := cfg.PresetRepo.GetPreset(ctx, userID, presetID)
-		if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
+		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		if err != nil {
+			if msg, ok := unavailableErrorMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)
 			return nil, errors.New("preset not found or access denied")
 		}

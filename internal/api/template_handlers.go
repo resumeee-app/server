@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/services/renderer"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 type templateHandler struct {
@@ -21,13 +21,16 @@ type templateHandler struct {
 func registerTemplateRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	h := &templateHandler{cfg: cfg}
 
-	mux.HandleFunc("GET /api/v1/templates", h.listTemplates)
-	mux.HandleFunc("POST /api/v1/templates", h.createTemplate)
-	mux.HandleFunc("POST /api/v1/templates/preview", h.renderPreview)
-	mux.HandleFunc("GET /api/v1/templates/{id}", h.getTemplate)
-	mux.HandleFunc("GET /api/v1/templates/{id}/preview", h.previewTemplate)
-	mux.HandleFunc("PUT /api/v1/templates/{id}", h.updateTemplate)
-	mux.HandleFunc("DELETE /api/v1/templates/{id}", h.deleteTemplate)
+	storeGuard := routeGuard{ok: cfg.TemplateStore != nil, msg: "template store unavailable"}
+	renderGuard := routeGuard{ok: cfg.Renderer != nil, msg: "renderer unavailable"}
+
+	mux.HandleFunc("GET /api/v1/templates", withRouteGuards(h.listTemplates, storeGuard))
+	mux.HandleFunc("POST /api/v1/templates", withRouteGuards(h.createTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("POST /api/v1/templates/preview", withRouteGuards(h.renderPreview, renderGuard))
+	mux.HandleFunc("GET /api/v1/templates/{id}", withRouteGuards(h.getTemplate, storeGuard))
+	mux.HandleFunc("GET /api/v1/templates/{id}/preview", withRouteGuards(h.previewTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("PUT /api/v1/templates/{id}", withRouteGuards(h.updateTemplate, storeGuard, renderGuard))
+	mux.HandleFunc("DELETE /api/v1/templates/{id}", withRouteGuards(h.deleteTemplate, storeGuard))
 }
 
 // RenderTemplatePreviewRequest defines parameters for rendering arbitrary Go template snippets on the server.
@@ -62,7 +65,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	userID := getUserID(r, h.cfg.DefaultUserID)
 
-	templates, err := h.cfg.TemplateRepo.ListTemplates(ctx, userID)
+	templates, err := h.cfg.TemplateStore.ListTemplates(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -104,7 +107,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.cfg.TemplateRepo.CreateTemplate(ctx, &tmpl); err != nil {
+	if err := h.cfg.TemplateStore.CreateTemplate(ctx, &tmpl); err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
@@ -122,7 +125,7 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -137,13 +140,13 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
 		return
 	}
@@ -182,7 +185,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.cfg.TemplateRepo.UpdateTemplate(ctx, tmpl); err != nil {
+	if err := h.cfg.TemplateStore.UpdateTemplate(ctx, tmpl); err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
@@ -200,13 +203,13 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == "system" {
+	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
 		return
 	}
@@ -216,7 +219,7 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.cfg.TemplateRepo.DeleteTemplate(ctx, userID, id); err != nil {
+	if err := h.cfg.TemplateStore.DeleteTemplate(ctx, userID, id); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -226,7 +229,7 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 
 // getRenderContext constructs a comprehensive execution context for template rendering.
 func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
-	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileRepo, userID, tmpl)
+	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
 }
 
 // renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
@@ -240,7 +243,7 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 	userID := getUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, id)
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -276,7 +279,11 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	txtTmpl := req.TextTemplate
 
 	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
-		if orig, err := h.cfg.TemplateRepo.GetTemplate(ctx, userID, req.TemplateID); err == nil && orig != nil {
+		if h.cfg.TemplateStore == nil {
+			writeError(w, http.StatusInternalServerError, CodeInternalError, "template store unavailable", "")
+			return
+		}
+		if orig, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateID); err == nil && orig != nil && (orig.UserID == userID || orig.IsBuiltIn || orig.UserID == core.SystemUserID) {
 			htmlTmpl = orig.HTMLTemplate
 			cssStyles = orig.CSSStyles
 			mdTmpl = orig.MarkdownTemplate

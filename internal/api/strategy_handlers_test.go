@@ -15,7 +15,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
-func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos) {
+func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestStores) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -25,12 +25,12 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	presetRepo := store
-	templateRepo := store
+	var presetStore core.PresetStore = store
+	var templateStore core.TemplateStore = store
 
 	router := api.NewRouter(api.RouterConfig{
-		PresetRepo:    presetRepo,
-		TemplateRepo:  templateRepo,
+		PresetStore:   presetStore,
+		TemplateStore: templateStore,
 		DefaultUserID: defaultUserID,
 		Admin:         true,
 	})
@@ -40,21 +40,21 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestRepos
 		server.Close()
 	})
 
-	return server, &strategyTestRepos{
-		db:           store,
-		presetRepo:   presetRepo,
-		templateRepo: templateRepo,
+	return server, &strategyTestStores{
+		db:            store,
+		presetStore:   presetStore,
+		templateStore: templateStore,
 	}
 }
 
-type strategyTestRepos struct {
-	db           any
-	presetRepo   core.PresetRepository
-	templateRepo core.TemplateRepository
+type strategyTestStores struct {
+	db            any
+	presetStore   core.PresetStore
+	templateStore core.TemplateStore
 }
 
 func TestStrategyCRUD_RFC005(t *testing.T) {
-	server, repos := setupStrategyTestServer(t)
+	server, stores := setupStrategyTestServer(t)
 	client := server.Client()
 	baseURL := server.URL
 
@@ -72,7 +72,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		CreatedAt:        time.Now().UTC(),
 		UpdatedAt:        time.Now().UTC(),
 	}
-	if err := repos.templateRepo.CreateTemplate(ctx, foreignTemplate); err != nil {
+	if err := stores.templateStore.CreateTemplate(ctx, foreignTemplate); err != nil {
 		t.Fatalf("failed to create foreign template: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			CreatedAt:          time.Now().UTC(),
 			UpdatedAt:          time.Now().UTC(),
 		}
-		if err := repos.presetRepo.CreatePreset(ctx, customPreset); err != nil {
+		if err := stores.presetStore.CreatePreset(ctx, customPreset); err != nil {
 			t.Fatalf("failed to seed custom preset: %v", err)
 		}
 
@@ -292,22 +292,22 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		}
 	})
 
-	// 5. Direct repository-level immutability defense-in-depth
-	t.Run("RepositoryLevel_BuiltInImmutability_Guards", func(t *testing.T) {
+	// 5. Direct store-level immutability defense-in-depth
+	t.Run("StoreLevel_BuiltInImmutability_Guards", func(t *testing.T) {
 		builtInPreset := &core.Preset{
 			ID:                 "builtin-immutability-test",
 			UserID:             "system",
-			Name:               "Builtin Repo Immutability Test",
+			Name:               "Builtin Store Immutability Test",
 			SystemInstructions: "Immutable",
 			TemplateSetID:      "builtin-standard-clean",
 		}
 
-		errUpdate := repos.presetRepo.UpdatePreset(ctx, builtInPreset)
+		errUpdate := stores.presetStore.UpdatePreset(ctx, builtInPreset)
 		if errUpdate != core.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from UpdatePreset, got %v", errUpdate)
 		}
 
-		errDelete := repos.presetRepo.DeletePreset(ctx, "system", "builtin-immutability-test")
+		errDelete := stores.presetStore.DeletePreset(ctx, "system", "builtin-immutability-test")
 		if errDelete != core.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from DeletePreset, got %v", errDelete)
 		}

@@ -33,7 +33,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/server"
 	auth "github.com/resumeee-app/resumeee-auth-firebase"
-	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/llm/gemini"
 	"github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
@@ -56,16 +56,16 @@ func main() {
 	authProvider := auth.NewFirebaseTokenVerifier("my-firebase-project")
 
 	// 3. Configure LLM provider(s) in resumeee-core/llm
-	gemini := llm.NewGeminiProvider(
+	geminiClient := gemini.New(
 		os.Getenv("GEMINI_API_KEY"),
-		llm.WithDefaultModel("gemini-2.5-flash"),
+		gemini.WithDefaultModel("gemini-2.5-flash"),
 	)
 
 	// 4. Inject configured dependencies into resumeee-api/server
 	err = server.Run(ctx,
 		server.WithStore(store),
 		server.WithAuthProvider(authProvider),
-		server.WithLLMClient(gemini),
+		server.WithLLMClient(geminiClient),
 		server.WithPort(8080),
 		server.WithQuotaLimits(100, 2_000_000),
 		server.WithWorkerPoolConfig(4, 200, 3),

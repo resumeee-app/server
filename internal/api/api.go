@@ -12,13 +12,15 @@
 //   - Tailoring preset configurations (/api/v1/presets/*)
 //   - LLM model enumeration (/api/v1/models)
 //
-// Handlers communicate with underlying domain services, persistence repositories,
+// Handlers communicate with underlying domain services, persistence stores,
 // and asynchronous worker pools via decoupled interfaces.
 package api
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -26,12 +28,14 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
+	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/renderer"
 	"github.com/resumeee-app/resumeee-core/seed"
-	"github.com/resumeee-app/resumeee-core/services/branch"
-	"github.com/resumeee-app/resumeee-core/services/profile"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // ChannelQueue provides a generic bounded channel-backed queue for asynchronous task dispatch.
@@ -64,10 +68,13 @@ func (q *ChannelQueue[T]) Channel() <-chan T {
 	return q.ch
 }
 
-// ChannelJobEnqueuer implements JobEnqueuer backed by ChannelQueue[core.GenerationJob].
+// ChannelJobEnqueuer implements branch.JobEnqueuer backed by ChannelQueue[core.GenerationJob].
 type ChannelJobEnqueuer struct {
 	queue *ChannelQueue[core.GenerationJob]
 }
+
+// Compile-time assertion ensuring ChannelJobEnqueuer satisfies branch.JobEnqueuer.
+var _ branch.JobEnqueuer = (*ChannelJobEnqueuer)(nil)
 
 // NewChannelJobEnqueuer creates a new ChannelJobEnqueuer with the given buffer capacity.
 func NewChannelJobEnqueuer(capacity int) *ChannelJobEnqueuer {
@@ -86,10 +93,13 @@ func (e *ChannelJobEnqueuer) Channel() <-chan core.GenerationJob {
 	return e.queue.Channel()
 }
 
-// ChannelPDFJobEnqueuer implements PDFJobEnqueuer backed by ChannelQueue[core.PDFParseJobTask].
+// ChannelPDFJobEnqueuer implements core.PDFJobEnqueuer backed by ChannelQueue[core.PDFParseJobTask].
 type ChannelPDFJobEnqueuer struct {
 	queue *ChannelQueue[core.PDFParseJobTask]
 }
+
+// Compile-time assertion ensuring ChannelPDFJobEnqueuer satisfies core.PDFJobEnqueuer.
+var _ core.PDFJobEnqueuer = (*ChannelPDFJobEnqueuer)(nil)
 
 // NewChannelPDFJobEnqueuer creates a new ChannelPDFJobEnqueuer with the given buffer capacity.
 func NewChannelPDFJobEnqueuer(capacity int) *ChannelPDFJobEnqueuer {
@@ -108,30 +118,42 @@ func (e *ChannelPDFJobEnqueuer) Channel() <-chan core.PDFParseJobTask {
 	return e.queue.Channel()
 }
 
+// PDFTextExtractor defines the narrow PDF text extraction contract required by upload handlers.
+type PDFTextExtractor interface {
+	ExtractText(ctx context.Context, r io.ReaderAt, size int64) (string, error)
+}
+
+// TemplateRenderer defines the template validation and rendering contract required by API handlers.
+type TemplateRenderer interface {
+	renderer.TemplateRenderer
+	Validate(tmpl *core.TemplateSet) error
+}
+
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileRepo       core.ProfileRepository
-	PresetRepo        core.PresetRepository
-	TemplateRepo      core.TemplateRepository
-	BranchRepo        core.BranchRepository
-	PDFJobRepo        core.PDFParseJobRepository
+	ProfileStore      core.ProfileStore
+	CareerStore       core.CareerStore
+	PresetStore       core.PresetStore
+	TemplateStore     core.TemplateStore
+	BranchStore       core.BranchStore
+	PDFJobStore       core.PDFJobStore
 	PDFJobEnqueuer    core.PDFJobEnqueuer
-	QuotaRepo         core.QuotaRepository
-	BranchService     branch.Service
-	ProfileService    profile.Service
-	PDFExtractor      core.PDFTextExtractor
-	ResumeExtractor   core.ResumeExtractor
-	Renderer          core.TemplateRenderer
-	Validator         core.ProvenanceValidator
-	JobEnqueuer       core.JobEnqueuer
-	PromptCompiler    core.PromptCompiler
+	QuotaStore        core.QuotaStore
+	BranchService     *branch.Service
+	ProfileService    *profile.Service
+	PDFExtractor      PDFTextExtractor
+	ResumeExtractor   worker.ResumeExtractor
+	Renderer          TemplateRenderer
+	Validator         branch.ProvenanceValidator
+	JobEnqueuer       branch.JobEnqueuer
+	PromptCompiler    branch.PromptCompiler
 	ModelEnumerator   core.ModelEnumerator
 	DefaultUserID     string
 	Admin             bool
 	AuthProvider      auth.Provider
 	TokenVerifier     core.TokenVerifier
 	FirebaseProjectID string
-	UserRepo          core.UserRepository
+	UserStore         core.UserStore
 	Store             core.Store
 	Provisioner       TenantProvisioner
 	Logger            *slog.Logger
@@ -141,15 +163,20 @@ type RouterConfig struct {
 	MonthlyTokenLimit int
 }
 
+// defaultTenantProvisioner lazily seeds default tenant data on first authenticated request.
 type defaultTenantProvisioner struct {
-	store        core.Store
-	profileRepo  core.ProfileRepository
-	branchRepo   core.BranchRepository
-	templateRepo core.TemplateRepository
-	userRepo     core.UserRepository
-	provisioned  sync.Map
+	store         core.Store
+	profileStore  core.ProfileStore
+	branchStore   core.BranchStore
+	templateStore core.TemplateStore
+	userStore     core.UserStore
+	provisioned   sync.Map
 }
 
+// Compile-time assertion ensuring defaultTenantProvisioner satisfies TenantProvisioner.
+var _ TenantProvisioner = (*defaultTenantProvisioner)(nil)
+
+// EnsureTenantProvisioned idempotently provisions default tenant records for userID if not already cached.
 func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error {
 	if _, ok := p.provisioned.Load(userID); ok {
 		return nil
@@ -157,8 +184,8 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	var err error
 	if p.store != nil {
 		err = seed.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
-	} else if p.profileRepo != nil && p.branchRepo != nil && p.templateRepo != nil {
-		err = seed.EnsureTenantProvisionedRepos(ctx, p.profileRepo, p.branchRepo, p.templateRepo, p.userRepo, userID, userInfo)
+	} else if p.profileStore != nil && p.branchStore != nil && p.templateStore != nil {
+		err = seed.EnsureTenantProvisionedStores(ctx, p.profileStore, p.branchStore, p.templateStore, p.userStore, userID, userInfo)
 	}
 	if err == nil {
 		p.provisioned.Store(userID, true)
@@ -177,8 +204,40 @@ func getUserID(r *http.Request, defaultID string) string {
 	return "default"
 }
 
+// resolveStoreDefaults populates any unset individual store fields from cfg.Store.
+func resolveStoreDefaults(cfg *RouterConfig) {
+	if cfg.Store == nil {
+		return
+	}
+	if cfg.ProfileStore == nil {
+		cfg.ProfileStore = cfg.Store.Profiles()
+	}
+	if cfg.CareerStore == nil {
+		cfg.CareerStore = cfg.Store.Career()
+	}
+	if cfg.PresetStore == nil {
+		cfg.PresetStore = cfg.Store.Presets()
+	}
+	if cfg.TemplateStore == nil {
+		cfg.TemplateStore = cfg.Store.Templates()
+	}
+	if cfg.BranchStore == nil {
+		cfg.BranchStore = cfg.Store.Branches()
+	}
+	if cfg.PDFJobStore == nil {
+		cfg.PDFJobStore = cfg.Store.PDFJobs()
+	}
+	if cfg.QuotaStore == nil {
+		cfg.QuotaStore = cfg.Store.Quotas()
+	}
+	if cfg.UserStore == nil {
+		cfg.UserStore = cfg.Store.Users()
+	}
+}
+
 // NewRouter constructs a net/http router and registers all OpenAPI routes under /api/v1.
 func NewRouter(cfg RouterConfig) http.Handler {
+	resolveStoreDefaults(&cfg)
 	if cfg.DefaultUserID == "" {
 		cfg.DefaultUserID = "default"
 	}
@@ -194,18 +253,17 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.MonthlyTokenLimit <= 0 {
 		cfg.MonthlyTokenLimit = 1000000
 	}
-	if cfg.PDFJobRepo == nil {
-		cfg.PDFJobRepo = memory.New()
+	if cfg.PDFJobStore == nil {
+		cfg.PDFJobStore = memory.New()
 	}
 	if cfg.PDFExtractor == nil {
 		cfg.PDFExtractor = pdf.NewExtractor()
 	}
 	if cfg.ResumeExtractor == nil {
-		cfg.ResumeExtractor = llm.NewDefaultResumeExtractor(nil)
-	}
-	if cfg.ModelEnumerator == nil {
-		if me, ok := cfg.ResumeExtractor.(core.ModelEnumerator); ok {
-			cfg.ModelEnumerator = me
+		defaultExtractor := llm.NewRegistryExtractor(nil)
+		cfg.ResumeExtractor = defaultExtractor
+		if cfg.ModelEnumerator == nil {
+			cfg.ModelEnumerator = defaultExtractor
 		}
 	}
 
@@ -213,13 +271,17 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cfg.PromptCompiler = llm.NewPromptCompiler()
 	}
 
-	if cfg.BranchService == nil && cfg.BranchRepo != nil {
-		cfg.BranchService = branch.NewService(branch.Config{
-			BranchRepo:        cfg.BranchRepo,
-			ProfileRepo:       cfg.ProfileRepo,
-			PresetRepo:        cfg.PresetRepo,
-			TemplateRepo:      cfg.TemplateRepo,
-			QuotaRepo:         cfg.QuotaRepo,
+	if cfg.ProfileService == nil && cfg.ProfileStore != nil && cfg.CareerStore != nil && cfg.BranchStore != nil {
+		cfg.ProfileService = profile.New(cfg.ProfileStore, cfg.CareerStore, cfg.BranchStore)
+	}
+
+	if cfg.BranchService == nil && cfg.BranchStore != nil {
+		cfg.BranchService = branch.New(branch.Config{
+			Branches:          cfg.BranchStore,
+			Profiles:          cfg.ProfileStore,
+			Presets:           cfg.PresetStore,
+			Templates:         cfg.TemplateStore,
+			Quotas:            cfg.QuotaStore,
 			JobEnqueuer:       cfg.JobEnqueuer,
 			Validator:         cfg.Validator,
 			Renderer:          cfg.Renderer,
@@ -241,13 +303,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerQuotaRoutes(mux, cfg)
 
 	provisioner := cfg.Provisioner
-	if provisioner == nil && (cfg.Store != nil || cfg.ProfileRepo != nil) {
+	if provisioner == nil && (cfg.Store != nil || cfg.ProfileStore != nil) {
 		provisioner = &defaultTenantProvisioner{
-			store:        cfg.Store,
-			profileRepo:  cfg.ProfileRepo,
-			branchRepo:   cfg.BranchRepo,
-			templateRepo: cfg.TemplateRepo,
-			userRepo:     cfg.UserRepo,
+			store:         cfg.Store,
+			profileStore:  cfg.ProfileStore,
+			branchStore:   cfg.BranchStore,
+			templateStore: cfg.TemplateStore,
+			userStore:     cfg.UserStore,
 		}
 	}
 
@@ -299,4 +361,67 @@ func registerModelRoutes(mux *http.ServeMux, cfg RouterConfig) {
 
 	mux.HandleFunc("GET /api/v1/models", modelsHandler)
 	mux.HandleFunc("GET /models", modelsHandler)
+}
+
+// routeGuard pairs a dependency availability check with the 500 error message returned when unavailable.
+type routeGuard struct {
+	ok  bool
+	msg string
+}
+
+// withRouteGuards wraps fn with precondition checks that fail closed with a 500 JSON error when dependencies are missing.
+func withRouteGuards(fn http.HandlerFunc, guards ...routeGuard) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		for _, g := range guards {
+			if !g.ok {
+				writeError(w, http.StatusInternalServerError, CodeInternalError, g.msg, "")
+				return
+			}
+		}
+		fn(w, r)
+	}
+}
+
+// storeUnavailableError indicates a required domain store was omitted from RouterConfig.
+type storeUnavailableError struct {
+	msg string
+}
+
+// Error returns the client-safe store unavailability message.
+func (e *storeUnavailableError) Error() string {
+	return e.msg
+}
+
+// writeAccessError translates store-unavailability or forbidden errors into 500 or 403 JSON responses.
+func writeAccessError(w http.ResponseWriter, err error, forbiddenMsg string) {
+	var unavailable *storeUnavailableError
+	if errors.As(err, &unavailable) {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, unavailable.Error(), "")
+		return
+	}
+	writeError(w, http.StatusForbidden, CodeForbidden, forbiddenMsg, "")
+}
+
+// fetchAuthorizedTemplate resolves templateID from store and verifies tenant ownership or built-in visibility.
+func fetchAuthorizedTemplate(ctx context.Context, store core.TemplateStore, userID, templateID string) (*core.TemplateSet, error) {
+	if store == nil {
+		return nil, &storeUnavailableError{msg: "template store unavailable"}
+	}
+	tmpl, err := store.Template(ctx, userID, templateID)
+	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
+		return nil, core.ErrForbidden
+	}
+	return tmpl, nil
+}
+
+// fetchAuthorizedPreset resolves presetID from store and verifies tenant ownership or built-in visibility.
+func fetchAuthorizedPreset(ctx context.Context, store core.PresetStore, userID, presetID string) (*core.Preset, error) {
+	if store == nil {
+		return nil, &storeUnavailableError{msg: "preset store unavailable"}
+	}
+	preset, err := store.Preset(ctx, userID, presetID)
+	if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
+		return nil, core.ErrForbidden
+	}
+	return preset, nil
 }
