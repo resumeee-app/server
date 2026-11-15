@@ -261,6 +261,7 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	if previewTimeout <= 0 {
 		previewTimeout = config.DefaultRenderPreviewTimeout
 	}
+	extendResponseWriteDeadline(w, previewTimeout)
 	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
 	defer cancel()
 

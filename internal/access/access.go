@@ -30,7 +30,7 @@ func (e *StoreUnavailableError) Error() string {
 // StoreUnavailableMessage extracts the unavailability message if err wraps *StoreUnavailableError.
 func StoreUnavailableMessage(err error) (string, bool) {
 	var unavailable *StoreUnavailableError
-	if errors.As(err, &unavailable) {
+	if errors.As(err, &unavailable) && unavailable != nil {
 		return unavailable.msg, true
 	}
 	return "", false

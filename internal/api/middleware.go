@@ -42,6 +42,11 @@ func (rw *responseWriterRecorder) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the underlying ResponseWriter for http.ResponseController deadline adjustments.
+func (rw *responseWriterRecorder) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // LoggingMiddleware logs incoming HTTP requests with method, path, status, and duration.
 func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -134,15 +139,15 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 
 // TimeoutMiddleware sets a request context cancellation deadline bounded by the given duration.
 // If timeout <= 0, it falls back to config.DefaultRESTTimeout.
-// For /profile/pdf/parse (normalized), handler-level timeout budgeting is used to accommodate LLM extraction.
+// Handler-scoped endpoints (/profile/pdf/parse and POST */preview routes) bypass this wrapper so
+// they can apply PDFParseTimeout or RenderPreviewTimeout directly.
 func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	if timeout <= 0 {
 		timeout = config.DefaultRESTTimeout
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cleanPath := path.Clean(r.URL.Path)
-			if cleanPath == "/api/v1/profile/pdf/parse" || strings.HasSuffix(cleanPath, "/profile/pdf/parse") {
+			if usesHandlerTimeout(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -151,6 +156,23 @@ func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// usesHandlerTimeout reports whether r manages its own handler-scoped timeout instead of RESTTimeout.
+func usesHandlerTimeout(r *http.Request) bool {
+	cleanPath := path.Clean(r.URL.Path)
+	if cleanPath == "/api/v1/profile/pdf/parse" || strings.HasSuffix(cleanPath, "/profile/pdf/parse") {
+		return true
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	if strings.HasSuffix(cleanPath, "/templates/preview") {
+		return true
+	}
+	return strings.Contains(cleanPath, "/branches/") &&
+		strings.Contains(cleanPath, "/versions/") &&
+		strings.HasSuffix(cleanPath, "/preview")
 }
 
 // isPublicRoute checks if a request path is exempt from authentication.

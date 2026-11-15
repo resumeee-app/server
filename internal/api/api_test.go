@@ -3249,6 +3249,10 @@ func TestHTMLRenderResponse_SetsNoSniffHeader(t *testing.T) {
 	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("expected X-Content-Type-Options: nosniff, got %q", got)
 	}
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "style-src 'unsafe-inline'") {
+		t.Errorf("expected restrictive Content-Security-Policy header, got %q", csp)
+	}
 }
 
 type failingCareerStore struct {
@@ -3514,4 +3518,70 @@ func TestSyncBranches_DecodesChunkedRequestBody(t *testing.T) {
 			t.Errorf("expected 1 enqueued job filtered from chunked body, got %d", syncResp.EnqueuedCount)
 		}
 	})
+}
+
+type deadlineRecordingWriter struct {
+	*httptest.ResponseRecorder
+	deadlineCalled bool
+	writeDeadline  time.Time
+}
+
+func (d *deadlineRecordingWriter) SetWriteDeadline(deadline time.Time) error {
+	d.deadlineCalled = true
+	d.writeDeadline = deadline
+	return nil
+}
+
+type staticResumeExtractor struct{}
+
+func (s *staticResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
+	return &core.JSONResume{}, core.TokenUsage{}, nil
+}
+
+func TestPDFParseSync_ExtendsResponseWriteDeadline(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+	cfg.PDFParseTimeout = 3 * time.Minute
+	cfg.PDFExtractor = &staticPDFTextExtractor{text: "Senior Engineer Resume"}
+	cfg.ResumeExtractor = &staticResumeExtractor{}
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	router := api.NewRouter(cfg)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("%PDF-1.4\n")); err != nil {
+		t.Fatalf("write pdf bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/profile/pdf/parse?sync=true", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	rec := &deadlineRecordingWriter{ResponseRecorder: httptest.NewRecorder()}
+	before := time.Now()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for sync pdf parse, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !rec.deadlineCalled {
+		t.Fatal("expected SetWriteDeadline to be invoked via ResponseController through middleware chain")
+	}
+	if remaining := rec.writeDeadline.Sub(before); remaining < 2*time.Minute {
+		t.Errorf("expected write deadline extended beyond 2m (3m parse timeout), got %v", remaining)
+	}
 }

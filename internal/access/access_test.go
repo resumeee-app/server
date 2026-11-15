@@ -48,6 +48,11 @@ func TestStoreUnavailableError(t *testing.T) {
 	if _, ok := access.StoreUnavailableMessage(errors.New("other")); ok {
 		t.Fatal("expected false for unrelated error")
 	}
+
+	var typedNil *access.StoreUnavailableError
+	if msg, ok := access.StoreUnavailableMessage(fmt.Errorf("wrapped: %w", typedNil)); ok || msg != "" {
+		t.Fatalf("expected (\"\", false) for wrapped typed-nil StoreUnavailableError, got (%q, %v)", msg, ok)
+	}
 }
 
 func TestTemplateAuthorization(t *testing.T) {

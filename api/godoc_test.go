@@ -34,89 +34,166 @@ func TestPackageDocCommentConsistency(t *testing.T) {
 		}
 
 		t.Run(relDir, func(t *testing.T) {
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				t.Fatalf("failed to read dir %s: %v", dir, err)
-			}
-
-			fset := token.NewFileSet()
-			var docFiles []string
-			var docTexts []string
-			var nonTestFiles []string
-			var detectedPkgName string
-
-			for _, entry := range entries {
-				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-					continue
-				}
-
-				filePath := filepath.Join(dir, entry.Name())
-				f, parseErr := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
-				if parseErr != nil {
-					t.Fatalf("failed to parse %s: %v", filePath, parseErr)
-				}
-
-				isTestFile := strings.HasSuffix(entry.Name(), "_test.go")
-				if !isTestFile {
-					nonTestFiles = append(nonTestFiles, entry.Name())
-					if detectedPkgName == "" {
-						detectedPkgName = f.Name.Name
-					}
-				}
-
-				if f.Doc != nil {
-					docText := strings.TrimSpace(f.Doc.Text())
-					if docText != "" {
-						docFiles = append(docFiles, entry.Name())
-						docTexts = append(docTexts, docText)
-					}
-				}
-			}
-
-			if len(nonTestFiles) == 0 {
-				t.Fatalf("package in %s has no non-test Go source files", relDir)
-			}
-
-			if detectedPkgName == "" {
-				detectedPkgName = filepath.Base(dir)
-			}
-
-			if len(docFiles) == 0 {
-				t.Fatalf("package %s (%s) has NO package doc comment", detectedPkgName, relDir)
-			}
-			if len(docFiles) > 1 {
-				t.Fatalf("package %s (%s) has multiple files with package doc comments: %v (expected only 1)",
-					detectedPkgName, relDir, docFiles)
-			}
-
-			docFile := docFiles[0]
-			docText := docTexts[0]
-
-			if strings.HasSuffix(docFile, "_test.go") {
-				t.Fatalf("package doc comment for %s is in a test file (%s); must be in non-test file",
-					detectedPkgName, docFile)
-			}
-
-			expectedFile := detectedPkgName + ".go"
-			if detectedPkgName == "main" {
-				expectedFile = "main.go"
-			}
-			if docFile != expectedFile {
-				t.Fatalf("package doc comment for %s in %s is in file %s; expected %s",
-					detectedPkgName, relDir, docFile, expectedFile)
-			}
-
-			expectedPrefix := "Package " + detectedPkgName
-			if !strings.HasPrefix(docText, expectedPrefix) {
-				t.Fatalf("package doc comment in %s/%s does not start with %q; got: %q",
-					relDir, docFile, expectedPrefix, docText)
-			}
-
-			if len(docText) < 20 {
-				t.Fatalf("package doc comment in %s/%s is too short (%d chars)", relDir, docFile, len(docText))
+			if err := checkPackageDirDocConsistency(dir, relDir); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
+}
+
+// TestCheckPackageDirDocConsistency verifies that checkPackageDirDocConsistency rejects malformed
+// package doc placement, count, and prefixes while accepting canonical Go and main packages.
+func TestCheckPackageDirDocConsistency(t *testing.T) {
+	t.Run("missing package doc comment", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoFile(t, dir, "sample.go", "package sample\n\nfunc run() {}\n")
+		if err := checkPackageDirDocConsistency(dir, "sample"); err == nil {
+			t.Fatal("expected error for missing package doc comment")
+		}
+	})
+
+	t.Run("multiple files with package doc comments", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoFile(t, dir, "sample.go", "// Package sample provides utilities.\npackage sample\n")
+		writeGoFile(t, dir, "extra.go", "// Package sample also documented here.\npackage sample\n\nfunc helper() {}\n")
+		if err := checkPackageDirDocConsistency(dir, "sample"); err == nil {
+			t.Fatal("expected error for multiple package doc comment files")
+		}
+	})
+
+	t.Run("package doc comment in wrong filename", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoFile(t, dir, "other.go", "// Package sample provides utilities.\npackage sample\n")
+		if err := checkPackageDirDocConsistency(dir, "sample"); err == nil {
+			t.Fatal("expected error for package doc comment outside <pkgname>.go")
+		}
+	})
+
+	t.Run("package doc comment in test file", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoFile(t, dir, "sample.go", "package sample\n")
+		writeGoFile(t, dir, "sample_test.go", "// Package sample documented in test.\npackage sample\n")
+		if err := checkPackageDirDocConsistency(dir, "sample"); err == nil {
+			t.Fatal("expected error for package doc comment inside test file")
+		}
+	})
+
+	t.Run("wrong doc prefix", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoFile(t, dir, "sample.go", "// Docs for sample utilities.\npackage sample\n")
+		if err := checkPackageDirDocConsistency(dir, "sample"); err == nil {
+			t.Fatal("expected error for doc comment not starting with Package <name>")
+		}
+	})
+
+	t.Run("valid library and main packages pass", func(t *testing.T) {
+		libDir := t.TempDir()
+		writeGoFile(t, libDir, "sample.go", "// Package sample provides utilities.\npackage sample\n")
+		if err := checkPackageDirDocConsistency(libDir, "sample"); err != nil {
+			t.Fatalf("unexpected error for valid library package: %v", err)
+		}
+
+		mainDir := t.TempDir()
+		writeGoFile(t, mainDir, "main.go", "// Package main runs the sample command.\npackage main\n\nfunc main() {}\n")
+		if err := checkPackageDirDocConsistency(mainDir, "cmd/sample"); err != nil {
+			t.Fatalf("unexpected error for valid main package: %v", err)
+		}
+	})
+}
+
+// writeGoFile writes src into name under dir for synthetic package doc verification tests.
+func writeGoFile(t *testing.T, dir, name, src string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// checkPackageDirDocConsistency validates single-file Package <name> doc placement for a single package directory.
+func checkPackageDirDocConsistency(dir, relDir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read dir %s: %w", dir, err)
+	}
+
+	fset := token.NewFileSet()
+	var docFiles []string
+	var docTexts []string
+	var nonTestFiles []string
+	var detectedPkgName string
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+
+		filePath := filepath.Join(dir, entry.Name())
+		f, parseErr := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
+		if parseErr != nil {
+			return fmt.Errorf("failed to parse %s: %w", filePath, parseErr)
+		}
+
+		isTestFile := strings.HasSuffix(entry.Name(), "_test.go")
+		if !isTestFile {
+			nonTestFiles = append(nonTestFiles, entry.Name())
+			if detectedPkgName == "" {
+				detectedPkgName = f.Name.Name
+			}
+		}
+
+		if f.Doc != nil {
+			docText := strings.TrimSpace(f.Doc.Text())
+			if docText != "" {
+				docFiles = append(docFiles, entry.Name())
+				docTexts = append(docTexts, docText)
+			}
+		}
+	}
+
+	if len(nonTestFiles) == 0 {
+		return fmt.Errorf("package in %s has no non-test Go source files", relDir)
+	}
+
+	if detectedPkgName == "" {
+		detectedPkgName = filepath.Base(dir)
+	}
+
+	if len(docFiles) == 0 {
+		return fmt.Errorf("package %s (%s) has NO package doc comment", detectedPkgName, relDir)
+	}
+	if len(docFiles) > 1 {
+		return fmt.Errorf("package %s (%s) has multiple files with package doc comments: %v (expected only 1)",
+			detectedPkgName, relDir, docFiles)
+	}
+
+	docFile := docFiles[0]
+	docText := docTexts[0]
+
+	if strings.HasSuffix(docFile, "_test.go") {
+		return fmt.Errorf("package doc comment for %s is in a test file (%s); must be in non-test file",
+			detectedPkgName, docFile)
+	}
+
+	expectedFile := detectedPkgName + ".go"
+	if detectedPkgName == "main" {
+		expectedFile = "main.go"
+	}
+	if docFile != expectedFile {
+		return fmt.Errorf("package doc comment for %s in %s is in file %s; expected %s",
+			detectedPkgName, relDir, docFile, expectedFile)
+	}
+
+	expectedPrefix := "Package " + detectedPkgName
+	if !strings.HasPrefix(docText, expectedPrefix) {
+		return fmt.Errorf("package doc comment in %s/%s does not start with %q; got: %q",
+			relDir, docFile, expectedPrefix, docText)
+	}
+
+	if len(docText) < 20 {
+		return fmt.Errorf("package doc comment in %s/%s is too short (%d chars)", relDir, docFile, len(docText))
+	}
+
+	return nil
 }
 
 // TestSymbolDocComments enforces that every exported and unexported symbol (function, method,
@@ -380,6 +457,7 @@ func allBlankIdents(decl *ast.GenDecl) bool {
 	return hasAny
 }
 
+// findRepoRoot walks parent directories from the working directory to locate the repository root containing go.mod.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -406,6 +484,7 @@ func findRepoRoot(t *testing.T) string {
 	}
 }
 
+// discoverPackageDirectories walks repoRoot and returns unique non-vendor directory paths containing Go files.
 func discoverPackageDirectories(t *testing.T, repoRoot string) []string {
 	t.Helper()
 	var pkgDirs []string

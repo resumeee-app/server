@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -40,6 +40,18 @@ func registerProfileTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	), withToolDeps(handleAddAchievementBullet(cfg), careerStoreDep(cfg)))
 }
 
+// fetchProfileSnapshot retrieves the canonical career profile snapshot for userID via ProfileService or ProfileStore.
+func fetchProfileSnapshot(ctx context.Context, cfg ServerConfig, userID string) (*core.MainProfileSnapshot, error) {
+	switch {
+	case cfg.ProfileService != nil:
+		return cfg.ProfileService.Snapshot(ctx, userID)
+	case cfg.ProfileStore != nil:
+		return cfg.ProfileStore.Snapshot(ctx, userID)
+	default:
+		return nil, access.NewStoreUnavailableError("profile service and store unavailable")
+	}
+}
+
 // handleGetMainProfile handles tool 'get_main_profile', returning the authenticated user's profile snapshot.
 func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcpSDK.CallToolRequest) (*mcpSDK.CallToolResult, error) {
@@ -49,16 +61,11 @@ func handleGetMainProfile(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *core.MainProfileSnapshot
-		var err error
-		switch {
-		case cfg.ProfileService != nil:
-			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
-		default:
-			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
-		}
-
+		snapshot, err := fetchProfileSnapshot(ctx, cfg, userID)
 		if err != nil {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
+				return mcpSDK.NewToolResultError(msg), nil
+			}
 			cfg.Logger.ErrorContext(ctx, "failed to get profile snapshot", "user_id", userID, "err", err)
 			return mcpSDK.NewToolResultError("failed to retrieve main profile due to an internal store error"), nil
 		}
@@ -130,7 +137,8 @@ func buildWorkExperience(userID, company, roleTitle string, startDate core.Date,
 	}
 
 	return &core.WorkExperience{
-		ID:            "exp-" + uuid.New().String(),
+		ID:            core.GenerateID("exp"),
+		ShortID:       core.GenerateShortID("exp"),
 		UserID:        userID,
 		Company:       company,
 		RoleTitle:     roleTitle,
@@ -169,20 +177,22 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("statement cannot be empty"), nil
 		}
 
-		if !verifyFactOwner(ctx, cfg, userID, ownerID, ownerType) {
+		canonicalOwnerID, ok := resolveFactOwnerID(ctx, cfg, userID, ownerID, ownerType)
+		if !ok {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("%s with ID %q not found or access denied", ownerType, ownerID)), nil
 		}
 
 		fact := &core.Fact{
-			ID:        "fact-" + uuid.New().String(),
+			ID:        core.GenerateID("fact"),
+			ShortID:   core.GenerateShortID("fact"),
 			UserID:    userID,
-			OwnerID:   ownerID,
+			OwnerID:   canonicalOwnerID,
 			OwnerType: ownerType,
 			Statement: statement,
 		}
 
 		if err := cfg.CareerStore.CreateFact(ctx, fact); err != nil {
-			cfg.Logger.ErrorContext(ctx, "failed to create achievement fact", "user_id", userID, "owner_id", ownerID, "err", err)
+			cfg.Logger.ErrorContext(ctx, "failed to create achievement fact", "user_id", userID, "owner_id", canonicalOwnerID, "err", err)
 			return mcpSDK.NewToolResultError("failed to create achievement fact due to an internal store error"), nil
 		}
 
@@ -190,19 +200,28 @@ func handleAddAchievementBullet(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	}
 }
 
-// verifyFactOwner reports whether the target entity exists and belongs to userID.
-func verifyFactOwner(ctx context.Context, cfg ServerConfig, userID, ownerID string, ownerType core.OwnerType) bool {
+// resolveFactOwnerID verifies that the target entity exists, belongs to userID, and returns its canonical entity UUID.
+func resolveFactOwnerID(ctx context.Context, cfg ServerConfig, userID, ownerID string, ownerType core.OwnerType) (string, bool) {
 	switch ownerType {
 	case core.OwnerTypeWorkExperience:
 		exp, err := cfg.CareerStore.Experience(ctx, userID, ownerID)
-		return err == nil && exp != nil && exp.UserID == userID
+		if err != nil || exp == nil || exp.UserID != userID {
+			return "", false
+		}
+		return exp.ID, true
 	case core.OwnerTypeProject:
 		proj, err := cfg.CareerStore.Project(ctx, userID, ownerID)
-		return err == nil && proj != nil && proj.UserID == userID
+		if err != nil || proj == nil || proj.UserID != userID {
+			return "", false
+		}
+		return proj.ID, true
 	case core.OwnerTypeEducation:
 		edu, err := cfg.CareerStore.Education(ctx, userID, ownerID)
-		return err == nil && edu != nil && edu.UserID == userID
+		if err != nil || edu == nil || edu.UserID != userID {
+			return "", false
+		}
+		return edu.ID, true
 	default:
-		return false
+		return "", false
 	}
 }

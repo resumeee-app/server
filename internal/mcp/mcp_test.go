@@ -181,20 +181,32 @@ func setupTestEnv(t *testing.T) *testEnv {
 func TestServer_Registration(t *testing.T) {
 	env := setupTestEnv(t)
 
-	// Verify all 8 tools are registered
+	// Verify all 18 tools are registered
 	expectedTools := []string{
 		"get_main_profile",
-		"list_branches",
-		"render_resume",
 		"add_experience",
 		"add_achievement_bullet",
+		"list_branches",
+		"render_resume",
 		"create_branch",
+		"update_branch",
 		"tailor_resume",
 		"run_gap_analysis",
 		"simulate_ats",
+		"list_presets",
+		"get_preset",
+		"create_preset",
+		"update_preset",
+		"list_supported_languages",
+		"list_skills",
+		"add_skill",
+		"update_skill",
 	}
 
 	tools := env.mcpServer.ListTools()
+	if len(tools) != len(expectedTools) {
+		t.Errorf("expected %d registered tools, got %d", len(expectedTools), len(tools))
+	}
 	for _, toolName := range expectedTools {
 		if _, ok := tools[toolName]; !ok {
 			t.Errorf("expected tool %q to be registered", toolName)
@@ -328,6 +340,12 @@ func TestTool_AddExperience(t *testing.T) {
 		if exps[0].Company != "Acme Corp" || exps[0].RoleTitle != "Lead Engineer" {
 			t.Errorf("unexpected experience details: %+v", exps[0])
 		}
+		if exps[0].ShortID == "" {
+			t.Errorf("expected non-empty ShortID for created experience")
+		}
+		if !strings.Contains(text, exps[0].ShortID) {
+			t.Errorf("expected response %q to include ShortID %q", text, exps[0].ShortID)
+		}
 	})
 }
 
@@ -427,6 +445,50 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 		}
 		if !strings.Contains(facts[0].Statement, "Reduced API latency") {
 			t.Errorf("unexpected fact statement: %s", facts[0].Statement)
+		}
+		if facts[0].ShortID == "" {
+			t.Errorf("expected non-empty ShortID for created fact")
+		}
+	})
+
+	t.Run("short_id owner resolves to canonical entity UUID", func(t *testing.T) {
+		shortExp := &core.WorkExperience{
+			ID:        "exp-canon-1",
+			ShortID:   "exp-shrt",
+			UserID:    "user-1",
+			Company:   "ShortID Co",
+			RoleTitle: "Staff Engineer",
+			StartDate: core.NewDate(2022, 1, 1),
+		}
+		if err := env.careerStore.CreateExperience(ctx, shortExp); err != nil {
+			t.Fatalf("failed to create seed experience: %v", err)
+		}
+
+		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
+			Params: mcpSDK.CallToolParams{
+				Arguments: map[string]any{
+					"owner_id":   "exp-shrt",
+					"owner_type": "work_experience",
+					"statement":  "Canonicalized owner UUID from short ID",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("expected success, got error: %+v", result)
+		}
+
+		facts, err := env.careerStore.ListFactsByOwner(ctx, "user-1", "work_experience", "exp-canon-1")
+		if err != nil || len(facts) != 1 {
+			t.Fatalf("expected 1 fact under canonical owner exp-canon-1, got %d (err: %v)", len(facts), err)
+		}
+		if facts[0].OwnerID != "exp-canon-1" {
+			t.Errorf("expected OwnerID exp-canon-1, got %q", facts[0].OwnerID)
+		}
+		if facts[0].ShortID == "" {
+			t.Errorf("expected non-empty ShortID for created fact")
 		}
 	})
 }

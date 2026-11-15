@@ -103,18 +103,11 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *core.MainProfileSnapshot
-		var err error
-		switch {
-		case cfg.ProfileService != nil:
-			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
-		case cfg.ProfileStore != nil:
-			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
-		default:
-			return nil, errors.New("profile service and store unavailable")
-		}
-
+		snapshot, err := fetchProfileSnapshot(ctx, cfg, userID)
 		if err != nil {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.ErrorContext(ctx, "failed to read main profile resource", "user_id", userID, "err", err)
 			return nil, errors.New("failed to retrieve profile due to an internal store error")
 		}

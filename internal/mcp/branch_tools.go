@@ -316,7 +316,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		createdBranch, err := cfg.BranchService.CreateBranch(ctx, branch)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to create branch", "user_id", userID, "err", err)
-			return mcpSDK.NewToolResultError("failed to create branch due to an internal store error"), nil
+			return mcpSDK.NewToolResultError(mcpDomainErrorMessage("create branch", err)), nil
 		}
 
 		res, err := jsonToolResult(createdBranch)
@@ -519,7 +519,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		ver, err := cfg.BranchService.GenerateVersion(tailorCtx, userID, branchID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to trigger tailoring generation", "branch_id", branchID, "err", err)
-			return mcpSDK.NewToolResultError("failed to trigger tailoring generation"), nil
+			return mcpSDK.NewToolResultError(mcpDomainErrorMessage("trigger tailoring generation", err)), nil
 		}
 
 		res, err := jsonToolResult(tailorResumePayload{
@@ -566,7 +566,7 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		report, err := cfg.BranchService.AnalyzeGaps(ctx, userID, targetBranchID)
 		if err != nil {
 			cfg.Logger.ErrorContext(ctx, "failed to run gap analysis", "branch_id", targetBranchID, "err", err)
-			return mcpSDK.NewToolResultError("failed to execute gap analysis"), nil
+			return mcpSDK.NewToolResultError(mcpDomainErrorMessage("execute gap analysis", err)), nil
 		}
 
 		res, err := jsonToolResult(report)

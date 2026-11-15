@@ -200,9 +200,6 @@ func (h *profileHandler) pdfParseTimeout() time.Duration {
 	if h.cfg.PDFParseTimeout > 0 {
 		return h.cfg.PDFParseTimeout
 	}
-	if h.cfg.LLMTimeout > 0 {
-		return h.cfg.LLMTimeout
-	}
 	return config.DefaultPDFParseTimeout
 }
 
@@ -215,6 +212,7 @@ func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.Respon
 	}
 
 	parseTimeout := h.pdfParseTimeout()
+	extendResponseWriteDeadline(w, parseTimeout)
 	syncCtx, cancel := context.WithTimeout(r.Context(), parseTimeout)
 	defer cancel()
 

@@ -11,8 +11,9 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 - `cmd/server/` — Default unified HTTP server binary serving REST `/api/v1/*` and MCP `/mcp/sse` + `/mcp/message` endpoints.
 - `cmd/mcp/` — Standalone MCP CLI binary supporting `stdio` transport for desktop AI assistants (Claude Desktop, Cursor, Antigravity).
 - `api/` — OpenAPI 3.1 contract (`api/openapi.yaml`) and repository-wide guardrail tests (`godoc_test.go`, `gofmt_test.go`, `import_boundary_test.go`, `interface_assertion_test.go`, `openapi_test.go`).
+- `internal/access/` — Shared tenant ownership, system-resource, and store availability guards.
 - `internal/api/` — HTTP handlers, routers, and authentication/timeout middleware.
-- `internal/mcp/` — MCP tools (`get_main_profile`, `add_career_fact`, `list_branches`, `create_tailored_branch`, `trigger_tailoring`, `get_tailored_resume`, `extract_resume`, etc.) and SSE/stdio handlers.
+- `internal/mcp/` — MCP tools (`get_main_profile`, `add_experience`, `add_achievement_bullet`, `list_branches`, `create_branch`, `tailor_resume`, `render_resume`, `run_gap_analysis`, `simulate_ats`, etc.) and SSE/stdio handlers.
 - `internal/config/` — Environment and CLI flag configuration.
 
 ---

@@ -115,6 +115,12 @@ func mcpDomainErrorMessage(action string, err error) string {
 		return fmt.Sprintf("target resource not found to %s", action)
 	case errors.Is(err, core.ErrForbidden):
 		return fmt.Sprintf("access denied to %s", action)
+	case errors.Is(err, core.ErrQuotaExceeded):
+		return fmt.Sprintf("quota exceeded while trying to %s", action)
+	case errors.Is(err, core.ErrProvenance):
+		return fmt.Sprintf("provenance validation failed while trying to %s", action)
+	case errors.Is(err, core.ErrTemplateSyntax):
+		return fmt.Sprintf("template syntax error while trying to %s", action)
 	default:
 		return fmt.Sprintf("failed to %s due to an internal error", action)
 	}

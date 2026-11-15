@@ -99,15 +99,11 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		themeID = &req.TemplateSetID
 	}
 
-	if themeID != nil && *themeID != "" {
-		if err := h.validateTemplateAccess(ctx, *themeID, userID); err != nil {
-			writeAccessError(w, err, "cannot access foreign or nonexistent template")
-			return
-		}
+	if themeID != nil && !h.validateOptionalTemplateAccess(ctx, w, userID, *themeID, "cannot access foreign or nonexistent template") {
+		return
 	}
-	if req.TemplateSetID != "" && (themeID == nil || *themeID != req.TemplateSetID) {
-		if err := h.validateTemplateAccess(ctx, req.TemplateSetID, userID); err != nil {
-			writeAccessError(w, err, "cannot access foreign or nonexistent template")
+	if themeID == nil || *themeID != req.TemplateSetID {
+		if !h.validateOptionalTemplateAccess(ctx, w, userID, req.TemplateSetID, "cannot access foreign or nonexistent template") {
 			return
 		}
 	}
@@ -158,20 +154,48 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, preset)
 }
 
+// loadMutablePreset fetches preset id for userID and rejects system/built-in or foreign presets.
+func (h *presetHandler) loadMutablePreset(ctx context.Context, w http.ResponseWriter, userID, id, immutableMsg string) (*core.Preset, bool) {
+	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
+	if err != nil {
+		writeDomainError(w, h.cfg.Logger, err)
+		return nil, false
+	}
+	if preset == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
+		return nil, false
+	}
+	if access.IsSystemPreset(preset) {
+		writeError(w, http.StatusForbidden, CodeForbidden, immutableMsg, "")
+		return nil, false
+	}
+	if preset.UserID != userID {
+		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to preset", "")
+		return nil, false
+	}
+	return preset, true
+}
+
+// validateOptionalTemplateAccess verifies userID may reference templateID when non-empty.
+func (h *presetHandler) validateOptionalTemplateAccess(ctx context.Context, w http.ResponseWriter, userID, templateID, forbiddenMsg string) bool {
+	if templateID == "" {
+		return true
+	}
+	if err := h.validateTemplateAccess(ctx, templateID, userID); err != nil {
+		writeAccessError(w, err, forbiddenMsg)
+		return false
+	}
+	return true
+}
+
 // updatePreset updates mutable fields of an existing user-created preset.
 func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, h.cfg.Logger, err)
-		return
-	}
-
-	if access.IsSystemPreset(preset) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be modified", "")
+	preset, ok := h.loadMutablePreset(ctx, w, userID, id, "built-in presets cannot be modified")
+	if !ok {
 		return
 	}
 
@@ -190,11 +214,8 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		preset.SystemInstructions = *req.SystemInstructions
 	}
 	if req.SuggestedThemeID != nil {
-		if *req.SuggestedThemeID != "" {
-			if err := h.validateTemplateAccess(ctx, *req.SuggestedThemeID, userID); err != nil {
-				writeAccessError(w, err, "cannot access foreign template")
-				return
-			}
+		if !h.validateOptionalTemplateAccess(ctx, w, userID, *req.SuggestedThemeID, "cannot access foreign template") {
+			return
 		}
 		preset.SuggestedThemeID = req.SuggestedThemeID
 		if *req.SuggestedThemeID != "" {
@@ -202,11 +223,8 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.TemplateSetID != nil {
-		if *req.TemplateSetID != "" {
-			if err := h.validateTemplateAccess(ctx, *req.TemplateSetID, userID); err != nil {
-				writeAccessError(w, err, "cannot access foreign template")
-				return
-			}
+		if !h.validateOptionalTemplateAccess(ctx, w, userID, *req.TemplateSetID, "cannot access foreign template") {
+			return
 		}
 		preset.TemplateSetID = *req.TemplateSetID
 		if preset.SuggestedThemeID == nil && *req.TemplateSetID != "" {
@@ -236,14 +254,7 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, h.cfg.Logger, err)
-		return
-	}
-
-	if access.IsSystemPreset(preset) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be deleted", "")
+	if _, ok := h.loadMutablePreset(ctx, w, userID, id, "built-in presets cannot be deleted"); !ok {
 		return
 	}
 

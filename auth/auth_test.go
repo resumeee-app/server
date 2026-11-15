@@ -99,7 +99,7 @@ func TestTokenVerifierProviderAndRegistry(t *testing.T) {
 	}
 
 	reg := auth.NewRegistry()
-	if _, err := reg.Get("unknown"); err == nil || !strings.Contains(err.Error(), "not registered") {
+	if _, err := reg.Provider("unknown"); err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("expected not registered error, got %v", err)
 	}
 	if _, err := reg.Default(); err == nil || !strings.Contains(err.Error(), "no default auth provider") {
@@ -204,8 +204,8 @@ func TestDefensiveNilReceivers(t *testing.T) {
 	if r.List() != nil {
 		t.Errorf("expected nil list from nil registry")
 	}
-	if _, err := r.Get("admin"); err == nil {
-		t.Error("expected error from nil registry Get")
+	if _, err := r.Provider("admin"); err == nil {
+		t.Error("expected error from nil registry Provider")
 	}
 	if _, err := r.Default(); err == nil {
 		t.Error("expected error from nil registry Default")
@@ -243,10 +243,19 @@ func TestDefensiveNilReceivers(t *testing.T) {
 		t.Errorf("expected empty registry")
 	}
 
+	reg.RegisterVerifier(auth.NewAdminProvider("default"))
+	if len(reg.List()) != 0 {
+		t.Errorf("expected RegisterVerifier to ignore reserved admin provider")
+	}
+
 	reg.RegisterVerifier(&verifierOnlyProvider{name: "custom-jwt", uid: "jwt-user"})
-	prov, err := reg.Get("custom-jwt")
+	prov, err := reg.Provider("custom-jwt")
 	if err != nil {
 		t.Fatalf("expected custom-jwt to be registered via RegisterVerifier: %v", err)
+	}
+	aliasProv, err := reg.Get("custom-jwt") //nolint:staticcheck // verify deprecated alias delegates to Provider
+	if err != nil || aliasProv != prov {
+		t.Fatalf("expected deprecated Get alias to return matching provider, got %v (err=%v)", aliasProv, err)
 	}
 	bearerReq := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
 	bearerReq.Header.Set("Authorization", "Bearer valid")

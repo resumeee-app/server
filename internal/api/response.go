@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -117,6 +119,8 @@ func writeDomainError(w http.ResponseWriter, logger *slog.Logger, err error) {
 		return
 	}
 
+	// Domain sentinels carry client-safe diagnostics constructed by resumeee-core;
+	// storage adapters must never wrap raw SQL or DSN strings inside core.Err* sentinels.
 	if errors.Is(err, core.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", err.Error())
 		return
@@ -179,6 +183,7 @@ func writeFormattedTextOutput(w http.ResponseWriter, format string, out core.Ren
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(out.HTML))
 		return true
@@ -213,4 +218,13 @@ func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, deta
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 	writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, message, details)
+}
+
+// extendResponseWriteDeadline extends the per-request HTTP write deadline beyond timeout by
+// config.DefaultHTTPWriteTimeoutBuffer so timeout error responses can flush after context cancellation.
+func extendResponseWriteDeadline(w http.ResponseWriter, timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + config.DefaultHTTPWriteTimeoutBuffer))
 }

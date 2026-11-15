@@ -91,6 +91,36 @@ func TestTimeoutMiddleware(t *testing.T) {
 		}
 	})
 
+	t.Run("bypasses REST timeout for POST preview routes while bounding GET template preview", func(t *testing.T) {
+		cases := []struct {
+			method       string
+			path         string
+			wantDeadline bool
+		}{
+			{method: http.MethodPost, path: "/api/v1/templates/preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/api/v1/branches/b-1/versions/1/preview", wantDeadline: false},
+			{method: http.MethodGet, path: "/api/v1/templates/t-1/preview", wantDeadline: true},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+				var hasDeadline bool
+				handler := TimeoutMiddleware(20 * time.Second)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, hasDeadline = r.Context().Deadline()
+					w.WriteHeader(http.StatusOK)
+				}))
+
+				req := httptest.NewRequest(tc.method, tc.path, nil)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+
+				if hasDeadline != tc.wantDeadline {
+					t.Errorf("got hasDeadline=%v, want %v for %s %s", hasDeadline, tc.wantDeadline, tc.method, tc.path)
+				}
+			})
+		}
+	})
+
 	t.Run("defaults non-positive timeout to 20 seconds", func(t *testing.T) {
 		var capturedDeadline time.Time
 		var hasDeadline bool

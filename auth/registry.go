@@ -99,14 +99,14 @@ func (r *Registry) RegisterVerifier(provider core.AuthProvider) {
 		return
 	}
 	name := strings.ToLower(strings.TrimSpace(provider.Name()))
-	if name == "" {
+	if name == "" || name == ProviderAdmin {
 		return
 	}
 	r.Register(NewTokenVerifierProvider(name, provider))
 }
 
-// Get retrieves a registered provider by name (case-insensitive).
-func (r *Registry) Get(name string) (Provider, error) {
+// Provider retrieves a registered provider by name (case-insensitive).
+func (r *Registry) Provider(name string) (Provider, error) {
 	if r == nil {
 		return nil, errors.New("nil auth registry")
 	}
@@ -122,6 +122,13 @@ func (r *Registry) Get(name string) (Provider, error) {
 		return nil, fmt.Errorf("auth provider %q not registered", name)
 	}
 	return p, nil
+}
+
+// Get retrieves a registered provider by name (case-insensitive).
+//
+// Deprecated: Use [Registry.Provider] instead.
+func (r *Registry) Get(name string) (Provider, error) {
+	return r.Provider(name)
 }
 
 // Default returns the default auth provider.

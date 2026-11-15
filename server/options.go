@@ -308,13 +308,21 @@ func WithStore(store core.Store) Option {
 // WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase),
 // wrapping it via auth.NewTokenVerifierProvider for HTTP Bearer token extraction. Callers supplying
 // an HTTP-aware auth.Provider (such as auth.AdminProvider or a non-Bearer request authenticator) must
-// use WithRequestAuthProvider instead so custom request authentication logic is not replaced.
+// use WithRequestAuthProvider instead; passing an "admin" provider is rejected so local admin auth is
+// never silently replaced with Bearer-only parsing.
 func WithAuthProvider(provider core.AuthProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: AuthProvider cannot be nil")
 		}
-		s.authProvider = auth.NewTokenVerifierProvider(provider.Name(), provider)
+		name := strings.TrimSpace(provider.Name())
+		if name == "" {
+			return errors.New("server: AuthProvider name cannot be empty")
+		}
+		if strings.EqualFold(name, auth.ProviderAdmin) {
+			return errors.New("server: admin AuthProvider requires WithRequestAuthProvider or WithAdminMode(true)")
+		}
+		s.authProvider = auth.NewTokenVerifierProvider(name, provider)
 		return nil
 	}
 }
@@ -336,7 +344,14 @@ func WithTokenVerifier(name string, verifier core.TokenVerifier) Option {
 		if verifier == nil {
 			return errors.New("server: TokenVerifier cannot be nil")
 		}
-		s.authProvider = auth.NewTokenVerifierProvider(name, verifier)
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return errors.New("server: TokenVerifier name cannot be empty")
+		}
+		if strings.EqualFold(trimmed, auth.ProviderAdmin) {
+			return errors.New("server: provider name \"admin\" is reserved for AdminProvider")
+		}
+		s.authProvider = auth.NewTokenVerifierProvider(trimmed, verifier)
 		return nil
 	}
 }
