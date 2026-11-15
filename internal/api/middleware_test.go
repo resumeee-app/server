@@ -91,15 +91,24 @@ func TestTimeoutMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("bypasses REST timeout for POST preview routes while bounding GET template preview", func(t *testing.T) {
+	t.Run("bypasses REST timeout for POST render-preview routes while bounding GET and unrelated routes", func(t *testing.T) {
 		cases := []struct {
 			method       string
 			path         string
 			wantDeadline bool
 		}{
 			{method: http.MethodPost, path: "/api/v1/templates/preview", wantDeadline: false},
-			{method: http.MethodPost, path: "/api/v1/branches/b-1/versions/1/preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/templates/preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/api/v1/branches/b-1/versions/1/render-preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/api/v1/resumes/b-1/versions/1/render-preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/branches/b-1/versions/1/render-preview", wantDeadline: false},
+			{method: http.MethodPost, path: "/resumes/b-1/versions/1/render-preview", wantDeadline: false},
 			{method: http.MethodGet, path: "/api/v1/templates/t-1/preview", wantDeadline: true},
+			{method: http.MethodGet, path: "/api/v1/branches/b-1/versions/1/preview", wantDeadline: true},
+			{method: http.MethodGet, path: "/api/v1/resumes/b-1/versions/1/preview", wantDeadline: true},
+			{method: http.MethodPost, path: "/api/v1/branches/b-1/versions/1/preview", wantDeadline: true},
+			{method: http.MethodPost, path: "/api/v1/other/branches/b-1/versions/1/render-preview", wantDeadline: true},
+			{method: http.MethodGet, path: "/api/v1/profile/pdf/parse", wantDeadline: true},
 		}
 
 		for _, tc := range cases {

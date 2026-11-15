@@ -29,7 +29,6 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/renderer"
@@ -78,8 +77,10 @@ type RouterConfig struct {
 	// an explicit positive LLMTimeout if provided, otherwise falling back to config.DefaultPDFParseTimeout.
 	PDFParseTimeout      time.Duration
 	RenderPreviewTimeout time.Duration
-	DailyRequestLimit    int
-	MonthlyTokenLimit    int
+	// HTTPWriteTimeoutBuffer is added to handler-scoped timeouts when extending response write deadlines.
+	HTTPWriteTimeoutBuffer time.Duration
+	DailyRequestLimit      int
+	MonthlyTokenLimit      int
 }
 
 // NewRouterConfigFromStore populates a RouterConfig's sub-store fields from a composite core.Store.
@@ -132,14 +133,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.RenderPreviewTimeout <= 0 {
 		cfg.RenderPreviewTimeout = config.DefaultRenderPreviewTimeout
 	}
+	if cfg.HTTPWriteTimeoutBuffer <= 0 {
+		cfg.HTTPWriteTimeoutBuffer = config.DefaultHTTPWriteTimeoutBuffer
+	}
 	if cfg.DailyRequestLimit <= 0 {
 		cfg.DailyRequestLimit = config.DefaultLLMDailyRequestLimit
 	}
 	if cfg.MonthlyTokenLimit <= 0 {
 		cfg.MonthlyTokenLimit = config.DefaultLLMMonthlyTokenLimit
-	}
-	if cfg.PDFJobStore == nil {
-		cfg.PDFJobStore = memory.New()
 	}
 	if cfg.PDFExtractor == nil {
 		cfg.PDFExtractor = pdf.NewExtractor()

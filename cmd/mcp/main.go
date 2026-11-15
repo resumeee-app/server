@@ -74,7 +74,10 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	}
 	defer closeMCPStore(store, logger)
 
-	mcpCfg, workerPool := buildMCPServerConfig(ctx, cfg, store, logger)
+	mcpCfg, workerPool, err := buildMCPServerConfig(cfg, store, logger)
+	if err != nil {
+		return err
+	}
 	workerPool.Start(ctx)
 	defer workerPool.Stop()
 
@@ -146,7 +149,12 @@ func loadMCPConfig(args []string) (*config.Config, error) {
 }
 
 // buildMCPServerConfig wires domain services, worker pool, and auth provider for MCP execution.
-func buildMCPServerConfig(ctx context.Context, cfg *config.Config, store core.Store, logger *slog.Logger) (resumeeeMCP.ServerConfig, *worker.Pool) {
+func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Logger) (resumeeeMCP.ServerConfig, *worker.Pool, error) {
+	authProvider, err := resolveMCPAuthProvider(cfg, logger)
+	if err != nil {
+		return resumeeeMCP.ServerConfig{}, nil, err
+	}
+
 	profileStore := store.Profiles()
 	careerStore := store.Career()
 	presetStore := store.Presets()
@@ -222,19 +230,19 @@ func buildMCPServerConfig(ctx context.Context, cfg *config.Config, store core.St
 		ResumeExtractor:      resumeExtractor,
 		JobEnqueuer:          workerPool,
 		DefaultUserID:        cfg.DefaultUserID,
-		Admin:                cfg.Admin,
+		Admin:                cfg.Admin && (authProvider == nil || authProvider.Name() == auth.ProviderAdmin),
+		AuthProvider:         authProvider,
 		Logger:               logger,
 		RESTTimeout:          cfg.RESTTimeout,
 		TailoringTimeout:     cfg.LLMTimeout,
 		SSEKeepAliveInterval: cfg.MCPSSEKeepAliveInterval,
 	}
 
-	resolveMCPAuthProvider(ctx, cfg, logger, &mcpCfg)
-	return mcpCfg, workerPool
+	return mcpCfg, workerPool, nil
 }
 
-// resolveMCPAuthProvider initializes auth from config and attaches any active provider onto mcpCfg.
-func resolveMCPAuthProvider(ctx context.Context, cfg *config.Config, logger *slog.Logger, mcpCfg *resumeeeMCP.ServerConfig) {
+// resolveMCPAuthProvider initializes auth from config and fails fast on explicit misconfiguration while allowing local stdio operation when unconfigured.
+func resolveMCPAuthProvider(cfg *config.Config, logger *slog.Logger) (auth.Provider, error) {
 	authReg, err := auth.NewRegistryFromConfig(auth.Config{
 		DefaultUserID:     cfg.DefaultUserID,
 		FirebaseProjectID: cfg.FirebaseProjectID,
@@ -242,15 +250,17 @@ func resolveMCPAuthProvider(ctx context.Context, cfg *config.Config, logger *slo
 		Admin:             cfg.Admin,
 	})
 	if err != nil {
-		logger.WarnContext(ctx, "failed to initialize auth registry for mcp", "err", err)
-		return
+		if logger != nil {
+			logger.Error("failed to initialize auth registry for mcp", "err", err)
+		}
+		return nil, fmt.Errorf("initializing auth registry: %w", err)
 	}
 	prov, err := authReg.Default()
 	if err != nil {
-		logger.WarnContext(ctx, "no active auth provider resolved for mcp from config", "err", err)
-		return
+		// No remote auth provider or explicit admin mode configured; allow local stdio execution.
+		return nil, nil
 	}
-	mcpCfg.AuthProvider = prov
+	return prov, nil
 }
 
 // closeMCPStore closes store on exit and logs any failure to stderr.

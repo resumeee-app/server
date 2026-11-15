@@ -70,6 +70,7 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 		PresetStore:    presetStore,
 		TemplateStore:  templateStore,
 		BranchStore:    branchStore,
+		PDFJobStore:    store,
 		QuotaStore:     store,
 		ProfileService: profileSvc,
 		Renderer:       templateRenderer,
@@ -3123,6 +3124,41 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/presets", nil, "preset store unavailable")
 		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/templates", nil, "template store unavailable")
 		assertInternalErr(t, http.MethodPost, profileOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
+		assertInternalErr(t, http.MethodGet, profileOnlySrv.URL+"/api/v1/profile/pdf/jobs/j-1", nil, "pdf job store unavailable")
+
+		var pdfBody bytes.Buffer
+		pdfMW := multipart.NewWriter(&pdfBody)
+		pdfPart, err := pdfMW.CreateFormFile("file", "resume.pdf")
+		if err != nil {
+			t.Fatalf("CreateFormFile: %v", err)
+		}
+		if _, err := pdfPart.Write(buildTestPDF("Resume text")); err != nil {
+			t.Fatalf("write pdf bytes: %v", err)
+		}
+		if err := pdfMW.Close(); err != nil {
+			t.Fatalf("close multipart writer: %v", err)
+		}
+		asyncReq, err := http.NewRequest(http.MethodPost, profileOnlySrv.URL+"/api/v1/profile/pdf/parse?async=true", &pdfBody)
+		if err != nil {
+			t.Fatalf("new async pdf request: %v", err)
+		}
+		asyncReq.Header.Set("Content-Type", pdfMW.FormDataContentType())
+		asyncResp, err := http.DefaultClient.Do(asyncReq)
+		if err != nil {
+			t.Fatalf("do async pdf request: %v", err)
+		}
+		asyncRespBody, _ := io.ReadAll(asyncResp.Body)
+		_ = asyncResp.Body.Close()
+		if asyncResp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("POST /api/v1/profile/pdf/parse?async=true: expected 500, got %d (%s)", asyncResp.StatusCode, string(asyncRespBody))
+		}
+		var asyncErr api.ErrorResponse
+		if err := json.Unmarshal(asyncRespBody, &asyncErr); err != nil {
+			t.Fatalf("decode async error response: %v", err)
+		}
+		if asyncErr.Error.Message != "pdf job store unavailable" {
+			t.Errorf("POST /api/v1/profile/pdf/parse?async=true: expected message %q, got %q", "pdf job store unavailable", asyncErr.Error.Message)
+		}
 
 		careerOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
 			CareerStore:   memStore,
@@ -3549,6 +3585,7 @@ func TestPDFParseSync_ExtendsResponseWriteDeadline(t *testing.T) {
 	cfg.Admin = true
 	cfg.DefaultUserID = "user-1"
 	cfg.PDFParseTimeout = 3 * time.Minute
+	cfg.HTTPWriteTimeoutBuffer = 45 * time.Second
 	cfg.PDFExtractor = &staticPDFTextExtractor{text: "Senior Engineer Resume"}
 	cfg.ResumeExtractor = &staticResumeExtractor{}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -3581,7 +3618,251 @@ func TestPDFParseSync_ExtendsResponseWriteDeadline(t *testing.T) {
 	if !rec.deadlineCalled {
 		t.Fatal("expected SetWriteDeadline to be invoked via ResponseController through middleware chain")
 	}
-	if remaining := rec.writeDeadline.Sub(before); remaining < 2*time.Minute {
-		t.Errorf("expected write deadline extended beyond 2m (3m parse timeout), got %v", remaining)
+	if remaining := rec.writeDeadline.Sub(before); remaining < 3*time.Minute+35*time.Second {
+		t.Errorf("expected write deadline >= 3m35s (3m parse timeout + 45s write buffer), got %v", remaining)
+	}
+}
+
+type slowPreviewRenderer struct {
+	api.TemplateRenderer
+	delay time.Duration
+}
+
+func (s *slowPreviewRenderer) Render(ctx context.Context, tmpl *core.TemplateSet, prof *core.Profile, content *core.TailoredContent) (*core.RenderOutput, error) {
+	select {
+	case <-time.After(s.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.TemplateRenderer.Render(ctx, tmpl, prof, content)
+}
+
+func TestNewRouter_RenderPreviewExceedsRESTTimeout(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	b := &core.Branch{
+		ID:            "branch-render-preview-timeout",
+		UserID:        "user-1",
+		Name:          "Slow Preview Branch",
+		TemplateSetID: core.TemplateStandardCleanID,
+	}
+	if err := memStore.CreateBranch(ctx, b); err != nil {
+		t.Fatalf("create branch: %v", err)
+	}
+	v := &core.BranchVersion{
+		ID:                "ver-render-preview-timeout",
+		ResumeID:          b.ID,
+		BranchID:          b.ID,
+		VersionNumber:     1,
+		Status:            core.VersionStatusCompleted,
+		TemplateSetIDUsed: core.TemplateStandardCleanID,
+		SourceType:        core.SourceTypeLLMGeneration,
+		TailoredContent:   &core.TailoredContent{Summary: "Built distributed systems"},
+		CreatedAt:         time.Now().UTC(),
+	}
+	if err := memStore.CreateVersion(ctx, v); err != nil {
+		t.Fatalf("create version: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+	cfg.RESTTimeout = 40 * time.Millisecond
+	cfg.RenderPreviewTimeout = 500 * time.Millisecond
+	cfg.HTTPWriteTimeoutBuffer = 30 * time.Second
+	cfg.Renderer = &slowPreviewRenderer{
+		TemplateRenderer: renderer.New(),
+		delay:            100 * time.Millisecond,
+	}
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	router := api.NewRouter(cfg)
+
+	for _, path := range []string{
+		"/api/v1/branches/" + b.ID + "/versions/1/render-preview",
+		"/api/v1/resumes/" + b.ID + "/versions/1/render-preview",
+	} {
+		t.Run(path, func(t *testing.T) {
+			bodyBytes, err := json.Marshal(api.RenderPreviewRequest{TemplateSetID: core.TemplateStandardCleanID})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			rec := &deadlineRecordingWriter{ResponseRecorder: httptest.NewRecorder()}
+
+			before := time.Now()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK past RESTTimeout (40ms) under RenderPreviewTimeout (500ms), got %d (%s)", rec.Code, rec.Body.String())
+			}
+			if !rec.deadlineCalled {
+				t.Fatal("expected SetWriteDeadline to be invoked for render-preview")
+			}
+			if remaining := rec.writeDeadline.Sub(before); remaining < 500*time.Millisecond+20*time.Second {
+				t.Errorf("expected write deadline extended by RenderPreviewTimeout + HTTPWriteTimeoutBuffer (>=20.5s), got %v", remaining)
+			}
+		})
+	}
+}
+
+type nilTemplateLookupStore struct {
+	core.TemplateStore
+}
+
+func (n *nilTemplateLookupStore) Template(_ context.Context, _, _ string) (*core.TemplateSet, error) {
+	return nil, nil
+}
+
+type nilPresetLookupStore struct {
+	core.PresetStore
+}
+
+func (n *nilPresetLookupStore) Preset(_ context.Context, _, _ string) (*core.Preset, error) {
+	return nil, nil
+}
+
+func TestTemplateHandlers_NilStoreResultReturns404(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.TemplateStore = &nilTemplateLookupStore{TemplateStore: memStore}
+	cfg.PresetStore = &nilPresetLookupStore{PresetStore: memStore}
+	cfg.Renderer = renderer.New()
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+
+	router := api.NewRouter(cfg)
+
+	cases := []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{method: http.MethodGet, path: "/api/v1/templates/t-1"},
+		{method: http.MethodPut, path: "/api/v1/templates/t-1", body: map[string]string{"name": "Updated"}},
+		{method: http.MethodDelete, path: "/api/v1/templates/t-1"},
+		{method: http.MethodGet, path: "/api/v1/templates/t-1/preview"},
+		{method: http.MethodGet, path: "/api/v1/presets/p-1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			var reqBody io.Reader
+			if tc.body != nil {
+				raw, err := json.Marshal(tc.body)
+				if err != nil {
+					t.Fatalf("marshal body: %v", err)
+				}
+				reqBody = bytes.NewReader(raw)
+			}
+			req := httptest.NewRequest(tc.method, tc.path, reqBody)
+			if tc.body != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404 Not Found on nil store result, got %d (%s)", rec.Code, rec.Body.String())
+			}
+			var errEnv api.ErrorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &errEnv); err != nil {
+				t.Fatalf("decode error envelope: %v", err)
+			}
+			if errEnv.Error.Code != api.CodeNotFound {
+				t.Errorf("expected error code %q, got %q", api.CodeNotFound, errEnv.Error.Code)
+			}
+		})
+	}
+}
+
+type deadlineSpyPDFExtractor struct {
+	text        string
+	hasDeadline bool
+	deadline    time.Time
+}
+
+func (d *deadlineSpyPDFExtractor) ExtractText(ctx context.Context, _ io.ReaderAt, _ int64) (string, error) {
+	d.deadline, d.hasDeadline = ctx.Deadline()
+	return d.text, nil
+}
+
+type deadlineSpyPDFJobStore struct {
+	core.PDFJobStore
+	hasDeadline bool
+	deadline    time.Time
+}
+
+func (d *deadlineSpyPDFJobStore) CreateJob(ctx context.Context, job *core.PDFParseJob) error {
+	d.deadline, d.hasDeadline = ctx.Deadline()
+	return d.PDFJobStore.CreateJob(ctx, job)
+}
+
+func TestPDFParseAsync_BoundsContextWithRESTTimeout(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	spyExtractor := &deadlineSpyPDFExtractor{text: "Senior Backend Engineer"}
+	spyJobStore := &deadlineSpyPDFJobStore{PDFJobStore: memStore}
+	restTimeout := 250 * time.Millisecond
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+	cfg.RESTTimeout = restTimeout
+	cfg.PDFParseTimeout = 5 * time.Minute
+	cfg.PDFExtractor = spyExtractor
+	cfg.PDFJobStore = spyJobStore
+	cfg.PDFJobEnqueuer = api.NewChannelPDFJobEnqueuer(4)
+	cfg.ResumeExtractor = &staticResumeExtractor{}
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	router := api.NewRouter(cfg)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("%PDF-1.4\n")); err != nil {
+		t.Fatalf("write pdf bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/profile/pdf/parse", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for async pdf parse, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !spyExtractor.hasDeadline {
+		t.Fatal("expected PDFExtractor context to be bounded by RESTTimeout")
+	}
+	if remaining := time.Until(spyExtractor.deadline); remaining <= 0 || remaining > restTimeout {
+		t.Errorf("expected PDFExtractor deadline within %v, got %v", restTimeout, remaining)
+	}
+	if !spyJobStore.hasDeadline {
+		t.Fatal("expected PDFJobStore.CreateJob context to be bounded by RESTTimeout")
+	}
+	if remaining := time.Until(spyJobStore.deadline); remaining <= 0 || remaining > restTimeout {
+		t.Errorf("expected PDFJobStore deadline within %v, got %v", restTimeout, remaining)
 	}
 }

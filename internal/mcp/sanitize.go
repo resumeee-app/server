@@ -34,12 +34,31 @@ var tagRegexCache = &customTagRegexCache{
 	patterns: make(map[string]*regexp.Regexp),
 }
 
-// inlinePromptReplacer normalizes line breaks, double quotes, and angle brackets in single-line prompt fields.
-var inlinePromptReplacer = strings.NewReplacer("\r", " ", "\n", " ", `"`, `'`, "<", "&lt;", ">", "&gt;")
+// inlinePromptReplacer escapes quotes, backticks, and angle brackets in single-line prompt arguments.
+var inlinePromptReplacer = strings.NewReplacer(
+	`"`, "&quot;",
+	`'`, "&#39;",
+	"`", "&#96;",
+	"<", "&lt;",
+	">", "&gt;",
+)
 
-// sanitizeInlinePromptValue neutralizes line breaks, quotes, and XML tags in single-line prompt arguments.
+// xmlCommentReplacer neutralizes XML/HTML comment openers and closers inside fenced content.
+var xmlCommentReplacer = strings.NewReplacer("<!--", "&lt;!--", "-->", "--&gt;")
+
+// sanitizeInlinePromptValue neutralizes line breaks, control characters, quotes, and XML tags in single-line prompt arguments.
 func sanitizeInlinePromptValue(value string) string {
-	return strings.TrimSpace(inlinePromptReplacer.Replace(value))
+	mapped := strings.Map(func(r rune) rune {
+		switch {
+		case r == '\r' || r == '\n' || r == '\t' || r == '\v' || r == '\f' || r == '\u0085' || r == '\u2028' || r == '\u2029':
+			return ' '
+		case r < 0x20 || r == 0x7f:
+			return -1
+		default:
+			return r
+		}
+	}, value)
+	return strings.TrimSpace(inlinePromptReplacer.Replace(mapped))
 }
 
 // customTagRegexCache caches compiled regular expressions for non-reserved XML boundary tags safely across goroutines.
@@ -63,7 +82,7 @@ func buildReservedPromptTagRegex(tags []string) *regexp.Regexp {
 	for i, tag := range tags {
 		escaped[i] = regexp.QuoteMeta(tag)
 	}
-	return regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*(?:%s)\b[^>]*>`, strings.Join(escaped, "|")))
+	return regexp.MustCompile(fmt.Sprintf(`(?i)<\s*/?\s*(?:%s)\b[^<>]*>?`, strings.Join(escaped, "|")))
 }
 
 // getOrCompile returns a cached case-insensitive regex matching opening or closing tagName instances.
@@ -81,7 +100,7 @@ func (c *customTagRegexCache) getOrCompile(tagName string) *regexp.Regexp {
 	if re, ok := c.patterns[key]; ok {
 		return re
 	}
-	re = regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*%s\b[^>]*>`, regexp.QuoteMeta(tagName)))
+	re = regexp.MustCompile(fmt.Sprintf(`(?i)<\s*/?\s*%s\b[^<>]*>?`, regexp.QuoteMeta(tagName)))
 	c.patterns[key] = re
 	return re
 }
@@ -95,11 +114,21 @@ func (c *customTagRegexCache) getOrCompile(tagName string) *regexp.Regexp {
 // Returns:
 //   - Escaped content enclosed within opening and closing XML tags.
 func SanitizeXMLFence(content, tagName string) string {
-	safe := escapeXMLMatches(content, reservedPromptTagRegex)
+	safe := escapeXMLComments(content)
+	safe = escapeXMLMatches(safe, reservedPromptTagRegex)
 	if !isReservedPromptTag(tagName) {
 		safe = escapeXMLMatches(safe, tagRegexCache.getOrCompile(tagName))
 	}
 	return fmt.Sprintf("<%s>\n%s\n</%s>", tagName, strings.TrimSpace(safe), tagName)
+}
+
+// escapeXMLComments repeatedly escapes XML comment delimiters until neither <!-- nor --> remains.
+func escapeXMLComments(content string) string {
+	safe := content
+	for strings.Contains(safe, "<!--") || strings.Contains(safe, "-->") {
+		safe = xmlCommentReplacer.Replace(safe)
+	}
+	return safe
 }
 
 // escapeXMLMatches replaces angle brackets on all regex tag matches with XML entities.

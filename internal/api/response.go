@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -221,10 +222,25 @@ func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, deta
 }
 
 // extendResponseWriteDeadline extends the per-request HTTP write deadline beyond timeout by
-// config.DefaultHTTPWriteTimeoutBuffer so timeout error responses can flush after context cancellation.
-func extendResponseWriteDeadline(w http.ResponseWriter, timeout time.Duration) {
+// writeBuffer (falling back to config.DefaultHTTPWriteTimeoutBuffer when <= 0) so timeout
+// error responses can flush after context cancellation.
+func extendResponseWriteDeadline(w http.ResponseWriter, timeout, writeBuffer time.Duration) {
 	if timeout <= 0 {
 		return
 	}
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + config.DefaultHTTPWriteTimeoutBuffer))
+	if writeBuffer <= 0 {
+		writeBuffer = config.DefaultHTTPWriteTimeoutBuffer
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + writeBuffer))
+}
+
+// withRenderPreviewTimeout extends the response write deadline and derives a request context
+// bounded by cfg.RenderPreviewTimeout (falling back to config.DefaultRenderPreviewTimeout when <= 0).
+func withRenderPreviewTimeout(w http.ResponseWriter, r *http.Request, cfg RouterConfig) (context.Context, context.CancelFunc) {
+	previewTimeout := cfg.RenderPreviewTimeout
+	if previewTimeout <= 0 {
+		previewTimeout = config.DefaultRenderPreviewTimeout
+	}
+	extendResponseWriteDeadline(w, previewTimeout, cfg.HTTPWriteTimeoutBuffer)
+	return context.WithTimeout(r.Context(), previewTimeout)
 }

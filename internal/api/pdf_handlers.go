@@ -62,26 +62,41 @@ func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter
 	return rec.ID, true
 }
 
+// restTimeout returns the configured standard REST timeout budget, falling back to config.DefaultRESTTimeout.
+func (h *profileHandler) restTimeout() time.Duration {
+	if h.cfg.RESTTimeout > 0 {
+		return h.cfg.RESTTimeout
+	}
+	return config.DefaultRESTTimeout
+}
+
+// withRESTTimeout derives a child context bounded by restTimeout for fast non-LLM PDF stages.
+func (h *profileHandler) withRESTTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, h.restTimeout())
+}
+
 // parsePDFResume parses an uploaded candidate resume PDF. By default, it operates asynchronously,
 // enqueuing the extraction task and returning 202 Accepted with a job ID for status polling.
 // If the request explicitly supplies ?sync=true, it executes synchronously for backward compatibility.
 func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	reqCtx := r.Context()
 
-	upload, ok := h.readUploadedPDF(ctx, w, r)
+	upload, ok := h.readUploadedPDF(reqCtx, w, r)
 	if !ok {
 		return
 	}
 
 	userID := requestUserID(r, h.cfg.DefaultUserID)
-	text, ok := h.extractUploadedPDFText(ctx, w, upload.filename, upload.data)
+	extractCtx, cancelExtract := h.withRESTTimeout(reqCtx)
+	text, ok := h.extractUploadedPDFText(extractCtx, w, upload.filename, upload.data)
+	cancelExtract()
 	if !ok {
 		return
 	}
 
 	if h.cfg.ResumeExtractor == nil {
 		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "LLM resume extractor not configured", "filename", upload.filename)
+			h.cfg.Logger.ErrorContext(reqCtx, "LLM resume extractor not configured", "filename", upload.filename)
 		}
 		writeError(w, http.StatusInternalServerError, CodeInternalError, "LLM resume extractor not configured", "")
 		return
@@ -92,11 +107,13 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		(h.cfg.PDFJobEnqueuer != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
 
 	if !runAsync {
-		h.extractPDFResumeSync(ctx, w, r, userID, upload, text)
+		h.extractPDFResumeSync(reqCtx, w, userID, upload, text)
 		return
 	}
 
-	h.enqueueAsyncPDFJob(ctx, w, userID, upload, text)
+	asyncCtx, cancelAsync := h.withRESTTimeout(reqCtx)
+	defer cancelAsync()
+	h.enqueueAsyncPDFJob(asyncCtx, w, userID, upload, text)
 }
 
 // readUploadedPDF enforces the 10 MiB upload ceiling, validates multipart form fields, and returns raw PDF bytes.
@@ -204,33 +221,39 @@ func (h *profileHandler) pdfParseTimeout() time.Duration {
 }
 
 // extractPDFResumeSync reserves quota and synchronously extracts structured JSON Resume data via LLM.
-func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.ResponseWriter, r *http.Request, userID string, upload pdfUploadPayload, text string) {
+func (h *profileHandler) extractPDFResumeSync(reqCtx context.Context, w http.ResponseWriter, userID string, upload pdfUploadPayload, text string) {
 	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
-	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, estimatedPDFParseTokens, dailyLimit, monthlyLimit)
+	reserveCtx, cancelReserve := h.withRESTTimeout(reqCtx)
+	reservationID, ok := h.reserveQuota(reserveCtx, w, userID, core.OperationPDFParse, estimatedPDFParseTokens, dailyLimit, monthlyLimit)
+	cancelReserve()
 	if !ok {
 		return
 	}
 
 	parseTimeout := h.pdfParseTimeout()
-	extendResponseWriteDeadline(w, parseTimeout)
-	syncCtx, cancel := context.WithTimeout(r.Context(), parseTimeout)
+	extendResponseWriteDeadline(w, parseTimeout, h.cfg.HTTPWriteTimeoutBuffer)
+	syncCtx, cancel := context.WithTimeout(reqCtx, parseTimeout)
 	defer cancel()
 
 	extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, upload.provider, upload.model, estimatedPDFParseTokens)
 	if err != nil {
 		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, err.Error())
+			releaseCtx, cancelRelease := h.withRESTTimeout(reqCtx)
+			_ = h.cfg.QuotaStore.ReleaseQuota(releaseCtx, reservationID, err.Error())
+			cancelRelease()
 		}
-		h.writePDFExtractionError(ctx, w, upload.provider, parseTimeout, err)
+		h.writePDFExtractionError(reqCtx, w, upload.provider, parseTimeout, err)
 		return
 	}
 
 	if h.cfg.QuotaStore != nil && reservationID != "" {
-		_ = h.cfg.QuotaStore.CommitUsage(ctx, reservationID, usage)
+		commitCtx, cancelCommit := h.withRESTTimeout(reqCtx)
+		_ = h.cfg.QuotaStore.CommitUsage(commitCtx, reservationID, usage)
+		cancelCommit()
 	}
 
 	if h.cfg.Logger != nil {
-		h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume synchronously", "filename", upload.filename, "provider", upload.provider, "model", upload.model)
+		h.cfg.Logger.InfoContext(reqCtx, "successfully parsed pdf resume synchronously", "filename", upload.filename, "provider", upload.provider, "model", upload.model)
 	}
 	writeJSON(w, http.StatusOK, extracted)
 }
@@ -305,7 +328,7 @@ func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.Res
 // enqueueAsyncPDFJob persists a pending PDF parse job and enqueues it onto the background PDF worker pool.
 func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.ResponseWriter, userID string, upload pdfUploadPayload, text string) {
 	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "pdf job store unavailable", "")
 		return
 	}
 
@@ -383,11 +406,6 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 	jobID := r.PathValue("id")
 	if jobID == "" {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "job id is required", "")
-		return
-	}
-
-	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
 		return
 	}
 

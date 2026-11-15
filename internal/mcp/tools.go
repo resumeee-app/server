@@ -14,7 +14,7 @@ import (
 )
 
 // defaultTemplateSetID is the fallback built-in template set identifier when none is specified.
-const defaultTemplateSetID = "builtin-standard-clean"
+const defaultTemplateSetID = core.TemplateStandardCleanID
 
 // parseArguments extracts and casts the tool arguments map from a CallToolRequest.
 func parseArguments(req mcpSDK.CallToolRequest) map[string]any {

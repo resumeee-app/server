@@ -8,7 +8,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 - `server/` — Public Go package (`github.com/resumeee-app/resumeee-api/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
 - `auth/` — Public Go package (`github.com/resumeee-app/resumeee-api/auth`) providing request authentication providers and multi-scheme registry resolution.
-- `cmd/server/` — Default unified HTTP server binary serving REST `/api/v1/*` and MCP `/mcp/sse` + `/mcp/message` endpoints.
+- `cmd/server/` — Default unified HTTP server binary serving REST `/api/v1/*` and MCP `/mcp/sse` + `/mcp/messages` endpoints.
 - `cmd/mcp/` — Standalone MCP CLI binary supporting `stdio` transport for desktop AI assistants (Claude Desktop, Cursor, Antigravity).
 - `api/` — OpenAPI 3.1 contract (`api/openapi.yaml`) and repository-wide guardrail tests (`godoc_test.go`, `gofmt_test.go`, `import_boundary_test.go`, `interface_assertion_test.go`, `openapi_test.go`).
 - `internal/access/` — Shared tenant ownership, system-resource, and store availability guards.

@@ -22,6 +22,7 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	profileGuard := routeGuard{ok: cfg.ProfileStore != nil, msg: "profile store unavailable"}
 	serviceGuard := routeGuard{ok: cfg.ProfileService != nil, msg: "profile service unavailable"}
 	careerGuard := routeGuard{ok: cfg.CareerStore != nil, msg: "career store unavailable"}
+	pdfJobGuard := routeGuard{ok: cfg.PDFJobStore != nil, msg: "pdf job store unavailable"}
 
 	// Main profile, JSON Resume, and PDF ingestion routes.
 	mux.HandleFunc("GET /api/v1/profile", withRouteGuards(h.getProfile, profileGuard))
@@ -30,9 +31,9 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("POST /api/v1/profile/jsonresume/import", h.importJSONResume)
 	mux.HandleFunc("GET /api/v1/profile/jsonresume/export", withRouteGuards(h.exportJSONResume, serviceGuard))
 	mux.HandleFunc("POST /api/v1/profile/pdf/parse", h.parsePDFResume)
-	mux.HandleFunc("GET /api/v1/profile/pdf/jobs/{id}", h.getPDFParseJob)
-	mux.HandleFunc("GET /profile/pdf/jobs/{id}", h.getPDFParseJob)
-	mux.HandleFunc("GET /api/v1/profile/pdf/parse/{id}", h.getPDFParseJob)
+	mux.HandleFunc("GET /api/v1/profile/pdf/jobs/{id}", withRouteGuards(h.getPDFParseJob, pdfJobGuard))
+	mux.HandleFunc("GET /profile/pdf/jobs/{id}", withRouteGuards(h.getPDFParseJob, pdfJobGuard))
+	mux.HandleFunc("GET /api/v1/profile/pdf/parse/{id}", withRouteGuards(h.getPDFParseJob, pdfJobGuard))
 	mux.HandleFunc("POST /api/v1/profile/pdf/commit", h.commitPDFResume)
 
 	handleCareer := func(pattern string, fn http.HandlerFunc) {

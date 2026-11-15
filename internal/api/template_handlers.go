@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/resumeee-app/resumeee-api/internal/access"
-	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/renderer"
 )
@@ -134,6 +133,10 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, tmpl)
 }
@@ -143,6 +146,10 @@ func (h *templateHandler) loadMutableTemplate(ctx context.Context, w http.Respon
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
 		writeDomainError(w, h.cfg.Logger, err)
+		return nil, false
+	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
 		return nil, false
 	}
 
@@ -240,6 +247,10 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
+		return
+	}
 
 	renderCtx := renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
 	out, err := renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
@@ -257,12 +268,7 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 
 // renderPreview renders draft Go template definitions on the server for real-time editor previews.
 func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
-	previewTimeout := h.cfg.RenderPreviewTimeout
-	if previewTimeout <= 0 {
-		previewTimeout = config.DefaultRenderPreviewTimeout
-	}
-	extendResponseWriteDeadline(w, previewTimeout)
-	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	ctx, cancel := withRenderPreviewTimeout(w, r, h.cfg)
 	defer cancel()
 
 	userID := requestUserID(r, h.cfg.DefaultUserID)

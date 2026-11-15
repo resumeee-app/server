@@ -150,6 +150,10 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
+	if preset == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, preset)
 }

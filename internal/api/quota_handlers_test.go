@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -204,12 +205,14 @@ type mockUsageResumeExtractor struct {
 	resume *core.JSONResume
 	usage  core.TokenUsage
 	err    error
+	calls  atomic.Int32
 }
 
 // Compile-time assertion ensuring mockUsageResumeExtractor satisfies worker.ResumeExtractor.
 var _ worker.ResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
 func (m *mockUsageResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
+	m.calls.Add(1)
 	return m.resume, m.usage, m.err
 }
 
@@ -271,6 +274,9 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 	}
+	if got := extractor.calls.Load(); got != 1 {
+		t.Errorf("expected ResumeExtractor to be called once, got %d", got)
+	}
 
 	// Verify quota was committed: daily used should be 1, monthly tokens should be 500 (not 1000)
 	quota, err := store.Quota(ctx, defaultUserID)
@@ -330,8 +336,11 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusOK {
-		t.Fatalf("expected non-200 error status, got 200")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 Internal Server Error on extraction failure, got %d", resp.StatusCode)
+	}
+	if got := extractor.calls.Load(); got != 1 {
+		t.Errorf("expected ResumeExtractor to be called once before failing, got %d", got)
 	}
 
 	// Verify quota was released: daily used should be refunded to 0, monthly tokens should be 0

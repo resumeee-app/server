@@ -139,7 +139,8 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 
 // TimeoutMiddleware sets a request context cancellation deadline bounded by the given duration.
 // If timeout <= 0, it falls back to config.DefaultRESTTimeout.
-// Handler-scoped endpoints (/profile/pdf/parse and POST */preview routes) bypass this wrapper so
+// Handler-scoped endpoints (POST /profile/pdf/parse, POST /templates/preview, and
+// POST /{branches,resumes}/{id}/versions/{v}/render-preview) bypass this wrapper so
 // they can apply PDFParseTimeout or RenderPreviewTimeout directly.
 func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	if timeout <= 0 {
@@ -160,19 +161,37 @@ func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 
 // usesHandlerTimeout reports whether r manages its own handler-scoped timeout instead of RESTTimeout.
 func usesHandlerTimeout(r *http.Request) bool {
-	cleanPath := path.Clean(r.URL.Path)
-	if cleanPath == "/api/v1/profile/pdf/parse" || strings.HasSuffix(cleanPath, "/profile/pdf/parse") {
-		return true
-	}
 	if r.Method != http.MethodPost {
 		return false
 	}
-	if strings.HasSuffix(cleanPath, "/templates/preview") {
+	relPath := stripAPIV1Prefix(path.Clean(r.URL.Path))
+	if relPath == "/profile/pdf/parse" || relPath == "/templates/preview" {
 		return true
 	}
-	return strings.Contains(cleanPath, "/branches/") &&
-		strings.Contains(cleanPath, "/versions/") &&
-		strings.HasSuffix(cleanPath, "/preview")
+	return isVersionRenderPreviewPath(relPath)
+}
+
+// stripAPIV1Prefix removes a leading /api/v1 segment from cleanPath while preserving root-relative paths.
+func stripAPIV1Prefix(cleanPath string) string {
+	if cleanPath == "/api/v1" {
+		return "/"
+	}
+	if strings.HasPrefix(cleanPath, "/api/v1/") {
+		return strings.TrimPrefix(cleanPath, "/api/v1")
+	}
+	return cleanPath
+}
+
+// isVersionRenderPreviewPath reports whether relPath matches /{branches|resumes}/{id}/versions/{v}/render-preview.
+func isVersionRenderPreviewPath(relPath string) bool {
+	segments := strings.Split(strings.TrimPrefix(relPath, "/"), "/")
+	if len(segments) != 5 {
+		return false
+	}
+	if segments[0] != "branches" && segments[0] != "resumes" {
+		return false
+	}
+	return segments[1] != "" && segments[2] == "versions" && segments[3] != "" && segments[4] == "render-preview"
 }
 
 // isPublicRoute checks if a request path is exempt from authentication.
