@@ -8,6 +8,9 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 )
 
+// fallbackUserID is the default local tenant identifier when none is explicitly configured.
+const fallbackUserID = "default"
+
 // AdminProvider implements Provider for single-user local administration deployments.
 // It bypasses external token verification and resolves identity from the X-User-ID header
 // or falls back to a configured default user identifier, always granting administrative privileges.
@@ -35,7 +38,7 @@ func WithDefaultUserID(userID string) AdminOption {
 func NewAdminProvider(defaultUserID string, opts ...AdminOption) *AdminProvider {
 	trimmed := strings.TrimSpace(defaultUserID)
 	if trimmed == "" {
-		trimmed = "default"
+		trimmed = fallbackUserID
 	}
 	p := &AdminProvider{
 		defaultUserID: trimmed,
@@ -56,14 +59,14 @@ func (p *AdminProvider) Name() string {
 // DefaultUserID returns the configured fallback tenant user identifier.
 func (p *AdminProvider) DefaultUserID() string {
 	if p == nil || p.defaultUserID == "" {
-		return "default"
+		return fallbackUserID
 	}
 	return p.defaultUserID
 }
 
 // AuthenticateRequest extracts the tenant user ID from the X-User-ID header or falls back to defaultUserID.
 func (p *AdminProvider) AuthenticateRequest(r *http.Request) (*core.TokenInfo, error) {
-	uid := "default"
+	uid := fallbackUserID
 	if p != nil && p.defaultUserID != "" {
 		uid = p.defaultUserID
 	}
@@ -86,7 +89,7 @@ func (p *AdminProvider) VerifyIDToken(_ context.Context, token string) (*core.To
 		if p != nil && p.defaultUserID != "" {
 			uid = p.defaultUserID
 		} else {
-			uid = "default"
+			uid = fallbackUserID
 		}
 	}
 	return &core.TokenInfo{

@@ -166,7 +166,10 @@ type TenantProvisioner interface {
 
 // AuthMiddlewareWithProvider inspects incoming requests using the provided auth.Provider
 // and injects the authenticated tenant ID and admin privileges into context.
-func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvisioner) func(http.Handler) http.Handler {
+func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvisioner, logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodOptions || isPublicRoute(r.URL.Path) {
@@ -206,7 +209,7 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvis
 					Role:     role,
 					IsActive: true,
 				}); err != nil {
-					slog.ErrorContext(r.Context(), "failed to provision tenant", "user_id", tokenInfo.UID, "error", err)
+					logger.ErrorContext(r.Context(), "failed to provision tenant", "user_id", tokenInfo.UID, "error", err)
 					writeError(w, http.StatusInternalServerError, CodeInternalError, "internal server error provisioning tenant", "")
 					return
 				}
@@ -214,22 +217,4 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvis
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-// AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
-//
-// Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
-func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioner TenantProvisioner) func(http.Handler) http.Handler {
-	if defaultUserID == "" {
-		defaultUserID = "default"
-	}
-
-	var provider auth.Provider
-	if admin {
-		provider = auth.NewAdminProvider(defaultUserID)
-	} else if verifier != nil {
-		provider = auth.NewTokenVerifierProvider("verifier", verifier)
-	}
-
-	return AuthMiddlewareWithProvider(provider, provisioner)
 }

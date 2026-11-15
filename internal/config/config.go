@@ -116,6 +116,12 @@ const (
 
 	// DefaultMCPSSEKeepAliveInterval sets the heartbeat cadence on MCP SSE streams.
 	DefaultMCPSSEKeepAliveInterval = 15 * time.Second
+
+	// DefaultMCPMaxConnsPerUser caps concurrent active MCP SSE streams per tenant.
+	DefaultMCPMaxConnsPerUser = 5
+
+	// DefaultMCPMaxTotalConns caps total concurrent active MCP SSE streams across all tenants.
+	DefaultMCPMaxTotalConns = 100
 )
 
 // Load reads configuration from process environment variables and a local .env file if present.
@@ -391,8 +397,11 @@ func (c *Config) ParseFlags(args []string) error {
 }
 
 // NewLogger constructs a structured slog.Logger for the given configuration.
-// If w is nil, os.Stdout is used as default.
+// If cfg is nil, baseline defaults are used; if w is nil, os.Stdout is used.
 func NewLogger(cfg *Config, w io.Writer) *slog.Logger {
+	if cfg == nil {
+		cfg = defaultConfig()
+	}
 	if w == nil {
 		w = os.Stdout
 	}

@@ -126,7 +126,7 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("admin mode bypasses verification and sets defaultUserID", func(t *testing.T) {
 		var capturedUID string
 		var capturedAdmin bool
-		handler := AuthMiddleware(true, "admin-user-default", nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewAdminProvider("admin-user-default"), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedUID, _ = core.UserIDFromContext(r.Context())
 			capturedAdmin = core.IsAdminFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
@@ -149,7 +149,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("admin mode honors X-User-ID header override", func(t *testing.T) {
 		var capturedUID string
-		handler := AuthMiddleware(true, "default", nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewAdminProvider("default"), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedUID, _ = core.UserIDFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -178,7 +178,7 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 
 		var capturedUID string
-		handler := AuthMiddleware(false, "default", verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewTokenVerifierProvider("verifier", verifier), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedUID, _ = core.UserIDFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -211,6 +211,7 @@ func TestAuthMiddleware(t *testing.T) {
 				}
 			},
 		}
+		provider := auth.NewTokenVerifierProvider("verifier", verifier)
 
 		tests := []struct {
 			name          string
@@ -237,7 +238,7 @@ func TestAuthMiddleware(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				var capturedAdmin bool
-				handler := AuthMiddleware(false, "default", verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler := AuthMiddlewareWithProvider(provider, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					capturedAdmin = core.IsAdminFromContext(r.Context())
 					w.WriteHeader(http.StatusOK)
 				}))
@@ -259,7 +260,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode rejects missing authorization header with 401", func(t *testing.T) {
 		verifier := &mockTokenVerifier{}
-		handler := AuthMiddleware(false, "default", verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewTokenVerifierProvider("verifier", verifier), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -278,7 +279,7 @@ func TestAuthMiddleware(t *testing.T) {
 				return nil, core.ErrUnauthorized
 			},
 		}
-		handler := AuthMiddleware(false, "default", verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewTokenVerifierProvider("verifier", verifier), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -294,7 +295,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("public routes bypass token verification in multi-tenant mode", func(t *testing.T) {
 		verifier := &mockTokenVerifier{}
-		handler := AuthMiddleware(false, "default", verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handler := AuthMiddlewareWithProvider(auth.NewTokenVerifierProvider("verifier", verifier), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -309,8 +310,8 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("fails closed with 401 when admin is false and verifier is nil even with X-User-ID", func(t *testing.T) {
-		handler := AuthMiddleware(false, "default", nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	t.Run("fails closed with 401 when provider is nil even with X-User-ID", func(t *testing.T) {
+		handler := AuthMiddlewareWithProvider(nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -320,7 +321,7 @@ func TestAuthMiddleware(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("expected status 401 when verifier is nil and admin is false, got %d", rec.Code)
+			t.Fatalf("expected status 401 when provider is nil, got %d", rec.Code)
 		}
 	})
 
@@ -329,7 +330,7 @@ func TestAuthMiddleware(t *testing.T) {
 		var capturedUID string
 		var capturedAdmin bool
 
-		handler := AuthMiddlewareWithProvider(provider, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddlewareWithProvider(provider, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedUID, _ = core.UserIDFromContext(r.Context())
 			capturedAdmin = core.IsAdminFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
@@ -351,17 +352,39 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("AuthMiddlewareWithProvider fails closed when provider is nil", func(t *testing.T) {
-		handler := AuthMiddlewareWithProvider(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
+	t.Run("AuthMiddlewareWithProvider logs provisioning errors to injected logger and returns 500", func(t *testing.T) {
+		var injectedBuf bytes.Buffer
+		injectedLogger := slog.New(slog.NewTextHandler(&injectedBuf, nil))
+
+		var defaultBuf bytes.Buffer
+		origDefault := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&defaultBuf, nil)))
+		t.Cleanup(func() { slog.SetDefault(origDefault) })
+
+		verifier := &mockTokenVerifier{
+			verifyFunc: func(_ context.Context, _ string) (*core.TokenInfo, error) {
+				return &core.TokenInfo{UID: "tenant-prov-fail"}, nil
+			},
+		}
+		provisioner := &defaultTenantProvisioner{} // Partial nil stores trigger provisioning error.
+
+		handler := AuthMiddlewareWithProvider(auth.NewTokenVerifierProvider("verifier", verifier), provisioner, injectedLogger)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			t.Fatal("next handler should not run on provisioning failure")
 		}))
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+		req.Header.Set("Authorization", "Bearer valid-tok")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("expected status 401 when provider is nil, got %d", rec.Code)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 Internal Server Error on provisioning failure, got %d", rec.Code)
+		}
+		if !strings.Contains(injectedBuf.String(), "failed to provision tenant") {
+			t.Errorf("expected provisioning error logged to injected logger, got %q", injectedBuf.String())
+		}
+		if defaultBuf.Len() != 0 {
+			t.Errorf("expected global default logger to stay unused, got %q", defaultBuf.String())
 		}
 	})
 }

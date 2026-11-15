@@ -30,19 +30,23 @@ type quotaHandler struct {
 	cfg RouterConfig
 }
 
+// resolveQuotaLimits returns positive daily request and monthly token limits, falling back to config defaults.
+func resolveQuotaLimits(dailyLimit, monthlyLimit int) (int, int) {
+	if dailyLimit <= 0 {
+		dailyLimit = config.DefaultLLMDailyRequestLimit
+	}
+	if monthlyLimit <= 0 {
+		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
+	}
+	return dailyLimit, monthlyLimit
+}
+
 // getQuota returns the current rate limit and token quota status for the authenticated tenant.
 func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 
-	dailyLimit := h.cfg.DailyRequestLimit
-	if dailyLimit <= 0 {
-		dailyLimit = config.DefaultLLMDailyRequestLimit
-	}
-	monthlyLimit := h.cfg.MonthlyTokenLimit
-	if monthlyLimit <= 0 {
-		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
-	}
+	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
 
 	var quota *core.TenantQuota
 	if h.cfg.QuotaStore != nil {

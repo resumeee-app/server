@@ -49,31 +49,33 @@ type TemplateRenderer interface {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileStore         core.ProfileStore
-	CareerStore          core.CareerStore
-	PresetStore          core.PresetStore
-	TemplateStore        core.TemplateStore
-	BranchStore          core.BranchStore
-	PDFJobStore          core.PDFJobStore
-	PDFJobEnqueuer       core.PDFJobEnqueuer
-	QuotaStore           core.QuotaStore
-	BranchService        BranchService
-	ProfileService       ProfileService
-	PDFExtractor         PDFTextExtractor
-	ResumeExtractor      worker.ResumeExtractor
-	Renderer             TemplateRenderer
-	Validator            branch.ProvenanceValidator
-	JobEnqueuer          branch.JobEnqueuer
-	PromptCompiler       branch.PromptCompiler
-	ModelEnumerator      core.ModelEnumerator
-	DefaultUserID        string
-	Admin                bool
-	AuthProvider         auth.Provider
-	UserStore            core.UserStore
-	Provisioner          TenantProvisioner
-	Logger               *slog.Logger
-	RESTTimeout          time.Duration
-	LLMTimeout           time.Duration
+	ProfileStore    core.ProfileStore
+	CareerStore     core.CareerStore
+	PresetStore     core.PresetStore
+	TemplateStore   core.TemplateStore
+	BranchStore     core.BranchStore
+	PDFJobStore     core.PDFJobStore
+	PDFJobEnqueuer  core.PDFJobEnqueuer
+	QuotaStore      core.QuotaStore
+	BranchService   BranchService
+	ProfileService  ProfileService
+	PDFExtractor    PDFTextExtractor
+	ResumeExtractor worker.ResumeExtractor
+	Renderer        TemplateRenderer
+	Validator       branch.ProvenanceValidator
+	JobEnqueuer     branch.JobEnqueuer
+	PromptCompiler  branch.PromptCompiler
+	ModelEnumerator core.ModelEnumerator
+	DefaultUserID   string
+	Admin           bool
+	AuthProvider    auth.Provider
+	UserStore       core.UserStore
+	Provisioner     TenantProvisioner
+	Logger          *slog.Logger
+	RESTTimeout     time.Duration
+	LLMTimeout      time.Duration
+	// PDFParseTimeout bounds synchronous PDF resume extraction. When <= 0, NewRouter inherits
+	// an explicit positive LLMTimeout if provided, otherwise falling back to config.DefaultPDFParseTimeout.
 	PDFParseTimeout      time.Duration
 	RenderPreviewTimeout time.Duration
 	DailyRequestLimit    int
@@ -105,22 +107,27 @@ func requestUserID(r *http.Request, defaultID string) string {
 	if defaultID != "" {
 		return defaultID
 	}
-	return "default"
+	return config.DefaultUserID
 }
 
 // NewRouter constructs a net/http router and registers all OpenAPI routes under /api/v1.
 func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.DefaultUserID == "" {
-		cfg.DefaultUserID = "default"
+		cfg.DefaultUserID = config.DefaultUserID
 	}
 	if cfg.RESTTimeout <= 0 {
 		cfg.RESTTimeout = config.DefaultRESTTimeout
 	}
+	origLLMTimeout := cfg.LLMTimeout
 	if cfg.LLMTimeout <= 0 {
 		cfg.LLMTimeout = config.DefaultLLMTimeout
 	}
 	if cfg.PDFParseTimeout <= 0 {
-		cfg.PDFParseTimeout = config.DefaultPDFParseTimeout
+		if origLLMTimeout > 0 {
+			cfg.PDFParseTimeout = origLLMTimeout
+		} else {
+			cfg.PDFParseTimeout = config.DefaultPDFParseTimeout
+		}
 	}
 	if cfg.RenderPreviewTimeout <= 0 {
 		cfg.RenderPreviewTimeout = config.DefaultRenderPreviewTimeout
@@ -199,7 +206,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if authProvider == nil && cfg.Admin {
 		authProvider = auth.NewAdminProvider(cfg.DefaultUserID)
 	}
-	handler = AuthMiddlewareWithProvider(authProvider, provisioner)(handler)
+	handler = AuthMiddlewareWithProvider(authProvider, provisioner, cfg.Logger)(handler)
 
 	handler = CORSMiddleware(handler)
 	handler = LoggingMiddleware(cfg.Logger)(handler)

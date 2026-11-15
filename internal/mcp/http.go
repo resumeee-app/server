@@ -187,11 +187,6 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (*core.TokenInfo, er
 	}, nil
 }
 
-// isAdminBypass reports whether HTTP requests bypass external token verification in local admin mode.
-func isAdminBypass(cfg ServerConfig) bool {
-	return len(cfg.AuthTokens) == 0 && ((cfg.AuthProvider != nil && cfg.AuthProvider.Name() == auth.ProviderAdmin) || (cfg.AuthProvider == nil && cfg.Admin))
-}
-
 // NewHTTPHandler constructs an http.Handler wrapping the MCP SSEServer with authentication,
 // session hijacking defense, 10MB payload body bounding, and active connection limits.
 //
@@ -215,13 +210,15 @@ func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handl
 			return
 		}
 		userID := tokenInfo.UID
-		if !isAdminBypass(cfg) {
-			if pErr := cfg.EnsureTenant(r.Context(), userID); pErr != nil {
-				cfg.Logger.ErrorContext(r.Context(), "failed to lazily provision tenant", "user_id", userID, "err", pErr)
-			}
-		}
 		ctx := WithUserID(r.Context(), userID)
 		ctx = core.WithIsAdmin(ctx, tokenInfo.IsAdmin())
+		if isAdminBypass(cfg) {
+			ctx = withSkipTenantProvision(ctx)
+		} else if pErr := cfg.EnsureTenant(ctx, userID); pErr != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to lazily provision tenant", "user_id", userID, "err", pErr)
+			http.Error(w, "internal server error provisioning tenant", http.StatusInternalServerError)
+			return
+		}
 		r = r.WithContext(ctx)
 
 		if r.Method == http.MethodGet && (r.URL.Path == "/mcp/sse" || strings.HasSuffix(r.URL.Path, "/sse")) {
@@ -260,7 +257,11 @@ func newSSEServer(mcpServer *serverSDK.MCPServer, cfg ServerConfig, sessions *se
 		serverSDK.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
 			ctx = WithUserID(ctx, userID)
-			return core.WithIsAdmin(ctx, core.IsAdminFromContext(r.Context()))
+			ctx = core.WithIsAdmin(ctx, core.IsAdminFromContext(r.Context()))
+			if isAdminBypass(cfg) || skipTenantProvisionFromContext(r.Context()) {
+				ctx = withSkipTenantProvision(ctx)
+			}
+			return ctx
 		}),
 	)
 }

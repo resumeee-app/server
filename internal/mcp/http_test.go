@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +18,9 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/profile"
 )
 
 type mockTokenVerifier struct {
@@ -193,6 +197,130 @@ func TestAuthenticateRequest(t *testing.T) {
 	})
 }
 
+type failingProfileStore struct {
+	core.ProfileStore
+	err error
+}
+
+func (f *failingProfileStore) Profile(_ context.Context, _ string) (*core.Profile, error) {
+	return nil, f.err
+}
+
+func (f *failingProfileStore) UpsertProfile(_ context.Context, _ *core.Profile) error {
+	return f.err
+}
+
+func callMCPToolOverSSE(t *testing.T, handler http.Handler, headers map[string]string, toolName string, args map[string]any) string {
+	t.Helper()
+
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	sseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sseReq, err := http.NewRequestWithContext(sseCtx, http.MethodGet, ts.URL+"/mcp/sse", nil)
+	if err != nil {
+		t.Fatalf("new SSE request: %v", err)
+	}
+	for k, v := range headers {
+		sseReq.Header.Set(k, v)
+	}
+
+	sseResp, err := ts.Client().Do(sseReq)
+	if err != nil {
+		t.Fatalf("SSE connect failed: %v", err)
+	}
+	defer func() { _ = sseResp.Body.Close() }()
+	if sseResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from /mcp/sse, got %d", sseResp.StatusCode)
+	}
+
+	msgPathCh := make(chan string, 1)
+	rpcRespCh := make(chan string, 1)
+	scanErrCh := make(chan error, 1)
+
+	go func() {
+		scanner := bufio.NewScanner(sseResp.Body)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		sentEndpoint := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+			if !sentEndpoint {
+				sentEndpoint = true
+				msgPathCh <- payload
+				continue
+			}
+			if strings.Contains(payload, `"id":1`) {
+				rpcRespCh <- payload
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			scanErrCh <- err
+		}
+	}()
+
+	var msgPath string
+	select {
+	case msgPath = <-msgPathCh:
+	case scanErr := <-scanErrCh:
+		t.Fatalf("SSE scan error before endpoint event: %v", scanErr)
+	case <-sseCtx.Done():
+		t.Fatalf("timed out waiting for SSE endpoint event")
+	}
+
+	msgURL := msgPath
+	if !strings.HasPrefix(msgURL, "http") {
+		msgURL = ts.URL + msgPath
+	}
+
+	reqBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, toolName, mustMarshalJSON(t, args))
+	postReq, err := http.NewRequestWithContext(sseCtx, http.MethodPost, msgURL, strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("new POST request: %v", err)
+	}
+	for k, v := range headers {
+		postReq.Header.Set(k, v)
+	}
+	postReq.Header.Set("Content-Type", "application/json")
+
+	postResp, err := ts.Client().Do(postReq)
+	if err != nil {
+		t.Fatalf("POST message failed: %v", err)
+	}
+	_ = postResp.Body.Close()
+	if postResp.StatusCode != http.StatusAccepted && postResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected POST status %d", postResp.StatusCode)
+	}
+
+	select {
+	case respLine := <-rpcRespCh:
+		return respLine
+	case scanErr := <-scanErrCh:
+		t.Fatalf("SSE scan error waiting for tool response: %v", scanErr)
+	case <-sseCtx.Done():
+		t.Fatalf("timed out waiting for SSE tool response for %q", toolName)
+	}
+	return ""
+}
+
+func mustMarshalJSON(t *testing.T, v any) string {
+	t.Helper()
+	if v == nil {
+		return "{}"
+	}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		t.Fatalf("encode JSON: %v", err)
+	}
+	return strings.TrimSpace(buf.String())
+}
+
 func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 	ctx := context.Background()
 
@@ -316,12 +444,19 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 		}
 	})
 
-	t.Run("AdminProvider and Admin mode skip EnsureTenant", func(t *testing.T) {
+	t.Run("AdminProvider and Admin mode skip EnsureTenant across live SSE tool execution", func(t *testing.T) {
 		store, err := memory.NewSeeded(ctx, "seed-owner")
 		if err != nil {
 			t.Fatalf("failed to seed store: %v", err)
 		}
-		mcpSrv := serverSDK.NewMCPServer("test", "1.0.0")
+
+		profileSvc := profile.New(store, store, store)
+		branchSvc := branch.New(branch.Config{
+			Branches:  store,
+			Profiles:  store,
+			Presets:   store,
+			Templates: store,
+		})
 
 		cases := []struct {
 			name   string
@@ -331,23 +466,35 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 			{
 				name: "AdminProvider",
 				cfg: ServerConfig{
-					AuthProvider:  auth.NewAdminProvider("default-user"),
-					ProfileStore:  store,
-					BranchStore:   store,
-					TemplateStore: store,
-					UserStore:     store,
+					AuthProvider:         auth.NewAdminProvider("default-user"),
+					ProfileService:       profileSvc,
+					BranchService:        branchSvc,
+					ProfileStore:         store,
+					CareerStore:          store,
+					BranchStore:          store,
+					TemplateStore:        store,
+					PresetStore:          store,
+					UserStore:            store,
+					RESTTimeout:          2 * time.Second,
+					SSEKeepAliveInterval: 5 * time.Second,
 				},
 				userID: "skip-prov-provider",
 			},
 			{
 				name: "Local Admin flag",
 				cfg: ServerConfig{
-					Admin:         true,
-					DefaultUserID: "default-user",
-					ProfileStore:  store,
-					BranchStore:   store,
-					TemplateStore: store,
-					UserStore:     store,
+					Admin:                true,
+					DefaultUserID:        "default-user",
+					ProfileService:       profileSvc,
+					BranchService:        branchSvc,
+					ProfileStore:         store,
+					CareerStore:          store,
+					BranchStore:          store,
+					TemplateStore:        store,
+					PresetStore:          store,
+					UserStore:            store,
+					RESTTimeout:          2 * time.Second,
+					SSEKeepAliveInterval: 5 * time.Second,
 				},
 				userID: "skip-prov-flag",
 			},
@@ -355,14 +502,127 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				mcpSrv := NewServer(tc.cfg)
 				handler := NewHTTPHandler(mcpSrv, tc.cfg)
-				req := httptest.NewRequest(http.MethodPost, "/mcp/messages?sessionId=nonexistent", nil)
-				req.Header.Set("X-User-ID", tc.userID)
-				rec := httptest.NewRecorder()
-				handler.ServeHTTP(rec, req)
+
+				headers := map[string]string{"X-User-ID": tc.userID}
+				rpcLine := callMCPToolOverSSE(t, handler, headers, "list_branches", nil)
+				if !strings.Contains(rpcLine, `"result"`) {
+					t.Fatalf("expected valid SSE tool result for list_branches, got: %s", rpcLine)
+				}
 
 				if prof, _ := store.Profile(ctx, tc.userID); prof != nil {
-					t.Errorf("expected %s to skip lazy tenant provisioning for %q, but profile was created", tc.name, tc.userID)
+					t.Errorf("expected %s to skip lazy tenant provisioning for %q even during live tool execution, but profile was created", tc.name, tc.userID)
+				}
+			})
+		}
+	})
+
+	t.Run("multi-tenant EnsureTenant error fails closed with 500", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "seed-owner")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		mcpSrv := serverSDK.NewMCPServer("test", "1.0.0")
+		handler := NewHTTPHandler(mcpSrv, ServerConfig{
+			AuthTokens: map[string]string{
+				"tenant-tok": "tenant-failing-prov",
+			},
+			ProfileStore:  &failingProfileStore{ProfileStore: store, err: errors.New("database unavailable")},
+			BranchStore:   store,
+			TemplateStore: store,
+			UserStore:     store,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil)
+		req.Header.Set("Authorization", "Bearer tenant-tok")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 Internal Server Error when EnsureTenant fails, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "database unavailable") {
+			t.Errorf("expected sanitized 500 error body without raw backend error, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("Admin true with AuthTokens or non-admin AuthProvider does not elevate non-admin user", func(t *testing.T) {
+		store, err := memory.NewSeeded(ctx, "user-token-1")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+
+		branchSvc := branch.New(branch.Config{
+			Branches:  store,
+			Profiles:  store,
+			Presets:   store,
+			Templates: store,
+		})
+
+		nonAdminVerifier := &mockTokenVerifier{
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
+				if token == "jwt-regular" {
+					return &core.TokenInfo{UID: "user-token-1", Admin: false, Role: "user"}, nil
+				}
+				return nil, core.ErrUnauthorized
+			},
+		}
+
+		cases := []struct {
+			name   string
+			cfg    ServerConfig
+			bearer string
+		}{
+			{
+				name: "Admin true with AuthTokens",
+				cfg: ServerConfig{
+					Admin:                true,
+					AuthTokens:           map[string]string{"static-tok": "user-token-1"},
+					BranchService:        branchSvc,
+					ProfileStore:         store,
+					BranchStore:          store,
+					TemplateStore:        store,
+					UserStore:            store,
+					RESTTimeout:          2 * time.Second,
+					SSEKeepAliveInterval: 5 * time.Second,
+				},
+				bearer: "static-tok",
+			},
+			{
+				name: "Admin true with JWT AuthProvider",
+				cfg: ServerConfig{
+					Admin:                true,
+					AuthProvider:         auth.NewTokenVerifierProvider("jwt", nonAdminVerifier),
+					BranchService:        branchSvc,
+					ProfileStore:         store,
+					BranchStore:          store,
+					TemplateStore:        store,
+					UserStore:            store,
+					RESTTimeout:          2 * time.Second,
+					SSEKeepAliveInterval: 5 * time.Second,
+				},
+				bearer: "jwt-regular",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				mcpSrv := NewServer(tc.cfg)
+				handler := NewHTTPHandler(mcpSrv, tc.cfg)
+
+				rpcLine := callMCPToolOverSSE(t, handler, map[string]string{
+					"Authorization": "Bearer " + tc.bearer,
+				}, "create_branch", map[string]any{
+					"name":              "Model Override Attempt",
+					"target_company":    "Acme",
+					"target_role":       "Engineer",
+					"provider_override": "openai",
+				})
+
+				if !strings.Contains(rpcLine, `"isError":true`) || !strings.Contains(rpcLine, "restricted to administrators") {
+					t.Fatalf("expected non-admin token with %s to be denied model selection override, got: %s", tc.name, rpcLine)
 				}
 			})
 		}

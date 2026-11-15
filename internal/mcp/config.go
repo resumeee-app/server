@@ -17,8 +17,14 @@ import (
 // contextKey defines a private string type used for context value keys in the mcp package.
 type contextKey string
 
-// userIDContextKey is the context key under which authenticated user IDs are stored.
-const userIDContextKey contextKey = "mcp_user_id"
+// Context value keys used within the mcp package.
+const (
+	// userIDContextKey is the context key under which authenticated user IDs are stored.
+	userIDContextKey contextKey = "mcp_user_id"
+
+	// skipTenantProvisionContextKey is the context key indicating lazy tenant provisioning is suppressed.
+	skipTenantProvisionContextKey contextKey = "mcp_skip_tenant_provision"
+)
 
 // ServerConfig encapsulates all dependencies, stores, services, timeouts, and authorization
 // parameters required by the MCP server subsystem across both stdio and SSE HTTP transports.
@@ -96,7 +102,31 @@ func UserIDFromContext(ctx context.Context, defaultID string) string {
 	if defaultID != "" {
 		return defaultID
 	}
-	return "default"
+	return config.DefaultUserID
+}
+
+// withSkipTenantProvision returns a child context instructing EnsureTenant to skip lazy tenant provisioning.
+func withSkipTenantProvision(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipTenantProvisionContextKey, true)
+}
+
+// skipTenantProvisionFromContext reports whether ctx suppresses lazy tenant provisioning.
+func skipTenantProvisionFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	skip, ok := ctx.Value(skipTenantProvisionContextKey).(bool)
+	return ok && skip
+}
+
+// isAdminBypass reports whether requests bypass external token verification in local admin mode.
+func isAdminBypass(cfg ServerConfig) bool {
+	return len(cfg.AuthTokens) == 0 && ((cfg.AuthProvider != nil && cfg.AuthProvider.Name() == auth.ProviderAdmin) || (cfg.AuthProvider == nil && cfg.Admin))
+}
+
+// isEffectiveAdmin reports whether ctx carries verified admin claims or cfg runs in local admin-bypass mode.
+func isEffectiveAdmin(ctx context.Context, cfg ServerConfig) bool {
+	return core.IsAdminFromContext(ctx) || isAdminBypass(cfg)
 }
 
 // setDefaults populates zero-value fields in ServerConfig with safe domain defaults.
@@ -117,17 +147,18 @@ func (c *ServerConfig) setDefaults() {
 		c.SSEKeepAliveInterval = config.DefaultMCPSSEKeepAliveInterval
 	}
 	if c.MaxConnectionsPerUser <= 0 {
-		c.MaxConnectionsPerUser = 5
+		c.MaxConnectionsPerUser = config.DefaultMCPMaxConnsPerUser
 	}
 	if c.MaxTotalConnections <= 0 {
-		c.MaxTotalConnections = 100
+		c.MaxTotalConnections = config.DefaultMCPMaxTotalConns
 	}
 }
 
-// EnsureTenant lazily provisions a tenant in the configured stores if unprovisioned.
+// EnsureTenant lazily provisions a tenant in the configured stores if unprovisioned,
+// unless ctx suppresses lazy provisioning (such as HTTP admin-bypass X-User-ID requests).
 // It ensures default profile, branch, and templates exist for the given user.
 func (c *ServerConfig) EnsureTenant(ctx context.Context, userID string) error {
-	if userID == "" || c.ProfileStore == nil || c.BranchStore == nil || c.TemplateStore == nil {
+	if skipTenantProvisionFromContext(ctx) || userID == "" || c.ProfileStore == nil || c.BranchStore == nil || c.TemplateStore == nil {
 		return nil
 	}
 	return seed.EnsureTenantProvisionedStores(ctx, c.ProfileStore, c.BranchStore, c.TemplateStore, c.UserStore, userID)

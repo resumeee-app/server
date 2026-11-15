@@ -3153,7 +3153,7 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		}, "template store unavailable")
 	})
 
-	t.Run("Store default populates CareerStore and ProfileService", func(t *testing.T) {
+	t.Run("NewRouterConfigFromStore populates CareerStore and ProfileService", func(t *testing.T) {
 		memStore, err := memory.NewSeeded(ctx, "user-1")
 		if err != nil {
 			t.Fatalf("failed to seed store: %v", err)
@@ -3249,4 +3249,269 @@ func TestHTMLRenderResponse_SetsNoSniffHeader(t *testing.T) {
 	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("expected X-Content-Type-Options: nosniff, got %q", got)
 	}
+}
+
+type failingCareerStore struct {
+	core.CareerStore
+	expErr error
+}
+
+func (f *failingCareerStore) Experience(_ context.Context, _, _ string) (*core.WorkExperience, error) {
+	return nil, f.expErr
+}
+
+type staticPDFTextExtractor struct {
+	text string
+}
+
+func (s *staticPDFTextExtractor) ExtractText(_ context.Context, _ io.ReaderAt, _ int64) (string, error) {
+	return s.text, nil
+}
+
+type contextDeadlineResumeExtractor struct{}
+
+func (c *contextDeadlineResumeExtractor) ExtractResume(ctx context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
+	<-ctx.Done()
+	return nil, core.TokenUsage{}, ctx.Err()
+}
+
+func TestRenderPreview_RejectsUnauthorizedOrMissingTemplateID(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-a")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+	if err := memStore.CreateTemplate(ctx, &core.TemplateSet{
+		ID:           "priv-tmpl-b",
+		UserID:       "user-b",
+		Name:         "Private Template B",
+		HTMLTemplate: "<p>{{.FullName}}</p>",
+	}); err != nil {
+		t.Fatalf("create private template: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-a"
+	cfg.Renderer = renderer.New()
+
+	srv := httptest.NewServer(api.NewRouter(cfg))
+	defer srv.Close()
+
+	for _, id := range []string{"priv-tmpl-b", "nonexistent-tmpl"} {
+		resp, body := doRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/templates/preview", map[string]string{
+			"template_id": id,
+		}, nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for template_id=%q, got %d (%s)", id, resp.StatusCode, string(body))
+		}
+		var errEnv api.ErrorResponse
+		if err := json.Unmarshal(body, &errEnv); err != nil {
+			t.Fatalf("decode error envelope: %v", err)
+		}
+		if errEnv.Error.Code != api.CodeForbidden {
+			t.Errorf("expected error code %q for template_id=%q, got %q", api.CodeForbidden, id, errEnv.Error.Code)
+		}
+	}
+}
+
+func TestCreateFact_ResolveOwnerErrorsSanitized(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	t.Run("not found owner maps to 400 without raw store error details", func(t *testing.T) {
+		cfg := api.NewRouterConfigFromStore(memStore)
+		cfg.Admin = true
+		cfg.DefaultUserID = "user-1"
+		srv := httptest.NewServer(api.NewRouter(cfg))
+		defer srv.Close()
+
+		resp, body := doRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/facts", map[string]any{
+			"owner_id":   "missing-exp-id",
+			"owner_type": core.OwnerTypeWorkExperience,
+			"statement":  "Built distributed queues",
+		}, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for missing owner, got %d (%s)", resp.StatusCode, string(body))
+		}
+		var errEnv api.ErrorResponse
+		if err := json.Unmarshal(body, &errEnv); err != nil {
+			t.Fatalf("decode error envelope: %v", err)
+		}
+		if errEnv.Error.Details != "" {
+			t.Errorf("expected empty sanitized details for 400 owner error, got %q", errEnv.Error.Details)
+		}
+	})
+
+	t.Run("unexpected backend error maps to sanitized 500", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		cfg := api.NewRouterConfigFromStore(memStore)
+		cfg.CareerStore = &failingCareerStore{
+			CareerStore: memStore,
+			expErr:      errors.New("secret sqlite internal failure"),
+		}
+		cfg.Admin = true
+		cfg.DefaultUserID = "user-1"
+		cfg.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		srv := httptest.NewServer(api.NewRouter(cfg))
+		defer srv.Close()
+
+		resp, body := doRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/facts", map[string]any{
+			"owner_id":   "any-id",
+			"owner_type": core.OwnerTypeWorkExperience,
+			"statement":  "Built distributed queues",
+		}, nil)
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("expected 500 Internal Server Error for unexpected backend failure, got %d (%s)", resp.StatusCode, string(body))
+		}
+		if strings.Contains(string(body), "secret sqlite internal failure") {
+			t.Errorf("expected raw backend error to be sanitized from response body, got %s", string(body))
+		}
+		if !strings.Contains(logBuf.String(), "secret sqlite internal failure") {
+			t.Errorf("expected raw error to be logged internally, got %q", logBuf.String())
+		}
+	})
+}
+
+func TestNewRouter_PDFParseTimeoutInheritsExplicitLLMTimeout(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+	cfg.LLMTimeout = 150 * time.Millisecond
+	cfg.PDFExtractor = &staticPDFTextExtractor{text: "Senior Engineer Resume"}
+	cfg.ResumeExtractor = &contextDeadlineResumeExtractor{}
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	srv := httptest.NewServer(api.NewRouter(cfg))
+	defer srv.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("%PDF-1.4\n")); err != nil {
+		t.Fatalf("write pdf bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/profile/pdf/parse?sync=true", &body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504 Gateway Timeout using inherited LLMTimeout, got %d (%s)", resp.StatusCode, string(respBody))
+	}
+	if !strings.Contains(string(respBody), "150ms") {
+		t.Errorf("expected timeout message to reflect inherited 150ms LLMTimeout, got %s", string(respBody))
+	}
+}
+
+func TestSyncBranches_DecodesChunkedRequestBody(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.DefaultUserID = "user-1"
+	cfg.JobEnqueuer = api.NewChannelJobEnqueuer(10)
+	cfg.Renderer = renderer.New()
+	cfg.Validator = provenance.New()
+	router := api.NewRouter(cfg)
+
+	t.Run("chunked invalid JSON body returns 400 instead of skipping decode", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/branches/sync", io.NopCloser(strings.NewReader("{bad-json")))
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = -1
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for malformed chunked body (ContentLength=-1), got %d (%s)", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("chunked valid JSON body filters branch_ids", func(t *testing.T) {
+		var branchIDs []string
+		for _, name := range []string{"Chunked Alpha", "Chunked Beta"} {
+			body, err := json.Marshal(api.CreateBranchRequest{
+				Name:               name,
+				TargetRole:         "Backend Engineer",
+				TargetCompany:      "Acme",
+				TargetRequirements: "Go, HTTP",
+				TemplateSetID:      "builtin-standard-clean",
+			})
+			if err != nil {
+				t.Fatalf("marshal create branch: %v", err)
+			}
+			createReq := httptest.NewRequest(http.MethodPost, "/api/v1/branches", bytes.NewReader(body))
+			createReq.Header.Set("Content-Type", "application/json")
+			createRec := httptest.NewRecorder()
+			router.ServeHTTP(createRec, createReq)
+			if createRec.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created creating %s, got %d (%s)", name, createRec.Code, createRec.Body.String())
+			}
+			var br core.Branch
+			if err := json.Unmarshal(createRec.Body.Bytes(), &br); err != nil {
+				t.Fatalf("decode created branch: %v", err)
+			}
+			branchIDs = append(branchIDs, br.ID)
+		}
+
+		// Mark both branches stale via profile summary update so an unfiltered sync would enqueue >= 2 jobs.
+		newSummary := "Updated summary triggering staleness"
+		profileBody, err := json.Marshal(api.UpdateProfileRequest{Summary: &newSummary})
+		if err != nil {
+			t.Fatalf("marshal update profile: %v", err)
+		}
+		putReq := httptest.NewRequest(http.MethodPut, "/api/v1/profile", bytes.NewReader(profileBody))
+		putReq.Header.Set("Content-Type", "application/json")
+		putRec := httptest.NewRecorder()
+		router.ServeHTTP(putRec, putReq)
+		if putRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK updating profile, got %d (%s)", putRec.Code, putRec.Body.String())
+		}
+
+		syncPayload := fmt.Sprintf(`{"branch_ids":[%q]}`, branchIDs[0])
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/branches/sync", io.NopCloser(strings.NewReader(syncPayload)))
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = -1
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected 202 Accepted for valid chunked body, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		var syncResp api.SyncBranchesResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &syncResp); err != nil {
+			t.Fatalf("decode SyncBranchesResponse: %v", err)
+		}
+		if syncResp.EnqueuedCount != 1 {
+			t.Errorf("expected 1 enqueued job filtered from chunked body, got %d", syncResp.EnqueuedCount)
+		}
+	})
 }

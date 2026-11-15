@@ -277,4 +277,15 @@ func TestCLI_Run_ConfigFlag(t *testing.T) {
 			t.Fatal("expected error for nonexistent -config path")
 		}
 	})
+
+	t.Run("returns error on invalid environment config without -config", func(t *testing.T) {
+		t.Setenv("REST_TIMEOUT", "not-a-duration")
+		err := runWithStore(context.Background(), func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+			t.Fatal("storeInit should not be called when environment configuration is invalid")
+			return nil, nil
+		}, bytes.NewBuffer(nil), &bytes.Buffer{})
+		if err == nil {
+			t.Fatal("expected error for invalid REST_TIMEOUT without -config")
+		}
+	})
 }

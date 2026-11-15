@@ -27,18 +27,6 @@ import (
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
-// Operational defaults for the standalone stdio MCP server.
-const (
-	// mcpWorkerConcurrency sets the number of concurrent async tailoring workers in stdio CLI mode.
-	mcpWorkerConcurrency = 2
-
-	// mcpWorkerQueueSize caps buffered async tailoring tasks in stdio CLI mode.
-	mcpWorkerQueueSize = 50
-
-	// mcpFallbackDBPath is used if loading config from environment fails unexpectedly.
-	mcpFallbackDBPath = "data/resumeee.db"
-)
-
 // StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
 type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
@@ -134,13 +122,7 @@ func loadMCPConfig(args []string) (*config.Config, error) {
 	} else {
 		cfg, err = config.Load()
 		if err != nil {
-			cfg = &config.Config{
-				DBPath:                  mcpFallbackDBPath,
-				DefaultUserID:           config.DefaultUserID,
-				RESTTimeout:             config.DefaultRESTTimeout,
-				LLMTimeout:              config.DefaultLLMTimeout,
-				MCPSSEKeepAliveInterval: config.DefaultMCPSSEKeepAliveInterval,
-			}
+			return nil, fmt.Errorf("loading configuration: %w", err)
 		}
 	}
 
@@ -181,34 +163,50 @@ func buildMCPServerConfig(ctx context.Context, cfg *config.Config, store core.St
 	llmService := llm.NewService(llmRegistry)
 	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 
+	concurrency := cfg.WorkerConcurrency
+	if concurrency <= 0 {
+		concurrency = config.DefaultWorkerConcurrency
+	}
+	queueSize := cfg.WorkerQueueSize
+	if queueSize <= 0 {
+		queueSize = config.DefaultWorkerQueueSize
+	}
+	maxPerTenant := cfg.MaxConcurrentJobsPerTenant
+	if maxPerTenant <= 0 {
+		maxPerTenant = config.DefaultMaxConcurrentJobsPerTenant
+	}
+
 	workerPool := worker.New(worker.Config{
-		Concurrency:     mcpWorkerConcurrency,
-		QueueSize:       mcpWorkerQueueSize,
-		Branches:        branchStore,
-		Profiles:        profileStore,
-		Presets:         presetStore,
-		Templates:       templateStore,
-		Quotas:          quotaStore,
-		ResumeExtractor: resumeExtractor,
-		LLMTimeout:      cfg.LLMTimeout,
-		Generator:       llmService,
-		Validator:       provValidator,
-		Renderer:        templateRenderer,
-		Logger:          logger,
+		Concurrency:            concurrency,
+		QueueSize:              queueSize,
+		MaxConcurrentPerTenant: maxPerTenant,
+		Branches:               branchStore,
+		Profiles:               profileStore,
+		Presets:                presetStore,
+		Templates:              templateStore,
+		Quotas:                 quotaStore,
+		ResumeExtractor:        resumeExtractor,
+		LLMTimeout:             cfg.LLMTimeout,
+		Generator:              llmService,
+		Validator:              provValidator,
+		Renderer:               templateRenderer,
+		Logger:                 logger,
 	})
 
 	branchSvc := branch.New(branch.Config{
-		Branches:       branchStore,
-		Profiles:       profileStore,
-		Presets:        presetStore,
-		Templates:      templateStore,
-		Quotas:         quotaStore,
-		JobEnqueuer:    workerPool,
-		Validator:      provValidator,
-		Renderer:       templateRenderer,
-		Generator:      llmService,
-		PromptCompiler: llm.NewPromptCompiler(),
-		Logger:         logger,
+		Branches:          branchStore,
+		Profiles:          profileStore,
+		Presets:           presetStore,
+		Templates:         templateStore,
+		Quotas:            quotaStore,
+		JobEnqueuer:       workerPool,
+		Validator:         provValidator,
+		Renderer:          templateRenderer,
+		Generator:         llmService,
+		PromptCompiler:    llm.NewPromptCompiler(),
+		DailyRequestLimit: cfg.LLMDailyRequestLimit,
+		MonthlyTokenLimit: cfg.LLMMonthlyTokenLimit,
+		Logger:            logger,
 	})
 
 	mcpCfg := resumeeeMCP.ServerConfig{

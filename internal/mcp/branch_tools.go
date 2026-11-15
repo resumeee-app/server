@@ -269,7 +269,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("reasoning_level must be one of: none, low, medium, high"), nil
 		}
 
-		isAdmin := cfg.Admin || core.IsAdminFromContext(ctx)
+		isAdmin := isEffectiveAdmin(ctx, cfg)
 		if !isAdmin && (providerOverride != "" || modelOverride != "" || reasoningLevel != "") {
 			return mcpSDK.NewToolResultError("model and reasoning selection are restricted to administrators"), nil
 		}
@@ -448,7 +448,7 @@ func applyBranchReferenceUpdates(ctx context.Context, cfg ServerConfig, userID s
 
 // applyBranchModelUpdates enforces administrator permissions and applies LLM override arguments onto branch.
 func applyBranchModelUpdates(ctx context.Context, cfg ServerConfig, branch *core.Branch, args map[string]any, allowEmpty bool) string {
-	isAdmin := cfg.Admin || core.IsAdminFromContext(ctx)
+	isAdmin := isEffectiveAdmin(ctx, cfg)
 	if !isAdmin && (args["provider_override"] != nil || args["model_override"] != nil || args["reasoning_level"] != nil) {
 		return "model and reasoning selection are restricted to administrators"
 	}

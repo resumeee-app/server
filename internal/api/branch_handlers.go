@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
@@ -101,9 +102,14 @@ type SyncBranchesResponse struct {
 	VersionIDs    []string `json:"version_ids"`
 }
 
+// isLocalAdminMode reports whether cfg enables unauthenticated local admin mode without an external auth provider.
+func isLocalAdminMode(cfg RouterConfig) bool {
+	return cfg.Admin && (cfg.AuthProvider == nil || cfg.AuthProvider.Name() == auth.ProviderAdmin)
+}
+
 // requireAdmin verifies administrative privilege, writing a 403 Forbidden response with msg if unauthorized.
 func (h *branchHandler) requireAdmin(w http.ResponseWriter, r *http.Request, msg string) bool {
-	if !h.cfg.Admin && !core.IsAdminFromContext(r.Context()) {
+	if !core.IsAdminFromContext(r.Context()) && !isLocalAdminMode(h.cfg) {
 		writeError(w, http.StatusForbidden, CodeForbidden, msg, "")
 		return false
 	}
@@ -382,7 +388,7 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req SyncBranchesRequest
-	if r.Body != nil && r.ContentLength > 0 {
+	if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
 		if !decodeJSON(w, r, &req) {
 			return
 		}

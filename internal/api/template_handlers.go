@@ -138,25 +138,35 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tmpl)
 }
 
+// loadMutableTemplate fetches template id for userID and rejects system/built-in or foreign templates.
+func (h *templateHandler) loadMutableTemplate(ctx context.Context, w http.ResponseWriter, userID, id, immutableMsg string) (*core.TemplateSet, bool) {
+	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
+	if err != nil {
+		writeDomainError(w, h.cfg.Logger, err)
+		return nil, false
+	}
+
+	if access.IsSystemTemplate(tmpl) {
+		writeError(w, http.StatusForbidden, CodeForbidden, immutableMsg, "")
+		return nil, false
+	}
+
+	if tmpl.UserID != userID {
+		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+		return nil, false
+	}
+
+	return tmpl, true
+}
+
 // updateTemplate validates updated templates and updates the template set.
 func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, h.cfg.Logger, err)
-		return
-	}
-
-	if access.IsSystemTemplate(tmpl) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
-		return
-	}
-
-	if tmpl.UserID != userID {
-		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+	tmpl, ok := h.loadMutableTemplate(ctx, w, userID, id, "built-in templates cannot be modified")
+	if !ok {
 		return
 	}
 
@@ -207,19 +217,7 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, h.cfg.Logger, err)
-		return
-	}
-
-	if access.IsSystemTemplate(tmpl) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
-		return
-	}
-
-	if tmpl.UserID != userID {
-		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+	if _, ok := h.loadMutableTemplate(ctx, w, userID, id, "built-in templates cannot be deleted"); !ok {
 		return
 	}
 
@@ -279,15 +277,15 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	txtTmpl := req.TextTemplate
 
 	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
-		if orig, err := access.Template(ctx, h.cfg.TemplateStore, userID, req.TemplateID); err == nil && orig != nil {
-			htmlTmpl = orig.HTMLTemplate
-			cssStyles = orig.CSSStyles
-			mdTmpl = orig.MarkdownTemplate
-			txtTmpl = orig.TextTemplate
-		} else if msg, ok := access.StoreUnavailableMessage(err); ok {
-			writeError(w, http.StatusInternalServerError, CodeInternalError, msg, "")
+		orig, err := access.Template(ctx, h.cfg.TemplateStore, userID, req.TemplateID)
+		if err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return
 		}
+		htmlTmpl = orig.HTMLTemplate
+		cssStyles = orig.CSSStyles
+		mdTmpl = orig.MarkdownTemplate
+		txtTmpl = orig.TextTemplate
 	}
 
 	tmpl := &core.TemplateSet{

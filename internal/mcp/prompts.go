@@ -75,13 +75,13 @@ func registerPrompts(s *serverSDK.MCPServer, cfg ServerConfig) {
 func handlePromptPrepareJobApplication(_ ServerConfig) serverSDK.PromptHandlerFunc {
 	return func(_ context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
 		jobDescription := strings.TrimSpace(req.Params.Arguments["job_description"])
-		branchName := strings.TrimSpace(req.Params.Arguments["branch_name"])
+		branchName := sanitizeInlinePromptValue(req.Params.Arguments["branch_name"])
 		if branchName == "" {
 			branchName = "Target Role Branch"
 		}
 
 		promptCtx := prepareJobApplicationPromptContext{
-			JobDescription: jobDescription,
+			JobDescription: SanitizeXMLFence(jobDescription, "target_job_description"),
 			BranchName:     branchName,
 		}
 
@@ -109,7 +109,7 @@ func handlePromptPrepareJobApplication(_ ServerConfig) serverSDK.PromptHandlerFu
 //   - PromptHandlerFunc compatible with the MCP server SDK.
 func handlePromptMockInterviewPrep(_ ServerConfig) serverSDK.PromptHandlerFunc {
 	return func(_ context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
-		branchID := strings.TrimSpace(req.Params.Arguments["branch_id"])
+		branchID := sanitizeInlinePromptValue(req.Params.Arguments["branch_id"])
 		focusArea := strings.TrimSpace(req.Params.Arguments["focus_area"])
 		if focusArea == "" {
 			focusArea = "General Behavioral and Technical Alignment"
@@ -117,7 +117,7 @@ func handlePromptMockInterviewPrep(_ ServerConfig) serverSDK.PromptHandlerFunc {
 
 		promptCtx := mockInterviewPrepPromptContext{
 			BranchID:  branchID,
-			FocusArea: focusArea,
+			FocusArea: SanitizeXMLFence(focusArea, "focus_area"),
 		}
 
 		var sb strings.Builder

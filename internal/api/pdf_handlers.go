@@ -104,12 +104,7 @@ func (h *profileHandler) readUploadedPDF(ctx context.Context, w http.ResponseWri
 	r.Body = http.MaxBytesReader(w, r.Body, maxPDFUploadBytes)
 
 	if err := r.ParseMultipartForm(maxPDFUploadBytes); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxPDFUploadBytes, "error", err)
-			}
-			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
+		if h.writeMaxPDFBytesError(ctx, w, err) {
 			return pdfUploadPayload{}, false
 		}
 		if h.cfg.Logger != nil {
@@ -144,12 +139,7 @@ func (h *profileHandler) readUploadedPDF(ctx context.Context, w http.ResponseWri
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxPDFUploadBytes, "error", err)
-			}
-			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
+		if h.writeMaxPDFBytesError(ctx, w, err) {
 			return pdfUploadPayload{}, false
 		}
 		if h.cfg.Logger != nil {
@@ -165,6 +155,19 @@ func (h *profileHandler) readUploadedPDF(ctx context.Context, w http.ResponseWri
 		provider: strings.TrimSpace(r.FormValue("provider")),
 		model:    strings.TrimSpace(r.FormValue("model")),
 	}, true
+}
+
+// writeMaxPDFBytesError reports whether err is a *http.MaxBytesError, logging and writing a 413 response if so.
+func (h *profileHandler) writeMaxPDFBytesError(ctx context.Context, w http.ResponseWriter, err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(err, &maxBytesErr) {
+		return false
+	}
+	if h.cfg.Logger != nil {
+		h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxPDFUploadBytes, "error", err)
+	}
+	writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
+	return true
 }
 
 // extractUploadedPDFText extracts plain text from uploaded PDF bytes using the configured PDFExtractor.
@@ -192,19 +195,6 @@ func (h *profileHandler) extractUploadedPDFText(ctx context.Context, w http.Resp
 	return text, true
 }
 
-// pdfQuotaLimits returns the effective daily request and monthly token quotas for PDF extraction.
-func (h *profileHandler) pdfQuotaLimits() (int, int) {
-	dailyLimit := h.cfg.DailyRequestLimit
-	if dailyLimit <= 0 {
-		dailyLimit = config.DefaultLLMDailyRequestLimit
-	}
-	monthlyLimit := h.cfg.MonthlyTokenLimit
-	if monthlyLimit <= 0 {
-		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
-	}
-	return dailyLimit, monthlyLimit
-}
-
 // pdfParseTimeout returns the configured synchronous PDF LLM extraction timeout budget.
 func (h *profileHandler) pdfParseTimeout() time.Duration {
 	if h.cfg.PDFParseTimeout > 0 {
@@ -218,7 +208,7 @@ func (h *profileHandler) pdfParseTimeout() time.Duration {
 
 // extractPDFResumeSync reserves quota and synchronously extracts structured JSON Resume data via LLM.
 func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.ResponseWriter, r *http.Request, userID string, upload pdfUploadPayload, text string) {
-	dailyLimit, monthlyLimit := h.pdfQuotaLimits()
+	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
 	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, estimatedPDFParseTokens, dailyLimit, monthlyLimit)
 	if !ok {
 		return
@@ -323,13 +313,13 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 
 	if h.cfg.PDFJobEnqueuer == nil {
 		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server", "job_id", "")
+			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server")
 		}
 		writeError(w, http.StatusServiceUnavailable, CodeServiceUnavailable, "PDF worker queue not configured on server", "")
 		return
 	}
 
-	dailyLimit, monthlyLimit := h.pdfQuotaLimits()
+	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
 	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, estimatedPDFParseTokens, dailyLimit, monthlyLimit)
 	if !ok {
 		return

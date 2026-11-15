@@ -39,7 +39,7 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 
 	defaultUserID := cfg.DefaultUserID
 	if defaultUserID == "" {
-		defaultUserID = "default"
+		defaultUserID = fallbackUserID
 	}
 
 	// Always register Admin provider

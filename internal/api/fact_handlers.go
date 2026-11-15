@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -100,22 +101,22 @@ func (h *profileHandler) resolveCanonicalFactOwner(ctx context.Context, w http.R
 	switch ownerType {
 	case core.OwnerTypeWorkExperience:
 		exp, err := h.cfg.CareerStore.Experience(ctx, userID, ownerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
+		if err != nil || exp == nil {
+			h.writeFactOwnerError(w, "work_experience", err)
 			return "", false
 		}
 		return exp.ID, true
 	case core.OwnerTypeProject:
 		proj, err := h.cfg.CareerStore.Project(ctx, userID, ownerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
+		if err != nil || proj == nil {
+			h.writeFactOwnerError(w, "project", err)
 			return "", false
 		}
 		return proj.ID, true
 	case core.OwnerTypeEducation:
 		edu, err := h.cfg.CareerStore.Education(ctx, userID, ownerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
+		if err != nil || edu == nil {
+			h.writeFactOwnerError(w, "education", err)
 			return "", false
 		}
 		return edu.ID, true
@@ -123,6 +124,15 @@ func (h *profileHandler) resolveCanonicalFactOwner(ctx context.Context, w http.R
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("invalid owner_type: %q", ownerType), "")
 		return "", false
 	}
+}
+
+// writeFactOwnerError writes a 400 response when an owner entity is missing or delegates unexpected store errors.
+func (h *profileHandler) writeFactOwnerError(w http.ResponseWriter, ownerLabel string, err error) {
+	if err == nil || errors.Is(err, core.ErrNotFound) {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for "+ownerLabel, "")
+		return
+	}
+	writeDomainError(w, h.cfg.Logger, err)
 }
 
 // getFact retrieves an individual fact by its identifier.

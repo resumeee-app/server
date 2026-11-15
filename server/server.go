@@ -29,17 +29,8 @@ import (
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
-// HTTP header limit and MCP connection bounding constants.
-const (
-	// httpMaxHeaderBytes caps incoming HTTP request header bytes at 1 MiB.
-	httpMaxHeaderBytes = 1 << 20
-
-	// defaultMCPMaxConnsPerUser caps concurrent active MCP SSE streams per tenant.
-	defaultMCPMaxConnsPerUser = 5
-
-	// defaultMCPMaxTotalConns caps total concurrent active MCP SSE streams across all tenants.
-	defaultMCPMaxTotalConns = 100
-)
+// httpMaxHeaderBytes caps incoming HTTP request header bytes at 1 MiB.
+const httpMaxHeaderBytes = 1 << 20
 
 // Compile-time checks verify default infrastructure implementations satisfy server contracts.
 var (
@@ -381,6 +372,8 @@ func (s *Server) startWorkerPool(
 
 // buildHTTPHandler mounts the REST API router and optional MCP HTTP handler onto a single root handler.
 func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Handler {
+	isLocalAdmin := deps.authProvider != nil && deps.authProvider.Name() == auth.ProviderAdmin
+
 	apiRouter := api.NewRouter(api.RouterConfig{
 		ProfileStore:         s.store.Profiles(),
 		CareerStore:          s.store.Career(),
@@ -399,7 +392,7 @@ func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Ha
 		PDFJobEnqueuer:       deps.workerPool,
 		ModelEnumerator:      deps.llmRegistry,
 		DefaultUserID:        s.cfg.DefaultUserID,
-		Admin:                s.cfg.Admin,
+		Admin:                isLocalAdmin,
 		AuthProvider:         deps.authProvider,
 		UserStore:            s.store.Users(),
 		DailyRequestLimit:    s.cfg.LLMDailyRequestLimit,
@@ -428,14 +421,14 @@ func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Ha
 		ResumeExtractor:       deps.resumeExtractor,
 		JobEnqueuer:           deps.workerPool,
 		DefaultUserID:         s.cfg.DefaultUserID,
-		Admin:                 s.cfg.Admin,
+		Admin:                 isLocalAdmin,
 		AuthProvider:          deps.authProvider,
 		Logger:                logger,
 		RESTTimeout:           s.cfg.RESTTimeout,
 		TailoringTimeout:      s.cfg.LLMTimeout,
 		SSEKeepAliveInterval:  s.cfg.MCPSSEKeepAliveInterval,
-		MaxConnectionsPerUser: defaultMCPMaxConnsPerUser,
-		MaxTotalConnections:   defaultMCPMaxTotalConns,
+		MaxConnectionsPerUser: config.DefaultMCPMaxConnsPerUser,
+		MaxTotalConnections:   config.DefaultMCPMaxTotalConns,
 	}
 	mcpSrv := resumeeeMCP.NewServer(mcpCfg)
 	return BuildRootHandler(apiRouter, resumeeeMCP.NewHTTPHandler(mcpSrv, mcpCfg))

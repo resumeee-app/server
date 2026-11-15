@@ -34,6 +34,14 @@ var tagRegexCache = &customTagRegexCache{
 	patterns: make(map[string]*regexp.Regexp),
 }
 
+// inlinePromptReplacer normalizes line breaks, double quotes, and angle brackets in single-line prompt fields.
+var inlinePromptReplacer = strings.NewReplacer("\r", " ", "\n", " ", `"`, `'`, "<", "&lt;", ">", "&gt;")
+
+// sanitizeInlinePromptValue neutralizes line breaks, quotes, and XML tags in single-line prompt arguments.
+func sanitizeInlinePromptValue(value string) string {
+	return strings.TrimSpace(inlinePromptReplacer.Replace(value))
+}
+
 // customTagRegexCache caches compiled regular expressions for non-reserved XML boundary tags safely across goroutines.
 type customTagRegexCache struct {
 	mu       sync.RWMutex

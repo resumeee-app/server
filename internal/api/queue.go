@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 )
@@ -13,7 +14,7 @@ type ChannelQueue[T any] struct {
 // NewChannelQueue constructs a ChannelQueue with the specified buffer capacity.
 func NewChannelQueue[T any](capacity int) *ChannelQueue[T] {
 	if capacity <= 0 {
-		capacity = 100
+		capacity = config.DefaultWorkerQueueSize
 	}
 	return &ChannelQueue[T]{
 		ch: make(chan T, capacity),

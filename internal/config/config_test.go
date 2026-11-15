@@ -353,6 +353,18 @@ func TestNewLogger(t *testing.T) {
 			t.Errorf("expected output for warning message")
 		}
 	})
+
+	t.Run("nil config falls back to default config without panicking", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := config.NewLogger(nil, &buf)
+		if logger == nil {
+			t.Fatal("expected non-nil logger for nil config")
+		}
+		logger.Info("nil config log check")
+		if !strings.Contains(buf.String(), "nil config log check") {
+			t.Errorf("expected log message in output buffer, got: %q", buf.String())
+		}
+	})
 }
 
 func TestLoad(t *testing.T) {
