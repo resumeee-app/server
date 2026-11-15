@@ -9,6 +9,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -59,12 +60,7 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		case "custom":
 			all, lErr := cfg.CareerStore.ListSkills(ctx, userID)
 			if lErr == nil {
-				skills = make([]core.Skill, 0, len(all))
-				for _, s := range all {
-					if !s.IsGlobal && s.UserID == userID {
-						skills = append(skills, s)
-					}
-				}
+				skills = access.FilterCustomSkills(all, userID)
 			}
 			err = lErr
 		default:

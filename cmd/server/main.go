@@ -9,11 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
@@ -145,15 +143,14 @@ func toServerConfig(cfg *config.Config) *server.Config {
 		LLMDebugDir:                cfg.LLMDebugDir,
 		RESTTimeout:                cfg.RESTTimeout,
 		LLMTimeout:                 cfg.LLMTimeout,
+		PDFParseTimeout:            cfg.PDFParseTimeout,
+		RenderPreviewTimeout:       cfg.RenderPreviewTimeout,
+		HTTPReadHeaderTimeout:      cfg.HTTPReadHeaderTimeout,
+		HTTPReadTimeout:            cfg.HTTPReadTimeout,
+		HTTPMinWriteTimeout:        cfg.HTTPMinWriteTimeout,
+		HTTPWriteTimeoutBuffer:     cfg.HTTPWriteTimeoutBuffer,
+		HTTPIdleTimeout:            cfg.HTTPIdleTimeout,
+		HTTPShutdownTimeout:        cfg.HTTPShutdownTimeout,
+		MCPSSEKeepAliveInterval:    cfg.MCPSSEKeepAliveInterval,
 	}
-}
-
-// buildRootHandler unifies the API router and optional MCP handler into a single http.Handler.
-func buildRootHandler(apiRouter http.Handler, mcpHandler ...http.Handler) http.Handler {
-	return server.BuildRootHandler(apiRouter, mcpHandler...)
-}
-
-// buildServer configures an *http.Server with defense-in-depth timeouts and header limits.
-func buildServer(addr string, handler http.Handler, writeTimeout time.Duration) *http.Server {
-	return server.BuildHTTPServer(addr, handler, writeTimeout)
 }

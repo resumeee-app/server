@@ -39,7 +39,7 @@ func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 
 	projs, err := h.cfg.CareerStore.ListProjects(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if projs == nil {
@@ -66,7 +66,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 
 	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
+		skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 
 	proj := core.Project{
@@ -84,7 +84,7 @@ func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.CareerStore.CreateProject(ctx, &proj); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *profileHandler) getProject(w http.ResponseWriter, r *http.Request) {
 
 	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 
 	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
 	applyProjectUpdates(proj, req)
 
 	if err := h.cfg.CareerStore.UpdateProject(ctx, proj); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -155,7 +155,7 @@ func applyProjectUpdates(proj *core.Project, req UpdateProjectRequest) {
 		proj.Metadata = req.Metadata
 	}
 	if req.SkillIDs != nil {
-		proj.Skills = parseSkillsInput(req.SkillIDs)
+		proj.Skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 }
 
@@ -166,7 +166,7 @@ func (h *profileHandler) deleteProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteProject(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

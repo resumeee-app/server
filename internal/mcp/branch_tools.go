@@ -10,7 +10,9 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 // tailorResumePayload serializes the asynchronous tailoring initiation response returned by tailor_resume.
@@ -144,9 +146,9 @@ func handleRenderResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		templateSetID := resolveRenderTemplateID(args, branch, ver)
-		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID)
+		tmpl, err := access.Template(ctx, cfg.TemplateStore, userID, templateSetID)
 		if err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return mcpSDK.NewToolResultError(msg), nil
 			}
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
@@ -238,7 +240,7 @@ func renderBranchOutput(ctx context.Context, cfg ServerConfig, userID string, tm
 		output = extractFormatOutput(outputFormat, ver.HTMLOutput, ver.MarkdownOutput, ver.PlainTextOutput)
 	}
 	if outputFormat == core.OutputFormatHTML {
-		output = stripScriptTags(output)
+		output = renderer.StripScriptTags(output)
 	}
 	return output
 }
@@ -284,8 +286,8 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if templateSetID == "" {
 			templateSetID = defaultTemplateSetID
 		}
-		if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+		if _, err := access.Template(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return mcpSDK.NewToolResultError(msg), nil
 			}
 			return mcpSDK.NewToolResultError(fmt.Sprintf("template set %q not found or access denied", templateSetID)), nil
@@ -293,7 +295,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 
 		fencedRequirements := targetRequirements
 		if strings.TrimSpace(targetRequirements) != "" {
-			fencedRequirements = sanitizeXMLFence(targetRequirements, "target_job_description")
+			fencedRequirements = SanitizeXMLFence(targetRequirements, "target_job_description")
 		}
 
 		branch := &core.Branch{
@@ -330,8 +332,8 @@ func validateBranchPresetAccess(ctx context.Context, cfg ServerConfig, userID, s
 	if strategyID == "" {
 		return nil, ""
 	}
-	if _, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, strategyID); err != nil {
-		if msg, ok := unavailableErrorMessage(err); ok {
+	if _, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, strategyID); err != nil {
+		if msg, ok := access.StoreUnavailableMessage(err); ok {
 			return nil, msg
 		}
 		return nil, fmt.Sprintf("tailoring strategy %q not found or access denied", strategyID)
@@ -395,7 +397,7 @@ func applyBranchTextUpdates(branch *core.Branch, args map[string]any) {
 	if reqs, ok := args["target_requirements"].(string); ok {
 		reqs = strings.TrimSpace(reqs)
 		if reqs != "" {
-			branch.TargetRequirements = sanitizeXMLFence(reqs, "target_job_description")
+			branch.TargetRequirements = SanitizeXMLFence(reqs, "target_job_description")
 		} else {
 			branch.TargetRequirements = ""
 		}
@@ -403,7 +405,7 @@ func applyBranchTextUpdates(branch *core.Branch, args map[string]any) {
 	if dirs, ok := args["custom_directives"].(string); ok {
 		dirs = strings.TrimSpace(dirs)
 		if dirs != "" {
-			fenced := sanitizeXMLFence(dirs, "custom_instructions")
+			fenced := SanitizeXMLFence(dirs, "custom_instructions")
 			branch.CustomDirectives = fenced
 			branch.BranchInstructions = fenced
 		} else {
@@ -432,8 +434,8 @@ func applyBranchReferenceUpdates(ctx context.Context, cfg ServerConfig, userID s
 	if tmplID, ok := args["template_set_id"].(string); ok {
 		tmplID = strings.TrimSpace(tmplID)
 		if tmplID != "" {
-			if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, tmplID); err != nil {
-				if msg, ok := unavailableErrorMessage(err); ok {
+			if _, err := access.Template(ctx, cfg.TemplateStore, userID, tmplID); err != nil {
+				if msg, ok := access.StoreUnavailableMessage(err); ok {
 					return msg
 				}
 				return fmt.Sprintf("template set %q not found or access denied", tmplID)
@@ -496,9 +498,9 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		// Apply XML boundary fencing to untrusted client inputs before persisting and queuing tailoring.
-		branch.TargetRequirements = sanitizeXMLFence(jobDescription, "target_job_description")
+		branch.TargetRequirements = SanitizeXMLFence(jobDescription, "target_job_description")
 		if customInstructions != "" {
-			branch.CustomDirectives = sanitizeXMLFence(customInstructions, "custom_instructions")
+			branch.CustomDirectives = SanitizeXMLFence(customInstructions, "custom_instructions")
 			branch.BranchInstructions = branch.CustomDirectives
 		}
 
@@ -558,7 +560,7 @@ func handleRunGapAnalysis(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("branch with ID %q not found or access denied", targetBranchID)), nil
 		}
 
-		branch.TargetRequirements = sanitizeXMLFence(jobDescription, "target_job_description")
+		branch.TargetRequirements = SanitizeXMLFence(jobDescription, "target_job_description")
 		_ = cfg.BranchStore.UpdateBranch(ctx, branch)
 
 		report, err := cfg.BranchService.AnalyzeGaps(ctx, userID, targetBranchID)

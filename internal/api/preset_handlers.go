@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -53,24 +54,12 @@ type UpdatePresetRequest struct {
 	Language           *string `json:"language,omitempty"`
 }
 
-// validateReasoningLevel verifies that the given reasoning effort level is empty or
-// matches one of the accepted enum values ("none", "low", "medium", "high").
-func validateReasoningLevel(level string) error {
-	return core.ValidateReasoningLevel(level)
-}
-
-// validateModelOverride verifies that the specified model override and optional provider override
-// correspond to an available LLM model option registered in the enumerator catalog.
-func validateModelOverride(enumerator core.ModelEnumerator, providerOverride, modelOverride string) error {
-	return core.ValidateModelOverride(enumerator, providerOverride, modelOverride)
-}
-
 // validateTemplateAccess verifies that the target template exists and is accessible by the user.
 func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID string, userID string) error {
 	if templateID == "" {
 		return nil
 	}
-	_, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, templateID)
+	_, err := access.Template(ctx, h.cfg.TemplateStore, userID, templateID)
 	return err
 }
 
@@ -81,7 +70,7 @@ func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 
 	presets, err := h.cfg.PresetStore.ListPresets(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if presets == nil {
@@ -147,7 +136,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.PresetStore.CreatePreset(ctx, &preset); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -162,7 +151,7 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -177,11 +166,11 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
-	if preset.IsBuiltIn() {
+	if access.IsSystemPreset(preset) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be modified", "")
 		return
 	}
@@ -234,7 +223,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.PresetStore.UpdatePreset(ctx, preset); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -249,17 +238,17 @@ func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
-	if preset.IsBuiltIn() {
+	if access.IsSystemPreset(preset) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in presets cannot be deleted", "")
 		return
 	}
 
 	if err := h.cfg.PresetStore.DeletePreset(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

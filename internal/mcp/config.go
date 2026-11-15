@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/renderer"
 	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/worker"
@@ -24,9 +24,9 @@ const userIDContextKey contextKey = "mcp_user_id"
 // parameters required by the MCP server subsystem across both stdio and SSE HTTP transports.
 type ServerConfig struct {
 	// ProfileService provides main career profile snapshot retrieval and mutation operations.
-	ProfileService *profile.Service
+	ProfileService ProfileService
 	// BranchService coordinates targeted resume branch lifecycles, version generation, and gap analysis.
-	BranchService *branch.Service
+	BranchService BranchService
 	// TemplateRenderer handles multi-format (HTML, Markdown, PlainText) resume rendering.
 	TemplateRenderer renderer.TemplateRenderer
 	// ProfileStore provides persistence access for base profiles and career snapshots.
@@ -51,14 +51,14 @@ type ServerConfig struct {
 	Admin bool
 	// AuthProvider authenticates incoming requests across transports.
 	AuthProvider auth.Provider
-	// TokenVerifier validates bearer tokens in multi-tenant mode.
-	TokenVerifier core.TokenVerifier
 	// Logger provides structured diagnostic logging across MCP tool invocations and transports.
 	Logger *slog.Logger
 	// RESTTimeout specifies the maximum execution deadline for synchronous database and rendering operations.
 	RESTTimeout time.Duration
 	// TailoringTimeout specifies the execution deadline for asynchronous LLM resume tailoring jobs.
 	TailoringTimeout time.Duration
+	// SSEKeepAliveInterval controls how often MCP SSE streams emit keep-alive heartbeats.
+	SSEKeepAliveInterval time.Duration
 	// MaxConnectionsPerUser defines the concurrent active SSE connection limit per individual tenant.
 	MaxConnectionsPerUser int
 	// MaxTotalConnections defines the global concurrent active SSE connection limit across all tenants.
@@ -105,13 +105,16 @@ func (c *ServerConfig) setDefaults() {
 		c.Logger = slog.Default()
 	}
 	if c.DefaultUserID == "" {
-		c.DefaultUserID = "default"
+		c.DefaultUserID = config.DefaultUserID
 	}
 	if c.RESTTimeout <= 0 {
-		c.RESTTimeout = 30 * time.Second
+		c.RESTTimeout = config.DefaultRESTTimeout
 	}
 	if c.TailoringTimeout <= 0 {
-		c.TailoringTimeout = 10 * time.Minute
+		c.TailoringTimeout = config.DefaultLLMTimeout
+	}
+	if c.SSEKeepAliveInterval <= 0 {
+		c.SSEKeepAliveInterval = config.DefaultMCPSSEKeepAliveInterval
 	}
 	if c.MaxConnectionsPerUser <= 0 {
 		c.MaxConnectionsPerUser = 5

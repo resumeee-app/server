@@ -9,6 +9,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -98,7 +99,7 @@ func handleGetPreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		preset, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
 		if err != nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
@@ -126,8 +127,8 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		desc, _ := args["description"].(string)
 		templateSetID := optionalTrimmedString(args, "template_set_id", "suggested_theme_id")
 		if templateSetID != "" {
-			if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
-				if msg, ok := unavailableErrorMessage(err); ok {
+			if _, err := access.Template(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
+				if msg, ok := access.StoreUnavailableMessage(err); ok {
 					return mcpSDK.NewToolResultError(msg), nil
 				}
 				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
@@ -180,12 +181,12 @@ func handleUpdatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("id is required"), nil
 		}
 
-		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		preset, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
 		if err != nil {
 			return mcpSDK.NewToolResultError(fmt.Sprintf("preset with ID %q not found or access denied", presetID)), nil
 		}
 
-		if preset.IsBuiltIn() || strings.HasPrefix(preset.ID, "builtin-") || preset.UserID == core.SystemUserID {
+		if access.IsSystemPreset(preset) {
 			return mcpSDK.NewToolResultError("built-in presets cannot be modified (immutable)"), nil
 		}
 
@@ -214,8 +215,8 @@ func applyPresetUpdates(ctx context.Context, cfg ServerConfig, userID string, pr
 		preset.SystemInstructions = strings.TrimSpace(sys)
 	}
 	if rawTemplateID := optionalTrimmedString(args, "template_set_id", "suggested_theme_id"); rawTemplateID != "" {
-		if _, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, rawTemplateID); err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+		if _, err := access.Template(ctx, cfg.TemplateStore, userID, rawTemplateID); err != nil {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return msg
 			}
 			return fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)

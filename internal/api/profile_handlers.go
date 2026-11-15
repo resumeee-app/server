@@ -95,11 +95,6 @@ type UpdateProfileRequest struct {
 	Metadata           map[string]any    `json:"metadata"`
 }
 
-// parseSkillsInput converts raw skill identifier/name strings from user payloads into core.Skill instances.
-func parseSkillsInput(skillIDs []string) []core.Skill {
-	return core.ParseSkillsInput(skillIDs)
-}
-
 // resolveEntityShortID returns the trimmed client shortID or generates a prefixed one when blank.
 func resolveEntityShortID(raw, prefix string) string {
 	shortID := strings.TrimSpace(raw)
@@ -152,7 +147,7 @@ func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 
 	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -172,7 +167,7 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
 		if !errors.Is(err, core.ErrNotFound) {
-			writeDomainError(w, err)
+			writeDomainError(w, h.cfg.Logger, err)
 			return
 		}
 		prof = &core.Profile{
@@ -185,13 +180,13 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	applyProfileUpdates(prof, req)
 
 	if err := h.cfg.ProfileStore.UpsertProfile(ctx, prof); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	updated, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -236,7 +231,7 @@ func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) 
 
 	snap, err := h.cfg.ProfileStore.Snapshot(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -257,10 +252,20 @@ func (h *profileHandler) handleJSONResumeImport(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, emptyMsg, "")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
 	defer func() { _ = r.Body.Close() }()
 
 	payload, err := io.ReadAll(r.Body)
-	if err != nil || len(payload) == 0 {
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body exceeds maximum allowed size", maxBytesErr.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, unreadableMsg, "")
+		return
+	}
+	if len(payload) == 0 {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, unreadableMsg, "")
 		return
 	}
@@ -281,7 +286,7 @@ func (h *profileHandler) handleJSONResumeImport(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid JSON Resume payload", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -300,7 +305,7 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 
 	resume, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, versionIDPtr)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

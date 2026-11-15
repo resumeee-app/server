@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,12 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 )
-
-// DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
-const DefaultPDFParseTimeout = 10 * time.Minute
 
 // PDF ingestion size, token quota, and retry defaults.
 const (
@@ -26,12 +25,6 @@ const (
 
 	// estimatedPDFParseTokens is the token reservation estimate used prior to LLM extraction.
 	estimatedPDFParseTokens = 1000
-
-	// defaultPDFDailyRequestLimit is the fallback daily request quota when RouterConfig leaves DailyRequestLimit unset.
-	defaultPDFDailyRequestLimit = 50
-
-	// defaultPDFMonthlyTokenLimit is the fallback monthly token quota when RouterConfig leaves MonthlyTokenLimit unset.
-	defaultPDFMonthlyTokenLimit = 1000000
 
 	// defaultPDFQuotaRetryAfterSeconds is returned in Retry-After headers when quota is exhausted.
 	defaultPDFQuotaRetryAfterSeconds = 3600
@@ -63,7 +56,7 @@ func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter
 			writeQuotaError(w, defaultPDFQuotaRetryAfterSeconds, "llm operation quota exceeded", qErr.Error())
 			return "", false
 		}
-		writeDomainError(w, qErr)
+		writeDomainError(w, h.cfg.Logger, qErr)
 		return "", false
 	}
 	return rec.ID, true
@@ -193,7 +186,7 @@ func (h *profileHandler) extractUploadedPDFText(ctx context.Context, w http.Resp
 		if h.cfg.Logger != nil {
 			h.cfg.Logger.ErrorContext(ctx, "unexpected pdf extraction error", "filename", filename, "error", err)
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return "", false
 	}
 	return text, true
@@ -203,13 +196,24 @@ func (h *profileHandler) extractUploadedPDFText(ctx context.Context, w http.Resp
 func (h *profileHandler) pdfQuotaLimits() (int, int) {
 	dailyLimit := h.cfg.DailyRequestLimit
 	if dailyLimit <= 0 {
-		dailyLimit = defaultPDFDailyRequestLimit
+		dailyLimit = config.DefaultLLMDailyRequestLimit
 	}
 	monthlyLimit := h.cfg.MonthlyTokenLimit
 	if monthlyLimit <= 0 {
-		monthlyLimit = defaultPDFMonthlyTokenLimit
+		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
 	}
 	return dailyLimit, monthlyLimit
+}
+
+// pdfParseTimeout returns the configured synchronous PDF LLM extraction timeout budget.
+func (h *profileHandler) pdfParseTimeout() time.Duration {
+	if h.cfg.PDFParseTimeout > 0 {
+		return h.cfg.PDFParseTimeout
+	}
+	if h.cfg.LLMTimeout > 0 {
+		return h.cfg.LLMTimeout
+	}
+	return config.DefaultPDFParseTimeout
 }
 
 // extractPDFResumeSync reserves quota and synchronously extracts structured JSON Resume data via LLM.
@@ -220,11 +224,8 @@ func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.Respon
 		return
 	}
 
-	llmTimeout := h.cfg.LLMTimeout
-	if llmTimeout <= 0 {
-		llmTimeout = DefaultPDFParseTimeout
-	}
-	syncCtx, cancel := context.WithTimeout(r.Context(), llmTimeout)
+	parseTimeout := h.pdfParseTimeout()
+	syncCtx, cancel := context.WithTimeout(r.Context(), parseTimeout)
 	defer cancel()
 
 	extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, upload.provider, upload.model, estimatedPDFParseTokens)
@@ -232,7 +233,7 @@ func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.Respon
 		if h.cfg.QuotaStore != nil && reservationID != "" {
 			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, err.Error())
 		}
-		h.writePDFExtractionError(ctx, w, upload.provider, err)
+		h.writePDFExtractionError(ctx, w, upload.provider, parseTimeout, err)
 		return
 	}
 
@@ -247,7 +248,7 @@ func (h *profileHandler) extractPDFResumeSync(ctx context.Context, w http.Respon
 }
 
 // writePDFExtractionError maps synchronous LLM resume extraction failures onto HTTP status codes and structured logs.
-func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.ResponseWriter, provider string, err error) {
+func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.ResponseWriter, provider string, parseTimeout time.Duration, err error) {
 	logLevel := slog.LevelError
 	var (
 		logMsg     string
@@ -287,7 +288,7 @@ func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.Res
 		logMsg = "upstream LLM request timed out"
 		statusCode = http.StatusGatewayTimeout
 		errorCode = CodeUpstreamError
-		respMsg = "upstream LLM parsing timed out after 10 minutes"
+		respMsg = fmt.Sprintf("upstream LLM parsing timed out after %s", parseTimeout)
 	case errors.Is(err, core.ErrValidation):
 		logLevel = slog.LevelWarn
 		logMsg = "failed to extract structured resume validation error"
@@ -310,7 +311,7 @@ func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.Res
 		writeError(w, statusCode, errorCode, respMsg, "")
 		return
 	}
-	writeDomainError(w, err)
+	writeDomainError(w, h.cfg.Logger, err)
 }
 
 // enqueueAsyncPDFJob persists a pending PDF parse job and enqueues it onto the background PDF worker pool.
@@ -351,7 +352,7 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 		if h.cfg.QuotaStore != nil && reservationID != "" {
 			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -372,7 +373,7 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -408,7 +409,7 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

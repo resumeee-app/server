@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -100,8 +101,18 @@ func writeError(w http.ResponseWriter, status int, code, message, details string
 	})
 }
 
-// writeDomainError translates known domain errors into uniform JSON error envelopes.
-func writeDomainError(w http.ResponseWriter, err error) {
+// writeAccessError translates store-unavailability or forbidden errors into 500 or 403 JSON responses.
+func writeAccessError(w http.ResponseWriter, err error, forbiddenMsg string) {
+	if msg, ok := access.StoreUnavailableMessage(err); ok {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, msg, "")
+		return
+	}
+	writeError(w, http.StatusForbidden, CodeForbidden, forbiddenMsg, "")
+}
+
+// writeDomainError translates known domain errors into uniform JSON error envelopes,
+// logging unexpected internal failures through logger (or slog.Default() when nil).
+func writeDomainError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	if err == nil {
 		return
 	}
@@ -155,29 +166,44 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		return
 	}
 
-	slog.Default().Error("unhandled internal api error", "error", err)
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("unhandled internal api error", "error", err)
 	writeError(w, http.StatusInternalServerError, CodeInternalError, "an internal error occurred while processing the request", "")
+}
+
+// writeFormattedTextOutput writes html, markdown/md, or text/txt rendered outputs and returns true when handled.
+func writeFormattedTextOutput(w http.ResponseWriter, format string, out core.RenderOutput) bool {
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.HTML))
+		return true
+	case "markdown", "md":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.Markdown))
+		return true
+	case "text", "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.PlainText))
+		return true
+	default:
+		return false
+	}
 }
 
 // writeRenderOutput writes rendered resume output according to the format query parameter (html, markdown, text, or default json).
 func writeRenderOutput(w http.ResponseWriter, r *http.Request, out core.RenderOutput) {
 	format := strings.ToLower(r.URL.Query().Get("format"))
-	switch format {
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.HTML))
-	case "markdown", "md":
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.Markdown))
-	case "text", "txt":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.PlainText))
-	default:
-		writeJSON(w, http.StatusOK, out)
+	if writeFormattedTextOutput(w, format, out) {
+		return
 	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // writeQuotaError writes a structured 429 Too Many Requests response with guaranteed Retry-After header.

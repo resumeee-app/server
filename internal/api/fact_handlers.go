@@ -41,7 +41,7 @@ func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
 
 	facts, err := h.cfg.CareerStore.ListFactsByOwner(ctx, userID, ownerType, ownerID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if facts == nil {
@@ -73,7 +73,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 
 	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
+		skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 
 	fact := core.Fact{
@@ -88,7 +88,7 @@ func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.CareerStore.CreateFact(ctx, &fact); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *profileHandler) getFact(w http.ResponseWriter, r *http.Request) {
 
 	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 
 	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -166,11 +166,11 @@ func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
 		fact.Impact = *req.Impact
 	}
 	if req.SkillIDs != nil {
-		fact.Skills = parseSkillsInput(req.SkillIDs)
+		fact.Skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 
 	if err := h.cfg.CareerStore.UpdateFact(ctx, fact); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -184,7 +184,7 @@ func (h *profileHandler) deleteFact(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteFact(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

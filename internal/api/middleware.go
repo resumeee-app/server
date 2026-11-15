@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -132,11 +133,11 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 }
 
 // TimeoutMiddleware sets a request context cancellation deadline bounded by the given duration.
-// If timeout <= 0, it falls back to a 20-second default boundary.
+// If timeout <= 0, it falls back to config.DefaultRESTTimeout.
 // For /profile/pdf/parse (normalized), handler-level timeout budgeting is used to accommodate LLM extraction.
 func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	if timeout <= 0 {
-		timeout = 20 * time.Second
+		timeout = config.DefaultRESTTimeout
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,12 +166,7 @@ type TenantProvisioner interface {
 
 // AuthMiddlewareWithProvider inspects incoming requests using the provided auth.Provider
 // and injects the authenticated tenant ID and admin privileges into context.
-func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
-	var provisioner TenantProvisioner
-	if len(provisioners) > 0 {
-		provisioner = provisioners[0]
-	}
-
+func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvisioner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodOptions || isPublicRoute(r.URL.Path) {
@@ -197,8 +193,8 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 				return
 			}
 
-			ctx := WithUserID(r.Context(), tokenInfo.UID)
-			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
+			ctx := core.WithUserID(r.Context(), tokenInfo.UID)
+			ctx = core.WithIsAdmin(ctx, tokenInfo.IsAdmin())
 			if provisioner != nil && provider.Name() != auth.ProviderAdmin {
 				role := core.UserRoleUser
 				if tokenInfo.IsAdmin() {
@@ -223,7 +219,7 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 // AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
 //
 // Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
-func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
+func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioner TenantProvisioner) func(http.Handler) http.Handler {
 	if defaultUserID == "" {
 		defaultUserID = "default"
 	}
@@ -235,5 +231,5 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifie
 		provider = auth.NewTokenVerifierProvider("verifier", verifier)
 	}
 
-	return AuthMiddlewareWithProvider(provider, provisioners...)
+	return AuthMiddlewareWithProvider(provider, provisioner)
 }

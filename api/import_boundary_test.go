@@ -16,6 +16,7 @@ var nonStoragePackageDirs = []string{
 	"api",
 	"auth",
 	"server",
+	"internal/access",
 	"internal/api",
 	"internal/mcp",
 	"internal/config",
@@ -25,6 +26,7 @@ var nonStoragePackageDirs = []string{
 var nonFirebasePackageDirs = []string{
 	"api",
 	"server",
+	"internal/access",
 	"internal/api",
 	"internal/mcp",
 	"internal/config",
@@ -35,6 +37,7 @@ var nonMCPPackageDirs = []string{
 	"api",
 	"auth",
 	"server",
+	"internal/access",
 	"internal/api",
 	"internal/config",
 }

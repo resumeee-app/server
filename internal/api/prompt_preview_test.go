@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
@@ -225,7 +226,7 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 		Renderer:      renderer.New(),
 		DefaultUserID: defaultUserID,
 		Admin:         false,
-		TokenVerifier: verifier,
+		AuthProvider:  auth.NewTokenVerifierProvider("test", verifier),
 	})
 	server := httptest.NewServer(router)
 	defer server.Close()

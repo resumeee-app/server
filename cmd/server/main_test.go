@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/resumeee-api/server"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
@@ -161,7 +162,7 @@ func TestBuildRootHandler(t *testing.T) {
 		_, _ = w.Write([]byte(`{"full_name":"Test User"}`))
 	})
 
-	handler := buildRootHandler(apiMux)
+	handler := server.BuildRootHandler(apiMux, nil)
 
 	tests := []struct {
 		name         string
@@ -378,25 +379,30 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 
 func TestBuildServer_Configuration(t *testing.T) {
 	mux := http.NewServeMux()
-	server := buildServer(":8080", mux, 11*time.Minute)
+	srv := server.BuildHTTPServer(":8080", mux, server.HTTPTimeouts{
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      11 * time.Minute,
+		IdleTimeout:       120 * time.Second,
+	})
 
-	if server.Addr != ":8080" {
-		t.Errorf("expected Addr :8080, got %s", server.Addr)
+	if srv.Addr != ":8080" {
+		t.Errorf("expected Addr :8080, got %s", srv.Addr)
 	}
-	if server.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("expected ReadHeaderTimeout 5s, got %v", server.ReadHeaderTimeout)
+	if srv.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("expected ReadHeaderTimeout 5s, got %v", srv.ReadHeaderTimeout)
 	}
-	if server.ReadTimeout != 60*time.Second {
-		t.Errorf("expected ReadTimeout 60s, got %v", server.ReadTimeout)
+	if srv.ReadTimeout != 60*time.Second {
+		t.Errorf("expected ReadTimeout 60s, got %v", srv.ReadTimeout)
 	}
-	if server.WriteTimeout != 11*time.Minute {
-		t.Errorf("expected WriteTimeout 11m, got %v", server.WriteTimeout)
+	if srv.WriteTimeout != 11*time.Minute {
+		t.Errorf("expected WriteTimeout 11m, got %v", srv.WriteTimeout)
 	}
-	if server.IdleTimeout != 120*time.Second {
-		t.Errorf("expected IdleTimeout 120s, got %v", server.IdleTimeout)
+	if srv.IdleTimeout != 120*time.Second {
+		t.Errorf("expected IdleTimeout 120s, got %v", srv.IdleTimeout)
 	}
-	if server.MaxHeaderBytes != 1<<20 {
-		t.Errorf("expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
+	if srv.MaxHeaderBytes != 1<<20 {
+		t.Errorf("expected MaxHeaderBytes 1MB, got %d", srv.MaxHeaderBytes)
 	}
 }
 
@@ -410,7 +416,7 @@ func TestBuildRootHandler_MCPRouting(t *testing.T) {
 		_, _ = w.Write([]byte("mcp"))
 	})
 
-	root := buildRootHandler(apiMux, mcpMux)
+	root := server.BuildRootHandler(apiMux, mcpMux)
 
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/mcp/sse", nil)

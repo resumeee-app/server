@@ -5,88 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 // defaultTemplateSetID is the fallback built-in template set identifier when none is specified.
 const defaultTemplateSetID = "builtin-standard-clean"
-
-// reservedPromptTagRegex matches reserved prompt XML boundary tags that must be escaped inside untrusted input.
-var reservedPromptTagRegex = regexp.MustCompile(`(?i)</?\s*(?:rules_hierarchy|tier_1_global_rules|tier_2_strategy_instructions|tier_3_branch_directives|main_career_profile|target_job_description|custom_instructions|resume_document|extracted_candidate_data|ats_extraction_rules|ats_matching_rules|response_schema)\b[^>]*>`)
-
-// StripScriptTags removes HTML script tags (both paired blocks and standalone unclosed tags) from rendered HTML.
-//
-// Parameters:
-//   - html: Raw HTML string potentially containing script elements.
-//
-// Returns:
-//   - Sanitized HTML string with all script tags stripped.
-func StripScriptTags(html string) string {
-	return stripScriptTags(html)
-}
-
-// stripScriptTags delegates script tag sanitization to the renderer package.
-func stripScriptTags(html string) string {
-	return renderer.StripScriptTags(html)
-}
-
-// SanitizeXMLFence neutralizes closing and parent prompt tags and wraps content in XML boundary tags.
-//
-// Parameters:
-//   - content: Untrusted client or external job description text.
-//   - tagName: Target enclosing XML tag name (e.g., 'target_job_description').
-//
-// Returns:
-//   - Escaped content enclosed within opening and closing XML tags.
-func SanitizeXMLFence(content, tagName string) string {
-	return sanitizeXMLFence(content, tagName)
-}
-
-// sanitizeXMLFence escapes conflicting prompt boundary XML tags in untrusted inputs.
-func sanitizeXMLFence(content, tagName string) string {
-	safe := escapeXMLMatches(content, reservedPromptTagRegex)
-	if !isReservedPromptTag(tagName) {
-		customTagRegex := regexp.MustCompile(fmt.Sprintf(`(?i)</?\s*%s\b[^>]*>`, regexp.QuoteMeta(tagName)))
-		safe = escapeXMLMatches(safe, customTagRegex)
-	}
-	return fmt.Sprintf("<%s>\n%s\n</%s>", tagName, strings.TrimSpace(safe), tagName)
-}
-
-// escapeXMLMatches replaces angle brackets on all regex tag matches with XML entities.
-func escapeXMLMatches(content string, tagRegex *regexp.Regexp) string {
-	return tagRegex.ReplaceAllStringFunc(content, func(m string) string {
-		escaped := strings.ReplaceAll(m, "<", "&lt;")
-		return strings.ReplaceAll(escaped, ">", "&gt;")
-	})
-}
-
-// isReservedPromptTag reports whether tagName is already covered by reservedPromptTagRegex.
-func isReservedPromptTag(tagName string) bool {
-	switch strings.ToLower(tagName) {
-	case "rules_hierarchy",
-		"tier_1_global_rules",
-		"tier_2_strategy_instructions",
-		"tier_3_branch_directives",
-		"main_career_profile",
-		"target_job_description",
-		"custom_instructions",
-		"resume_document",
-		"extracted_candidate_data",
-		"ats_extraction_rules",
-		"ats_matching_rules",
-		"response_schema":
-		return true
-	default:
-		return false
-	}
-}
 
 // parseArguments extracts and casts the tool arguments map from a CallToolRequest.
 func parseArguments(req mcpSDK.CallToolRequest) map[string]any {

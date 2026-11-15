@@ -71,7 +71,12 @@ func EnvLookup(envMap map[string]string) func(string) string {
 // LoadFromDir parses configuration, reading from a local .env file in dir if present,
 // and resolving process environment variables as authoritative overrides.
 func LoadFromDir(dir string) (*Config, error) {
-	envPath := filepath.Join(dir, ".env")
+	return LoadFromFile(filepath.Join(dir, ".env"))
+}
+
+// LoadFromFile parses configuration, reading from envPath if present,
+// and resolving process environment variables as authoritative overrides.
+func LoadFromFile(envPath string) (*Config, error) {
 	envMap, err := LoadDotEnv(envPath)
 	if err != nil {
 		return nil, err

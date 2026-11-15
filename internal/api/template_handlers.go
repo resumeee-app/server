@@ -5,10 +5,11 @@ import (
 	"errors"
 	htmltemplate "html/template"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/renderer"
 )
@@ -70,7 +71,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 
 	templates, err := h.cfg.TemplateStore.ListTemplates(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if templates == nil {
@@ -115,7 +116,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -130,7 +131,7 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -145,11 +146,11 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
+	if access.IsSystemTemplate(tmpl) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
 		return
 	}
@@ -193,7 +194,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -208,11 +209,11 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
+	if access.IsSystemTemplate(tmpl) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
 		return
 	}
@@ -223,21 +224,11 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.cfg.TemplateStore.DeleteTemplate(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// buildRenderContext constructs a comprehensive execution context for template rendering.
-func (h *templateHandler) buildRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
-	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
-}
-
-// renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
-func (h *templateHandler) renderAllFormats(tmpl *core.TemplateSet, renderCtx *renderer.RenderContext) (core.RenderOutput, error) {
-	return renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 }
 
 // previewTemplate renders a saved template set on the server across HTML, Markdown, and text formats.
@@ -248,18 +239,18 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
-	renderCtx := h.buildRenderContext(ctx, userID, tmpl)
-	out, err := h.renderAllFormats(tmpl, renderCtx)
+	renderCtx := renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
+	out, err := renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 	if err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -268,7 +259,13 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 
 // renderPreview renders draft Go template definitions on the server for real-time editor previews.
 func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	previewTimeout := h.cfg.RenderPreviewTimeout
+	if previewTimeout <= 0 {
+		previewTimeout = config.DefaultRenderPreviewTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	defer cancel()
+
 	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req RenderTemplatePreviewRequest
@@ -282,15 +279,14 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	txtTmpl := req.TextTemplate
 
 	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
-		if h.cfg.TemplateStore == nil {
-			writeError(w, http.StatusInternalServerError, CodeInternalError, "template store unavailable", "")
-			return
-		}
-		if orig, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateID); err == nil && orig != nil && (orig.UserID == userID || orig.IsBuiltIn || orig.UserID == core.SystemUserID) {
+		if orig, err := access.Template(ctx, h.cfg.TemplateStore, userID, req.TemplateID); err == nil && orig != nil {
 			htmlTmpl = orig.HTMLTemplate
 			cssStyles = orig.CSSStyles
 			mdTmpl = orig.MarkdownTemplate
 			txtTmpl = orig.TextTemplate
+		} else if msg, ok := access.StoreUnavailableMessage(err); ok {
+			writeError(w, http.StatusInternalServerError, CodeInternalError, msg, "")
+			return
 		}
 	}
 
@@ -301,18 +297,18 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 		TextTemplate:     txtTmpl,
 	}
 
-	renderCtx := h.buildRenderContext(ctx, userID, tmpl)
+	renderCtx := renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
 	if cssStyles != "" {
 		renderCtx.CSSStyles = htmltemplate.CSS(cssStyles)
 	}
 
-	out, err := h.renderAllFormats(tmpl, renderCtx)
+	out, err := renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 	if err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

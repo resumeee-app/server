@@ -12,6 +12,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -78,14 +79,8 @@ type sessionIDHolder struct {
 	id string
 }
 
-// MCP HTTP transport limits and keep-alive defaults.
-const (
-	// maxMCPRequestBodyBytes caps incoming MCP HTTP POST and SSE request bodies at 10 MiB.
-	maxMCPRequestBodyBytes = 10 << 20
-
-	// sseKeepAliveInterval controls how often the SSE server emits keep-alive comments.
-	sseKeepAliveInterval = 15 * time.Second
-)
+// maxMCPRequestBodyBytes caps incoming MCP HTTP POST and SSE request bodies at 10 MiB.
+const maxMCPRequestBodyBytes = 10 << 20
 
 // withSessionHolder attaches holder to ctx so the SSE session generator can record the generated ID.
 func withSessionHolder(ctx context.Context, holder *sessionIDHolder) context.Context {
@@ -137,27 +132,27 @@ func (sr *sessionRegistry) delete(sessionID string) {
 }
 
 // authenticateRequest extracts and verifies the client identity from the request's Authorization header,
-// falling back to development headers or the configured default user ID.
+// falling back to development headers or the configured default user ID in local admin mode.
 //
 // Parameters:
 //   - r: Incoming *http.Request.
-//   - cfg: ServerConfig providing AuthTokens dictionary and DefaultUserID fallback.
+//   - cfg: ServerConfig providing AuthTokens dictionary, AuthProvider, and DefaultUserID fallback.
 //
 // Returns:
-//   - Authenticated user ID string, or an error if authorization fails.
-func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
+//   - Authenticated *core.TokenInfo, or an error if authorization fails.
+func authenticateRequest(r *http.Request, cfg ServerConfig) (*core.TokenInfo, error) {
 	bearerToken, _ := auth.ExtractBearerToken(r)
 
 	// 1. If explicit token dictionary configured, require valid Bearer token
 	if len(cfg.AuthTokens) > 0 {
 		if bearerToken == "" {
-			return "", errors.New("missing or malformed Authorization Bearer header")
+			return nil, errors.New("missing or malformed Authorization Bearer header")
 		}
 		userID, ok := cfg.AuthTokens[bearerToken]
 		if !ok || userID == "" {
-			return "", errors.New("invalid authorization token")
+			return nil, errors.New("invalid authorization token")
 		}
-		return userID, nil
+		return &core.TokenInfo{UID: userID}, nil
 	}
 
 	// 2. AuthProvider if configured
@@ -165,38 +160,36 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 		tokenInfo, err := cfg.AuthProvider.AuthenticateRequest(r)
 		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
 			if cfg.AuthProvider.Name() != auth.ProviderAdmin && err != nil && (errors.Is(err, auth.ErrMissingBearerHeader) || errors.Is(err, auth.ErrEmptyBearerToken)) {
-				return "", errors.New("missing or malformed Authorization Bearer header")
+				return nil, errors.New("missing or malformed Authorization Bearer header")
 			}
-			return "", core.ErrUnauthorized
+			return nil, core.ErrUnauthorized
 		}
-		return tokenInfo.UID, nil
+		return tokenInfo, nil
 	}
 
-	// 3. Multi-tenant mode (not Admin): strictly require token verification
+	// 3. Multi-tenant mode (not Admin): strictly require an AuthProvider or AuthTokens
 	if !cfg.Admin {
-		if cfg.TokenVerifier == nil {
-			return "", core.ErrUnauthorized
-		}
-		if bearerToken == "" {
-			return "", errors.New("missing or malformed Authorization Bearer header")
-		}
-		tokenInfo, err := cfg.TokenVerifier.VerifyIDToken(r.Context(), bearerToken)
-		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
-			return "", core.ErrUnauthorized
-		}
-		return tokenInfo.UID, nil
+		return nil, core.ErrUnauthorized
 	}
 
 	// 4. Local Admin Mode (cfg.Admin is true): X-User-ID -> DefaultUserID
-	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
-		return uid, nil
+	uid := strings.TrimSpace(r.Header.Get("X-User-ID"))
+	if uid == "" {
+		uid = cfg.DefaultUserID
 	}
-
-	if cfg.DefaultUserID != "" {
-		return cfg.DefaultUserID, nil
+	if uid == "" {
+		uid = config.DefaultUserID
 	}
+	return &core.TokenInfo{
+		UID:   uid,
+		Admin: true,
+		Role:  string(core.UserRoleAdmin),
+	}, nil
+}
 
-	return "default", nil
+// isAdminBypass reports whether HTTP requests bypass external token verification in local admin mode.
+func isAdminBypass(cfg ServerConfig) bool {
+	return len(cfg.AuthTokens) == 0 && ((cfg.AuthProvider != nil && cfg.AuthProvider.Name() == auth.ProviderAdmin) || (cfg.AuthProvider == nil && cfg.Admin))
 }
 
 // NewHTTPHandler constructs an http.Handler wrapping the MCP SSEServer with authentication,
@@ -216,15 +209,19 @@ func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handl
 	mcpSSE := newSSEServer(mcpServer, cfg, sessions)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, err := authenticateRequest(r, cfg)
+		tokenInfo, err := authenticateRequest(r, cfg)
 		if err != nil {
 			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
-		if pErr := cfg.EnsureTenant(r.Context(), userID); pErr != nil {
-			cfg.Logger.ErrorContext(r.Context(), "failed to lazily provision tenant", "user_id", userID, "err", pErr)
+		userID := tokenInfo.UID
+		if !isAdminBypass(cfg) {
+			if pErr := cfg.EnsureTenant(r.Context(), userID); pErr != nil {
+				cfg.Logger.ErrorContext(r.Context(), "failed to lazily provision tenant", "user_id", userID, "err", pErr)
+			}
 		}
 		ctx := WithUserID(r.Context(), userID)
+		ctx = core.WithIsAdmin(ctx, tokenInfo.IsAdmin())
 		r = r.WithContext(ctx)
 
 		if r.Method == http.MethodGet && (r.URL.Path == "/mcp/sse" || strings.HasSuffix(r.URL.Path, "/sse")) {
@@ -250,7 +247,7 @@ func newSSEServer(mcpServer *serverSDK.MCPServer, cfg ServerConfig, sessions *se
 		serverSDK.WithMessageEndpoint("/messages"),
 		serverSDK.WithSSEMaxRequestBodyBytes(maxMCPRequestBodyBytes),
 		serverSDK.WithKeepAlive(true),
-		serverSDK.WithKeepAliveInterval(sseKeepAliveInterval),
+		serverSDK.WithKeepAliveInterval(cfg.SSEKeepAliveInterval),
 		serverSDK.WithSessionIDGenerator(func(_ context.Context, r *http.Request) (string, error) {
 			sessionID := uuid.New().String()
 			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
@@ -262,7 +259,8 @@ func newSSEServer(mcpServer *serverSDK.MCPServer, cfg ServerConfig, sessions *se
 		}),
 		serverSDK.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
-			return WithUserID(ctx, userID)
+			ctx = WithUserID(ctx, userID)
+			return core.WithIsAdmin(ctx, core.IsAdminFromContext(r.Context()))
 		}),
 	)
 }

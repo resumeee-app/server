@@ -39,7 +39,7 @@ func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
 
 	edus, err := h.cfg.CareerStore.ListEducation(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if edus == nil {
@@ -79,7 +79,7 @@ func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.cfg.CareerStore.CreateEducation(ctx, &edu); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *profileHandler) getEducation(w http.ResponseWriter, r *http.Request) {
 
 	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 
 	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.cfg.CareerStore.UpdateEducation(ctx, edu); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -156,7 +156,7 @@ func (h *profileHandler) deleteEducation(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteEducation(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

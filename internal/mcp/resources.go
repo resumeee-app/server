@@ -9,6 +9,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -227,9 +228,9 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 			return nil, errors.New("invalid template URI: missing template ID")
 		}
 
-		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateID)
+		tmpl, err := access.Template(ctx, cfg.TemplateStore, userID, templateID)
 		if err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return nil, errors.New(msg)
 			}
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
@@ -261,9 +262,9 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid preset URI: missing preset ID")
 		}
 
-		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		preset, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
 		if err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return nil, errors.New(msg)
 			}
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)

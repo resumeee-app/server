@@ -379,6 +379,22 @@ func TestServer_OptionValidation(t *testing.T) {
 		opt  Option
 	}{
 		{"nil Config", WithConfig(nil)},
+		{"WithConfig invalid port", WithConfig(func() *Config { c := DefaultConfig(); c.Port = 0; return c }())},
+		{"WithConfig empty DefaultUserID", WithConfig(func() *Config { c := DefaultConfig(); c.DefaultUserID = "  "; return c }())},
+		{"WithConfig zero daily quota", WithConfig(func() *Config { c := DefaultConfig(); c.LLMDailyRequestLimit = 0; return c }())},
+		{"WithConfig zero worker concurrency", WithConfig(func() *Config { c := DefaultConfig(); c.WorkerConcurrency = 0; return c }())},
+		{"WithConfig zero RESTTimeout", WithConfig(func() *Config { c := DefaultConfig(); c.RESTTimeout = 0; return c }())},
+		{"WithConfig zero HTTPReadHeaderTimeout", WithConfig(func() *Config { c := DefaultConfig(); c.HTTPReadHeaderTimeout = 0; return c }())},
+		{"WithConfig zero MCPSSEKeepAliveInterval", WithConfig(func() *Config { c := DefaultConfig(); c.MCPSSEKeepAliveInterval = 0; return c }())},
+		{"invalid WithHandlerTimeouts pdfParse", WithHandlerTimeouts(0, time.Second, time.Second)},
+		{"invalid WithHandlerTimeouts renderPreview", WithHandlerTimeouts(time.Second, 0, time.Second)},
+		{"invalid WithHandlerTimeouts keepAlive", WithHandlerTimeouts(time.Second, time.Second, 0)},
+		{"invalid WithHTTPTimeouts readHeader", WithHTTPTimeouts(0, time.Second, time.Second, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts read", WithHTTPTimeouts(time.Second, 0, time.Second, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts minWrite", WithHTTPTimeouts(time.Second, time.Second, 0, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts writeBuffer", WithHTTPTimeouts(time.Second, time.Second, time.Second, 0, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts idle", WithHTTPTimeouts(time.Second, time.Second, time.Second, time.Second, 0, time.Second)},
+		{"invalid WithHTTPTimeouts shutdown", WithHTTPTimeouts(time.Second, time.Second, time.Second, time.Second, time.Second, 0)},
 		{"invalid port 0", WithPort(0)},
 		{"invalid port 70000", WithPort(70000)},
 		{"empty DefaultUserID", WithDefaultUserID("")},
@@ -466,5 +482,37 @@ func TestServer_WithRequestAuthProvider(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for shutdown")
+	}
+}
+
+func TestServer_TimeoutAndConfigOptions(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DefaultUserID = "  custom-user  "
+	cfg.Environment = " "
+	cfg.LLMDebugDir = ""
+
+	srv, err := New(
+		WithConfig(cfg),
+		WithHandlerTimeouts(12*time.Minute, 15*time.Second, 20*time.Second),
+		WithHTTPTimeouts(6*time.Second, 70*time.Second, 40*time.Second, 15*time.Second, 150*time.Second, 12*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("expected valid config and timeout options, got error: %v", err)
+	}
+	if srv.cfg.DefaultUserID != "custom-user" {
+		t.Errorf("expected trimmed DefaultUserID 'custom-user', got %q", srv.cfg.DefaultUserID)
+	}
+	if srv.cfg.Environment != DefaultConfig().Environment {
+		t.Errorf("expected normalized Environment %q, got %q", DefaultConfig().Environment, srv.cfg.Environment)
+	}
+	if srv.cfg.LLMDebugDir != DefaultConfig().LLMDebugDir {
+		t.Errorf("expected normalized LLMDebugDir %q, got %q", DefaultConfig().LLMDebugDir, srv.cfg.LLMDebugDir)
+	}
+	if srv.cfg.PDFParseTimeout != 12*time.Minute || srv.cfg.RenderPreviewTimeout != 15*time.Second || srv.cfg.MCPSSEKeepAliveInterval != 20*time.Second {
+		t.Errorf("unexpected handler timeouts: %+v", srv.cfg)
+	}
+	if srv.cfg.HTTPReadHeaderTimeout != 6*time.Second || srv.cfg.HTTPReadTimeout != 70*time.Second || srv.cfg.HTTPMinWriteTimeout != 40*time.Second ||
+		srv.cfg.HTTPWriteTimeoutBuffer != 15*time.Second || srv.cfg.HTTPIdleTimeout != 150*time.Second || srv.cfg.HTTPShutdownTimeout != 12*time.Second {
+		t.Errorf("unexpected HTTP timeouts: %+v", srv.cfg)
 	}
 }

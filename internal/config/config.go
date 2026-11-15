@@ -38,6 +38,15 @@ type Config struct {
 	LLMDebugDir                string
 	RESTTimeout                time.Duration
 	LLMTimeout                 time.Duration
+	PDFParseTimeout            time.Duration
+	RenderPreviewTimeout       time.Duration
+	HTTPReadHeaderTimeout      time.Duration
+	HTTPReadTimeout            time.Duration
+	HTTPMinWriteTimeout        time.Duration
+	HTTPWriteTimeoutBuffer     time.Duration
+	HTTPIdleTimeout            time.Duration
+	HTTPShutdownTimeout        time.Duration
+	MCPSSEKeepAliveInterval    time.Duration
 }
 
 // Default configuration constants applied when environment variables or flags are unset.
@@ -78,8 +87,35 @@ const (
 	// DefaultRESTTimeout bounds synchronous HTTP/MCP handler execution durations.
 	DefaultRESTTimeout = 20 * time.Second
 
-	// DefaultLLMTimeout bounds asynchronous LLM tailoring and PDF extraction durations.
+	// DefaultLLMTimeout bounds asynchronous LLM tailoring durations.
 	DefaultLLMTimeout = 10 * time.Minute
+
+	// DefaultPDFParseTimeout bounds upstream LLM PDF resume extraction durations.
+	DefaultPDFParseTimeout = 10 * time.Minute
+
+	// DefaultRenderPreviewTimeout bounds synchronous resume/template preview rendering durations.
+	DefaultRenderPreviewTimeout = 10 * time.Second
+
+	// DefaultHTTPReadHeaderTimeout bounds HTTP request header reading durations.
+	DefaultHTTPReadHeaderTimeout = 5 * time.Second
+
+	// DefaultHTTPReadTimeout bounds full HTTP request reading durations.
+	DefaultHTTPReadTimeout = 60 * time.Second
+
+	// DefaultHTTPMinWriteTimeout enforces a minimum HTTP response write timeout floor.
+	DefaultHTTPMinWriteTimeout = 30 * time.Second
+
+	// DefaultHTTPWriteTimeoutBuffer adds headroom above RESTTimeout for HTTP response writes.
+	DefaultHTTPWriteTimeoutBuffer = 10 * time.Second
+
+	// DefaultHTTPIdleTimeout bounds keep-alive idle durations between HTTP requests.
+	DefaultHTTPIdleTimeout = 120 * time.Second
+
+	// DefaultHTTPShutdownTimeout bounds graceful HTTP server shutdown draining.
+	DefaultHTTPShutdownTimeout = 10 * time.Second
+
+	// DefaultMCPSSEKeepAliveInterval sets the heartbeat cadence on MCP SSE streams.
+	DefaultMCPSSEKeepAliveInterval = 15 * time.Second
 )
 
 // Load reads configuration from process environment variables and a local .env file if present.
@@ -131,6 +167,15 @@ func defaultConfig() *Config {
 		LLMDebugDir:                DefaultLLMDebugDir,
 		RESTTimeout:                DefaultRESTTimeout,
 		LLMTimeout:                 DefaultLLMTimeout,
+		PDFParseTimeout:            DefaultPDFParseTimeout,
+		RenderPreviewTimeout:       DefaultRenderPreviewTimeout,
+		HTTPReadHeaderTimeout:      DefaultHTTPReadHeaderTimeout,
+		HTTPReadTimeout:            DefaultHTTPReadTimeout,
+		HTTPMinWriteTimeout:        DefaultHTTPMinWriteTimeout,
+		HTTPWriteTimeoutBuffer:     DefaultHTTPWriteTimeoutBuffer,
+		HTTPIdleTimeout:            DefaultHTTPIdleTimeout,
+		HTTPShutdownTimeout:        DefaultHTTPShutdownTimeout,
+		MCPSSEKeepAliveInterval:    DefaultMCPSSEKeepAliveInterval,
 	}
 }
 
@@ -199,12 +244,30 @@ func loadQuotaAndWorkerConfig(cfg *Config, lookup func(string) string) error {
 	return nil
 }
 
-// loadTimeoutConfig parses synchronous REST and asynchronous LLM timeout durations.
+// loadTimeoutConfig parses synchronous REST, asynchronous LLM, HTTP server, and MCP timeout durations.
 func loadTimeoutConfig(cfg *Config, lookup func(string) string) error {
-	if err := parsePositiveDuration(lookup, &cfg.RESTTimeout, "REST_TIMEOUT", "HTTP_TIMEOUT", "RESUMEEE_CLIENT_TIMEOUT"); err != nil {
-		return err
+	specs := []struct {
+		target *time.Duration
+		keys   []string
+	}{
+		{target: &cfg.RESTTimeout, keys: []string{"REST_TIMEOUT", "HTTP_TIMEOUT", "RESUMEEE_CLIENT_TIMEOUT"}},
+		{target: &cfg.LLMTimeout, keys: []string{"LLM_TIMEOUT", "LLM_CALL_TIMEOUT"}},
+		{target: &cfg.PDFParseTimeout, keys: []string{"PDF_PARSE_TIMEOUT"}},
+		{target: &cfg.RenderPreviewTimeout, keys: []string{"RENDER_PREVIEW_TIMEOUT"}},
+		{target: &cfg.HTTPReadHeaderTimeout, keys: []string{"HTTP_READ_HEADER_TIMEOUT"}},
+		{target: &cfg.HTTPReadTimeout, keys: []string{"HTTP_READ_TIMEOUT"}},
+		{target: &cfg.HTTPMinWriteTimeout, keys: []string{"HTTP_MIN_WRITE_TIMEOUT"}},
+		{target: &cfg.HTTPWriteTimeoutBuffer, keys: []string{"HTTP_WRITE_TIMEOUT_BUFFER"}},
+		{target: &cfg.HTTPIdleTimeout, keys: []string{"HTTP_IDLE_TIMEOUT"}},
+		{target: &cfg.HTTPShutdownTimeout, keys: []string{"HTTP_SHUTDOWN_TIMEOUT"}},
+		{target: &cfg.MCPSSEKeepAliveInterval, keys: []string{"MCP_SSE_KEEPALIVE_INTERVAL"}},
 	}
-	return parsePositiveDuration(lookup, &cfg.LLMTimeout, "LLM_TIMEOUT", "LLM_CALL_TIMEOUT")
+	for _, spec := range specs {
+		if err := parsePositiveDuration(lookup, spec.target, spec.keys...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // loadLLMConfig reads LLM provider API credentials and debug prompt capture settings.

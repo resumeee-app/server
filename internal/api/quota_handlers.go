@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -36,18 +37,18 @@ func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 
 	dailyLimit := h.cfg.DailyRequestLimit
 	if dailyLimit <= 0 {
-		dailyLimit = 50
+		dailyLimit = config.DefaultLLMDailyRequestLimit
 	}
 	monthlyLimit := h.cfg.MonthlyTokenLimit
 	if monthlyLimit <= 0 {
-		monthlyLimit = 1000000
+		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
 	}
 
 	var quota *core.TenantQuota
 	if h.cfg.QuotaStore != nil {
 		q, err := h.cfg.QuotaStore.Quota(ctx, userID)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
-			writeDomainError(w, err)
+			writeDomainError(w, h.cfg.Logger, err)
 			return
 		}
 		quota = q

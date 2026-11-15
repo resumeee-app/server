@@ -53,7 +53,7 @@ func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request)
 
 	exps, err := h.cfg.CareerStore.ListExperiences(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if exps == nil {
@@ -80,7 +80,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 
 	var skills []core.Skill
 	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
+		skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 
 	exp := core.WorkExperience{
@@ -109,7 +109,7 @@ func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.cfg.CareerStore.CreateExperience(ctx, &exp); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (h *profileHandler) getExperience(w http.ResponseWriter, r *http.Request) {
 
 	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -140,7 +140,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 
 	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -152,7 +152,7 @@ func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request
 	applyExperienceUpdates(exp, req)
 
 	if err := h.cfg.CareerStore.UpdateExperience(ctx, exp); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -211,7 +211,7 @@ func applyExperienceUpdates(exp *core.WorkExperience, req UpdateExperienceReques
 		exp.Metadata = req.Metadata
 	}
 	if req.SkillIDs != nil {
-		exp.Skills = parseSkillsInput(req.SkillIDs)
+		exp.Skills = core.ParseSkillsInput(req.SkillIDs)
 	}
 }
 
@@ -222,7 +222,7 @@ func (h *profileHandler) deleteExperience(w http.ResponseWriter, r *http.Request
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteExperience(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

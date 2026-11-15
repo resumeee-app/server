@@ -35,7 +35,7 @@ func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Reque
 
 	certs, err := h.cfg.CareerStore.ListCertifications(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if certs == nil {
@@ -73,7 +73,7 @@ func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.cfg.CareerStore.CreateCertification(ctx, &cert); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -88,7 +88,7 @@ func (h *profileHandler) getCertification(w http.ResponseWriter, r *http.Request
 
 	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -104,7 +104,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 
 	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -132,7 +132,7 @@ func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.cfg.CareerStore.UpdateCertification(ctx, cert); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *profileHandler) deleteCertification(w http.ResponseWriter, r *http.Requ
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteCertification(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

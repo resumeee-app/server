@@ -1105,3 +1105,191 @@ func TestConfig_NewLLMRegistry(t *testing.T) {
 		}
 	})
 }
+
+func TestTimeoutDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := config.LoadFrom(func(string) string { return "" })
+		if err != nil {
+			t.Fatalf("LoadFrom defaults: %v", err)
+		}
+		checks := []struct {
+			name string
+			got  time.Duration
+			want time.Duration
+		}{
+			{"RESTTimeout", cfg.RESTTimeout, config.DefaultRESTTimeout},
+			{"LLMTimeout", cfg.LLMTimeout, config.DefaultLLMTimeout},
+			{"PDFParseTimeout", cfg.PDFParseTimeout, config.DefaultPDFParseTimeout},
+			{"RenderPreviewTimeout", cfg.RenderPreviewTimeout, config.DefaultRenderPreviewTimeout},
+			{"HTTPReadHeaderTimeout", cfg.HTTPReadHeaderTimeout, config.DefaultHTTPReadHeaderTimeout},
+			{"HTTPReadTimeout", cfg.HTTPReadTimeout, config.DefaultHTTPReadTimeout},
+			{"HTTPMinWriteTimeout", cfg.HTTPMinWriteTimeout, config.DefaultHTTPMinWriteTimeout},
+			{"HTTPWriteTimeoutBuffer", cfg.HTTPWriteTimeoutBuffer, config.DefaultHTTPWriteTimeoutBuffer},
+			{"HTTPIdleTimeout", cfg.HTTPIdleTimeout, config.DefaultHTTPIdleTimeout},
+			{"HTTPShutdownTimeout", cfg.HTTPShutdownTimeout, config.DefaultHTTPShutdownTimeout},
+			{"MCPSSEKeepAliveInterval", cfg.MCPSSEKeepAliveInterval, config.DefaultMCPSSEKeepAliveInterval},
+		}
+		for _, tc := range checks {
+			if tc.got != tc.want {
+				t.Errorf("%s: got %v, want %v", tc.name, tc.got, tc.want)
+			}
+		}
+	})
+
+	t.Run("overrides", func(t *testing.T) {
+		env := map[string]string{
+			"REST_TIMEOUT":               "25s",
+			"LLM_TIMEOUT":                "12m",
+			"PDF_PARSE_TIMEOUT":          "8m",
+			"RENDER_PREVIEW_TIMEOUT":     "15s",
+			"HTTP_READ_HEADER_TIMEOUT":   "7s",
+			"HTTP_READ_TIMEOUT":          "45s",
+			"HTTP_MIN_WRITE_TIMEOUT":     "35s",
+			"HTTP_WRITE_TIMEOUT_BUFFER":  "12s",
+			"HTTP_IDLE_TIMEOUT":          "90s",
+			"HTTP_SHUTDOWN_TIMEOUT":      "18s",
+			"MCP_SSE_KEEPALIVE_INTERVAL": "22s",
+		}
+		cfg, err := config.LoadFrom(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("LoadFrom overrides: %v", err)
+		}
+		checks := []struct {
+			name string
+			got  time.Duration
+			want time.Duration
+		}{
+			{"RESTTimeout", cfg.RESTTimeout, 25 * time.Second},
+			{"LLMTimeout", cfg.LLMTimeout, 12 * time.Minute},
+			{"PDFParseTimeout", cfg.PDFParseTimeout, 8 * time.Minute},
+			{"RenderPreviewTimeout", cfg.RenderPreviewTimeout, 15 * time.Second},
+			{"HTTPReadHeaderTimeout", cfg.HTTPReadHeaderTimeout, 7 * time.Second},
+			{"HTTPReadTimeout", cfg.HTTPReadTimeout, 45 * time.Second},
+			{"HTTPMinWriteTimeout", cfg.HTTPMinWriteTimeout, 35 * time.Second},
+			{"HTTPWriteTimeoutBuffer", cfg.HTTPWriteTimeoutBuffer, 12 * time.Second},
+			{"HTTPIdleTimeout", cfg.HTTPIdleTimeout, 90 * time.Second},
+			{"HTTPShutdownTimeout", cfg.HTTPShutdownTimeout, 18 * time.Second},
+			{"MCPSSEKeepAliveInterval", cfg.MCPSSEKeepAliveInterval, 22 * time.Second},
+		}
+		for _, tc := range checks {
+			if tc.got != tc.want {
+				t.Errorf("%s: got %v, want %v", tc.name, tc.got, tc.want)
+			}
+		}
+	})
+}
+
+func TestInvalidAllTimeoutValues(t *testing.T) {
+	keys := []string{
+		"REST_TIMEOUT",
+		"LLM_TIMEOUT",
+		"PDF_PARSE_TIMEOUT",
+		"RENDER_PREVIEW_TIMEOUT",
+		"HTTP_READ_HEADER_TIMEOUT",
+		"HTTP_READ_TIMEOUT",
+		"HTTP_MIN_WRITE_TIMEOUT",
+		"HTTP_WRITE_TIMEOUT_BUFFER",
+		"HTTP_IDLE_TIMEOUT",
+		"HTTP_SHUTDOWN_TIMEOUT",
+		"MCP_SSE_KEEPALIVE_INTERVAL",
+	}
+	badValues := []string{"0s", "-5s", "not-a-duration"}
+	for _, key := range keys {
+		for _, val := range badValues {
+			t.Run(key+"="+val, func(t *testing.T) {
+				_, err := config.LoadFrom(func(k string) string {
+					if k == key {
+						return val
+					}
+					return ""
+				})
+				if err == nil {
+					t.Errorf("expected error for %s=%q, got nil", key, val)
+				}
+			})
+		}
+	}
+}
+
+func TestEnvExampleMatchesDefaultTimeouts(t *testing.T) {
+	envPath := filepath.Join("..", "..", ".env.example")
+	raw, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	envMap, err := config.LoadDotEnv(envPath)
+	if err != nil {
+		t.Fatalf("LoadDotEnv(.env.example): %v", err)
+	}
+	requiredKeys := []string{
+		"REST_TIMEOUT",
+		"LLM_TIMEOUT",
+		"PDF_PARSE_TIMEOUT",
+		"RENDER_PREVIEW_TIMEOUT",
+		"HTTP_READ_HEADER_TIMEOUT",
+		"HTTP_READ_TIMEOUT",
+		"HTTP_MIN_WRITE_TIMEOUT",
+		"HTTP_WRITE_TIMEOUT_BUFFER",
+		"HTTP_IDLE_TIMEOUT",
+		"HTTP_SHUTDOWN_TIMEOUT",
+		"MCP_SSE_KEEPALIVE_INTERVAL",
+	}
+	for _, k := range requiredKeys {
+		if _, ok := envMap[k]; !ok {
+			t.Errorf(".env.example missing active timeout key %s", k)
+		}
+		if !strings.Contains(string(raw), k+"=") {
+			t.Errorf(".env.example missing literal %s= assignment", k)
+		}
+	}
+
+	cfg, err := config.LoadFrom(func(k string) string { return envMap[k] })
+	if err != nil {
+		t.Fatalf("LoadFrom(.env.example): %v", err)
+	}
+	defaults, err := config.LoadFrom(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("LoadFrom defaults: %v", err)
+	}
+
+	pairs := []struct {
+		name string
+		env  time.Duration
+		def  time.Duration
+	}{
+		{"RESTTimeout", cfg.RESTTimeout, defaults.RESTTimeout},
+		{"LLMTimeout", cfg.LLMTimeout, defaults.LLMTimeout},
+		{"PDFParseTimeout", cfg.PDFParseTimeout, defaults.PDFParseTimeout},
+		{"RenderPreviewTimeout", cfg.RenderPreviewTimeout, defaults.RenderPreviewTimeout},
+		{"HTTPReadHeaderTimeout", cfg.HTTPReadHeaderTimeout, defaults.HTTPReadHeaderTimeout},
+		{"HTTPReadTimeout", cfg.HTTPReadTimeout, defaults.HTTPReadTimeout},
+		{"HTTPMinWriteTimeout", cfg.HTTPMinWriteTimeout, defaults.HTTPMinWriteTimeout},
+		{"HTTPWriteTimeoutBuffer", cfg.HTTPWriteTimeoutBuffer, defaults.HTTPWriteTimeoutBuffer},
+		{"HTTPIdleTimeout", cfg.HTTPIdleTimeout, defaults.HTTPIdleTimeout},
+		{"HTTPShutdownTimeout", cfg.HTTPShutdownTimeout, defaults.HTTPShutdownTimeout},
+		{"MCPSSEKeepAliveInterval", cfg.MCPSSEKeepAliveInterval, defaults.MCPSSEKeepAliveInterval},
+	}
+	for _, p := range pairs {
+		if p.env != p.def {
+			t.Errorf(".env.example %s = %v, default = %v", p.name, p.env, p.def)
+		}
+	}
+}
+
+func TestLoadFromFile(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	if err := os.WriteFile(envPath, []byte("PORT=9091\nPDF_PARSE_TIMEOUT=4m\n"), 0o600); err != nil {
+		t.Fatalf("write temp env file: %v", err)
+	}
+	cfg, err := config.LoadFromFile(envPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if cfg.Port != 9091 {
+		t.Errorf("Port = %d, want 9091", cfg.Port)
+	}
+	if cfg.PDFParseTimeout != 4*time.Minute {
+		t.Errorf("PDFParseTimeout = %v, want 4m", cfg.PDFParseTimeout)
+	}
+}

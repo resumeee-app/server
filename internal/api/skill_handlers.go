@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -49,12 +50,7 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 		var allSkills []core.Skill
 		allSkills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
 		if err == nil {
-			skills = make([]core.Skill, 0, len(allSkills))
-			for _, s := range allSkills {
-				if !s.IsGlobal && s.UserID == userID {
-					skills = append(skills, s)
-				}
-			}
+			skills = access.FilterCustomSkills(allSkills, userID)
 		}
 	default:
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid skill type filter: must be one of all, global, custom", "")
@@ -62,7 +58,7 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if skills == nil {
@@ -100,7 +96,7 @@ func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.CareerStore.CreateSkill(ctx, &skill); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -115,7 +111,7 @@ func (h *profileHandler) getSkill(w http.ResponseWriter, r *http.Request) {
 
 	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -131,7 +127,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 
 	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -161,7 +157,7 @@ func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.cfg.CareerStore.UpdateSkill(ctx, skill); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -175,7 +171,7 @@ func (h *profileHandler) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := h.cfg.CareerStore.DeleteSkill(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

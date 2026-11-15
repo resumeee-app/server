@@ -5,14 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/renderer"
 )
-
-// defaultRenderPreviewTimeout bounds ephemeral template rendering requests in renderPreview.
-const defaultRenderPreviewTimeout = 10 * time.Second
 
 // RenderPreviewRequest specifies the target template set for an ephemeral branch version preview render.
 type RenderPreviewRequest struct {
@@ -65,7 +63,7 @@ func (h *branchHandler) generateBranchVersion(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -92,13 +90,13 @@ func (h *branchHandler) listBranchVersions(w http.ResponseWriter, r *http.Reques
 	id := r.PathValue("id")
 
 	if _, err := h.svc.Branch(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	versions, err := h.svc.ListVersions(ctx, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -112,22 +110,17 @@ func (h *branchHandler) getBranchVersion(w http.ResponseWriter, r *http.Request)
 	v := r.PathValue("v")
 
 	if _, err := h.svc.Branch(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	ver, err := h.svc.Version(ctx, id, v)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, ver)
-}
-
-// resolveVersionOutputs resolves or dynamically re-renders resume outputs incorporating targetTemplateID.
-func (h *branchHandler) resolveVersionOutputs(ctx context.Context, userID string, b *core.Branch, ver *core.BranchVersion, targetTemplateID string) core.RenderOutput {
-	return renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateStore, h.cfg.ProfileStore, userID, b, ver, targetTemplateID)
 }
 
 // exportBranchVersion renders and outputs a branch version in html, markdown, text, or jsonresume format.
@@ -139,13 +132,13 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 
 	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	ver, err := h.svc.Version(ctx, branchID, v)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -155,21 +148,12 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 	}
 
 	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
-	outputs := h.resolveVersionOutputs(ctx, userID, b, ver, targetTemplateID)
+	outputs := renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateStore, h.cfg.ProfileStore, userID, b, ver, targetTemplateID)
 
+	if writeFormattedTextOutput(w, format, outputs) {
+		return
+	}
 	switch format {
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(outputs.HTML))
-	case "markdown", "md":
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(outputs.Markdown))
-	case "text", "txt":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(outputs.PlainText))
 	case "jsonresume":
 		if h.cfg.ProfileService == nil {
 			writeError(w, http.StatusInternalServerError, CodeInternalError, "profile service unavailable", "")
@@ -177,7 +161,7 @@ func (h *branchHandler) exportBranchVersion(w http.ResponseWriter, r *http.Reque
 		}
 		res, err := h.cfg.ProfileService.ExportJSONResume(ctx, userID, &ver.ID)
 		if err != nil {
-			writeDomainError(w, err)
+			writeDomainError(w, h.cfg.Logger, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
@@ -195,18 +179,18 @@ func (h *branchHandler) previewBranchVersion(w http.ResponseWriter, r *http.Requ
 
 	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	ver, err := h.svc.Version(ctx, branchID, v)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	targetTemplateID := strings.TrimSpace(r.URL.Query().Get("template_set_id"))
-	outputs := h.resolveVersionOutputs(ctx, userID, b, ver, targetTemplateID)
+	outputs := renderer.ResolveVersionOutputs(ctx, h.cfg.Renderer, h.cfg.TemplateStore, h.cfg.ProfileStore, userID, b, ver, targetTemplateID)
 
 	writeRenderOutput(w, r, outputs)
 }
@@ -238,7 +222,7 @@ func (h *branchHandler) editBranchVersion(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template rendering failed", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -257,7 +241,7 @@ func (h *branchHandler) analyzeBranchGaps(w http.ResponseWriter, r *http.Request
 
 	report, err := h.svc.AnalyzeGaps(ctx, userID, branchID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -286,7 +270,7 @@ func (h *branchHandler) simulateBranchATSScore(w http.ResponseWriter, r *http.Re
 
 	score, err := h.svc.SimulateATS(ctx, userID, branchID, &opts)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -309,7 +293,7 @@ func (h *branchHandler) getPromptPreview(w http.ResponseWriter, r *http.Request)
 
 	preview, err := h.svc.PromptPreview(ctx, userID, id, nil)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -349,7 +333,7 @@ func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
 
 	preview, err := h.svc.PromptPreview(ctx, userID, id, opts)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -359,7 +343,11 @@ func (h *branchHandler) previewPrompt(w http.ResponseWriter, r *http.Request) {
 // renderPreview provides fast, ephemeral rendering of a resume version under a requested template set.
 // It executes strictly zero LLM invocations and guarantees snapshot immutability with zero database writes.
 func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), defaultRenderPreviewTimeout)
+	previewTimeout := h.cfg.RenderPreviewTimeout
+	if previewTimeout <= 0 {
+		previewTimeout = config.DefaultRenderPreviewTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
 	defer cancel()
 
 	userID := requestUserID(r, h.cfg.DefaultUserID)
@@ -377,7 +365,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, req.TemplateSetID)
+	tmpl, err := access.Template(ctx, h.cfg.TemplateStore, userID, req.TemplateSetID)
 	if err != nil {
 		writeAccessError(w, err, "cannot access target template")
 		return
@@ -395,7 +383,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := h.cfg.Renderer.Render(ctx, tmpl, prof, ver.TailoredContent)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -414,7 +402,7 @@ func (h *branchHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 func (h *branchHandler) loadRenderableVersion(ctx context.Context, w http.ResponseWriter, userID, branchID, versionParam string) (*core.BranchVersion, bool) {
 	b, err := h.svc.Branch(ctx, userID, branchID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return nil, false
 	}
 	if b == nil || b.UserID != userID {
@@ -424,7 +412,7 @@ func (h *branchHandler) loadRenderableVersion(ctx context.Context, w http.Respon
 
 	ver, err := h.svc.Version(ctx, branchID, versionParam)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return nil, false
 	}
 	if ver == nil {

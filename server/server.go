@@ -29,28 +29,10 @@ import (
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
-// HTTP server timeout, header limit, and MCP connection bounding constants.
+// HTTP header limit and MCP connection bounding constants.
 const (
-	// httpReadHeaderTimeout bounds time spent reading request headers to mitigate slowloris attacks.
-	httpReadHeaderTimeout = 5 * time.Second
-
-	// httpReadTimeout bounds the full HTTP request read duration.
-	httpReadTimeout = 60 * time.Second
-
-	// httpMinWriteTimeout sets the floor for HTTP response write timeouts.
-	httpMinWriteTimeout = 30 * time.Second
-
-	// httpWriteTimeoutBuffer adds headroom above synchronous RESTTimeout for socket flushing.
-	httpWriteTimeoutBuffer = 10 * time.Second
-
-	// httpIdleTimeout caps keep-alive idle connection lifetimes.
-	httpIdleTimeout = 120 * time.Second
-
 	// httpMaxHeaderBytes caps incoming HTTP request header bytes at 1 MiB.
 	httpMaxHeaderBytes = 1 << 20
-
-	// httpShutdownTimeout bounds graceful HTTP server connection draining during shutdown.
-	httpShutdownTimeout = 10 * time.Second
 
 	// defaultMCPMaxConnsPerUser caps concurrent active MCP SSE streams per tenant.
 	defaultMCPMaxConnsPerUser = 5
@@ -84,6 +66,15 @@ type Config struct {
 	LLMDebugDir                string
 	RESTTimeout                time.Duration
 	LLMTimeout                 time.Duration
+	PDFParseTimeout            time.Duration
+	RenderPreviewTimeout       time.Duration
+	HTTPReadHeaderTimeout      time.Duration
+	HTTPReadTimeout            time.Duration
+	HTTPMinWriteTimeout        time.Duration
+	HTTPWriteTimeoutBuffer     time.Duration
+	HTTPIdleTimeout            time.Duration
+	HTTPShutdownTimeout        time.Duration
+	MCPSSEKeepAliveInterval    time.Duration
 }
 
 // DefaultConfig returns a Config initialized with standard Resumeee server defaults.
@@ -103,6 +94,15 @@ func DefaultConfig() *Config {
 		LLMDebugDir:                config.DefaultLLMDebugDir,
 		RESTTimeout:                config.DefaultRESTTimeout,
 		LLMTimeout:                 config.DefaultLLMTimeout,
+		PDFParseTimeout:            config.DefaultPDFParseTimeout,
+		RenderPreviewTimeout:       config.DefaultRenderPreviewTimeout,
+		HTTPReadHeaderTimeout:      config.DefaultHTTPReadHeaderTimeout,
+		HTTPReadTimeout:            config.DefaultHTTPReadTimeout,
+		HTTPMinWriteTimeout:        config.DefaultHTTPMinWriteTimeout,
+		HTTPWriteTimeoutBuffer:     config.DefaultHTTPWriteTimeoutBuffer,
+		HTTPIdleTimeout:            config.DefaultHTTPIdleTimeout,
+		HTTPShutdownTimeout:        config.DefaultHTTPShutdownTimeout,
+		MCPSSEKeepAliveInterval:    config.DefaultMCPSSEKeepAliveInterval,
 	}
 }
 
@@ -126,7 +126,24 @@ func (c *Config) toInternalConfig() *config.Config {
 		LLMDebugDir:                c.LLMDebugDir,
 		RESTTimeout:                c.RESTTimeout,
 		LLMTimeout:                 c.LLMTimeout,
+		PDFParseTimeout:            c.PDFParseTimeout,
+		RenderPreviewTimeout:       c.RenderPreviewTimeout,
+		HTTPReadHeaderTimeout:      c.HTTPReadHeaderTimeout,
+		HTTPReadTimeout:            c.HTTPReadTimeout,
+		HTTPMinWriteTimeout:        c.HTTPMinWriteTimeout,
+		HTTPWriteTimeoutBuffer:     c.HTTPWriteTimeoutBuffer,
+		HTTPIdleTimeout:            c.HTTPIdleTimeout,
+		HTTPShutdownTimeout:        c.HTTPShutdownTimeout,
+		MCPSSEKeepAliveInterval:    c.MCPSSEKeepAliveInterval,
 	}
+}
+
+// HTTPTimeouts groups socket-level read, write, and idle timeouts for BuildHTTPServer.
+type HTTPTimeouts struct {
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
 }
 
 // Server orchestrates the Resumeee HTTP REST API, MCP server, background worker pool, and domain services.
@@ -365,37 +382,37 @@ func (s *Server) startWorkerPool(
 // buildHTTPHandler mounts the REST API router and optional MCP HTTP handler onto a single root handler.
 func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Handler {
 	apiRouter := api.NewRouter(api.RouterConfig{
-		ProfileStore:      s.store.Profiles(),
-		CareerStore:       s.store.Career(),
-		PresetStore:       s.store.Presets(),
-		TemplateStore:     s.store.Templates(),
-		BranchStore:       s.store.Branches(),
-		PDFJobStore:       s.store.PDFJobs(),
-		QuotaStore:        s.store.Quotas(),
-		BranchService:     deps.branchService,
-		ProfileService:    deps.profileService,
-		PDFExtractor:      deps.pdfExtractor,
-		ResumeExtractor:   deps.resumeExtractor,
-		Renderer:          deps.templateRenderer,
-		Validator:         deps.provValidator,
-		JobEnqueuer:       deps.workerPool,
-		PDFJobEnqueuer:    deps.workerPool,
-		ModelEnumerator:   deps.llmRegistry,
-		DefaultUserID:     s.cfg.DefaultUserID,
-		Admin:             s.cfg.Admin,
-		AuthProvider:      deps.authProvider,
-		TokenVerifier:     deps.authProvider,
-		UserStore:         s.store.Users(),
-		Store:             s.store,
-		DailyRequestLimit: s.cfg.LLMDailyRequestLimit,
-		MonthlyTokenLimit: s.cfg.LLMMonthlyTokenLimit,
-		RESTTimeout:       s.cfg.RESTTimeout,
-		LLMTimeout:        s.cfg.LLMTimeout,
-		Logger:            logger,
+		ProfileStore:         s.store.Profiles(),
+		CareerStore:          s.store.Career(),
+		PresetStore:          s.store.Presets(),
+		TemplateStore:        s.store.Templates(),
+		BranchStore:          s.store.Branches(),
+		PDFJobStore:          s.store.PDFJobs(),
+		QuotaStore:           s.store.Quotas(),
+		BranchService:        deps.branchService,
+		ProfileService:       deps.profileService,
+		PDFExtractor:         deps.pdfExtractor,
+		ResumeExtractor:      deps.resumeExtractor,
+		Renderer:             deps.templateRenderer,
+		Validator:            deps.provValidator,
+		JobEnqueuer:          deps.workerPool,
+		PDFJobEnqueuer:       deps.workerPool,
+		ModelEnumerator:      deps.llmRegistry,
+		DefaultUserID:        s.cfg.DefaultUserID,
+		Admin:                s.cfg.Admin,
+		AuthProvider:         deps.authProvider,
+		UserStore:            s.store.Users(),
+		DailyRequestLimit:    s.cfg.LLMDailyRequestLimit,
+		MonthlyTokenLimit:    s.cfg.LLMMonthlyTokenLimit,
+		RESTTimeout:          s.cfg.RESTTimeout,
+		LLMTimeout:           s.cfg.LLMTimeout,
+		PDFParseTimeout:      s.cfg.PDFParseTimeout,
+		RenderPreviewTimeout: s.cfg.RenderPreviewTimeout,
+		Logger:               logger,
 	})
 
 	if !s.mcpEnabled {
-		return BuildRootHandler(apiRouter)
+		return BuildRootHandler(apiRouter, nil)
 	}
 
 	mcpCfg := resumeeeMCP.ServerConfig{
@@ -413,10 +430,10 @@ func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Ha
 		DefaultUserID:         s.cfg.DefaultUserID,
 		Admin:                 s.cfg.Admin,
 		AuthProvider:          deps.authProvider,
-		TokenVerifier:         deps.authProvider,
 		Logger:                logger,
 		RESTTimeout:           s.cfg.RESTTimeout,
 		TailoringTimeout:      s.cfg.LLMTimeout,
+		SSEKeepAliveInterval:  s.cfg.MCPSSEKeepAliveInterval,
 		MaxConnectionsPerUser: defaultMCPMaxConnsPerUser,
 		MaxTotalConnections:   defaultMCPMaxTotalConns,
 	}
@@ -426,8 +443,13 @@ func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Ha
 
 // serveHTTP runs the HTTP listener until ctx is canceled and performs graceful connection draining.
 func (s *Server) serveHTTP(ctx context.Context, rootHandler http.Handler, logger *slog.Logger) error {
-	writeTimeout := max(s.cfg.RESTTimeout+httpWriteTimeoutBuffer, httpMinWriteTimeout)
-	httpServer := BuildHTTPServer(fmt.Sprintf(":%d", s.cfg.Port), rootHandler, writeTimeout)
+	writeTimeout := max(s.cfg.RESTTimeout+s.cfg.HTTPWriteTimeoutBuffer, s.cfg.HTTPMinWriteTimeout)
+	httpServer := BuildHTTPServer(fmt.Sprintf(":%d", s.cfg.Port), rootHandler, HTTPTimeouts{
+		ReadHeaderTimeout: s.cfg.HTTPReadHeaderTimeout,
+		ReadTimeout:       s.cfg.HTTPReadTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       s.cfg.HTTPIdleTimeout,
+	})
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -445,7 +467,7 @@ func (s *Server) serveHTTP(ctx context.Context, rootHandler http.Handler, logger
 		logger.Info("shutting down resumeee server gracefully", "signal", ctx.Err())
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), s.cfg.HTTPShutdownTimeout)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -469,8 +491,9 @@ func (s *Server) resolveAuthProvider(logger *slog.Logger) (auth.Provider, error)
 		return auth.NewAdminProvider(s.cfg.DefaultUserID), nil
 	}
 
-	logger.Error("multi-tenant mode requires an injected AuthProvider (WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)")
-	return nil, errors.New("multi-tenant mode requires an injected AuthProvider (WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)")
+	const msg = "multi-tenant mode requires an injected AuthProvider (WithRequestAuthProvider / WithAuthProvider / WithTokenVerifier) or explicit WithAdminMode(true)"
+	logger.Error(msg)
+	return nil, errors.New(msg)
 }
 
 // resolveLLMRegistry returns the configured llm.Registry (or constructs a new one)
@@ -491,29 +514,41 @@ func (s *Server) resolveLLMRegistry(logger *slog.Logger) *llm.Registry {
 }
 
 // BuildRootHandler unifies the REST API router and optional MCP handler into a single root http.Handler.
-func BuildRootHandler(apiRouter http.Handler, mcpHandler ...http.Handler) http.Handler {
+func BuildRootHandler(apiRouter, mcpHandler http.Handler) http.Handler {
 	rootMux := http.NewServeMux()
 	rootMux.Handle("/api/v1/", apiRouter)
 	rootMux.Handle("GET /healthz", apiRouter)
 	rootMux.Handle("GET /health", apiRouter)
 
-	if len(mcpHandler) > 0 && mcpHandler[0] != nil {
-		rootMux.Handle("/mcp/", mcpHandler[0])
-		rootMux.Handle("/mcp", mcpHandler[0])
+	if mcpHandler != nil {
+		rootMux.Handle("/mcp/", mcpHandler)
+		rootMux.Handle("/mcp", mcpHandler)
 	}
 
 	return rootMux
 }
 
 // BuildHTTPServer configures an *http.Server with defense-in-depth read/write/idle timeouts and header bounds.
-func BuildHTTPServer(addr string, handler http.Handler, writeTimeout time.Duration) *http.Server {
+func BuildHTTPServer(addr string, handler http.Handler, timeouts HTTPTimeouts) *http.Server {
+	if timeouts.ReadHeaderTimeout <= 0 {
+		timeouts.ReadHeaderTimeout = config.DefaultHTTPReadHeaderTimeout
+	}
+	if timeouts.ReadTimeout <= 0 {
+		timeouts.ReadTimeout = config.DefaultHTTPReadTimeout
+	}
+	if timeouts.WriteTimeout <= 0 {
+		timeouts.WriteTimeout = config.DefaultHTTPMinWriteTimeout
+	}
+	if timeouts.IdleTimeout <= 0 {
+		timeouts.IdleTimeout = config.DefaultHTTPIdleTimeout
+	}
 	return &http.Server{
 		Addr:              addr,
 		Handler:           handler,
-		ReadHeaderTimeout: httpReadHeaderTimeout,
-		ReadTimeout:       httpReadTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       httpIdleTimeout,
+		ReadHeaderTimeout: timeouts.ReadHeaderTimeout,
+		ReadTimeout:       timeouts.ReadTimeout,
+		WriteTimeout:      timeouts.WriteTimeout,
+		IdleTimeout:       timeouts.IdleTimeout,
 		MaxHeaderBytes:    httpMaxHeaderBytes,
 	}
 }

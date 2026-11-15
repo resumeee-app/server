@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
@@ -2979,13 +2980,12 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 		BranchStore:    store,
 		QuotaStore:     store,
 		UserStore:      store,
-		Store:          store,
 		ProfileService: profileSvc,
 		Renderer:       renderer.New(),
 		Validator:      provenance.New(),
 		JobEnqueuer:    enqueuer,
 		Admin:          false,
-		TokenVerifier:  verifier,
+		AuthProvider:   auth.NewTokenVerifierProvider("test", verifier),
 	})
 
 	server := httptest.NewServer(router)
@@ -3159,11 +3159,10 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 			t.Fatalf("failed to seed store: %v", err)
 		}
 
-		router := api.NewRouter(api.RouterConfig{
-			Store:         memStore,
-			Admin:         true,
-			DefaultUserID: "user-1",
-		})
+		cfg := api.NewRouterConfigFromStore(memStore)
+		cfg.Admin = true
+		cfg.DefaultUserID = "user-1"
+		router := api.NewRouter(cfg)
 		server := httptest.NewServer(router)
 		defer server.Close()
 		client := server.Client()
@@ -3183,4 +3182,71 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 			t.Fatalf("GET /api/v1/profile/jsonresume/export: expected 200, got %d: %s", exportResp.StatusCode, string(exportBody))
 		}
 	})
+}
+
+func TestJSONResumeImport_PayloadTooLargeReturns413(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx)
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.ProfileService = profile.New(memStore, memStore, memStore)
+
+	srv := httptest.NewServer(api.NewRouter(cfg))
+	defer srv.Close()
+
+	oversized := make([]byte, api.MaxRequestBodyBytes+1)
+	for i := range oversized {
+		oversized[i] = 'a'
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/profile/jsonresume/import", bytes.NewReader(oversized))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 Payload Too Large, got %d", resp.StatusCode)
+	}
+	var errEnv api.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errEnv); err != nil {
+		t.Fatalf("decode error envelope: %v", err)
+	}
+	if errEnv.Error.Code != api.CodePayloadTooLarge {
+		t.Errorf("expected error code %q, got %q", api.CodePayloadTooLarge, errEnv.Error.Code)
+	}
+}
+
+func TestHTMLRenderResponse_SetsNoSniffHeader(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx)
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.Admin = true
+	cfg.Renderer = renderer.New()
+
+	srv := httptest.NewServer(api.NewRouter(cfg))
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL + "/api/v1/templates/builtin-standard-clean/preview?format=html")
+	if err != nil {
+		t.Fatalf("GET preview: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("expected X-Content-Type-Options: nosniff, got %q", got)
+	}
 }

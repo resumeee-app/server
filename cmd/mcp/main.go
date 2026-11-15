@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
@@ -38,9 +37,6 @@ const (
 
 	// mcpFallbackDBPath is used if loading config from environment fails unexpectedly.
 	mcpFallbackDBPath = "data/resumeee.db"
-
-	// mcpFallbackRESTTimeout bounds synchronous tool/resource calls when fallback config is active.
-	mcpFallbackRESTTimeout = 30 * time.Second
 )
 
 // StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
@@ -122,15 +118,29 @@ func loadMCPConfig(args []string) (*config.Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
-	_ = configFile
 
-	cfg, err := config.Load()
-	if err != nil {
-		cfg = &config.Config{
-			DBPath:        mcpFallbackDBPath,
-			DefaultUserID: config.DefaultUserID,
-			RESTTimeout:   mcpFallbackRESTTimeout,
-			LLMTimeout:    config.DefaultLLMTimeout,
+	var (
+		cfg *config.Config
+		err error
+	)
+	if configFile != "" {
+		if _, statErr := os.Stat(configFile); statErr != nil {
+			return nil, fmt.Errorf("reading config file %q: %w", configFile, statErr)
+		}
+		cfg, err = config.LoadFromFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading config file %q: %w", configFile, err)
+		}
+	} else {
+		cfg, err = config.Load()
+		if err != nil {
+			cfg = &config.Config{
+				DBPath:                  mcpFallbackDBPath,
+				DefaultUserID:           config.DefaultUserID,
+				RESTTimeout:             config.DefaultRESTTimeout,
+				LLMTimeout:              config.DefaultLLMTimeout,
+				MCPSSEKeepAliveInterval: config.DefaultMCPSSEKeepAliveInterval,
+			}
 		}
 	}
 
@@ -202,22 +212,23 @@ func buildMCPServerConfig(ctx context.Context, cfg *config.Config, store core.St
 	})
 
 	mcpCfg := resumeeeMCP.ServerConfig{
-		ProfileService:   profileSvc,
-		BranchService:    branchSvc,
-		TemplateRenderer: templateRenderer,
-		ProfileStore:     profileStore,
-		CareerStore:      careerStore,
-		BranchStore:      branchStore,
-		TemplateStore:    templateStore,
-		PresetStore:      presetStore,
-		UserStore:        userStore,
-		ResumeExtractor:  resumeExtractor,
-		JobEnqueuer:      workerPool,
-		DefaultUserID:    cfg.DefaultUserID,
-		Admin:            cfg.Admin,
-		Logger:           logger,
-		RESTTimeout:      cfg.RESTTimeout,
-		TailoringTimeout: cfg.LLMTimeout,
+		ProfileService:       profileSvc,
+		BranchService:        branchSvc,
+		TemplateRenderer:     templateRenderer,
+		ProfileStore:         profileStore,
+		CareerStore:          careerStore,
+		BranchStore:          branchStore,
+		TemplateStore:        templateStore,
+		PresetStore:          presetStore,
+		UserStore:            userStore,
+		ResumeExtractor:      resumeExtractor,
+		JobEnqueuer:          workerPool,
+		DefaultUserID:        cfg.DefaultUserID,
+		Admin:                cfg.Admin,
+		Logger:               logger,
+		RESTTimeout:          cfg.RESTTimeout,
+		TailoringTimeout:     cfg.LLMTimeout,
+		SSEKeepAliveInterval: cfg.MCPSSEKeepAliveInterval,
 	}
 
 	resolveMCPAuthProvider(ctx, cfg, logger, &mcpCfg)
@@ -242,7 +253,6 @@ func resolveMCPAuthProvider(ctx context.Context, cfg *config.Config, logger *slo
 		return
 	}
 	mcpCfg.AuthProvider = prov
-	mcpCfg.TokenVerifier = prov
 }
 
 // closeMCPStore closes store on exit and logs any failure to stderr.

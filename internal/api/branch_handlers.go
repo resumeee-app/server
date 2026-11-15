@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
 )
 
 // branchHandler serves resume branch CRUD, synchronization, generation, and preview endpoints.
 type branchHandler struct {
 	cfg RouterConfig
-	svc *branch.Service
+	svc BranchService
 }
 
 // registerBranchRoutes binds REST endpoints for branch/resume creation, modification, version generation, preview rendering, and exports.
@@ -103,7 +103,7 @@ type SyncBranchesResponse struct {
 
 // requireAdmin verifies administrative privilege, writing a 403 Forbidden response with msg if unauthorized.
 func (h *branchHandler) requireAdmin(w http.ResponseWriter, r *http.Request, msg string) bool {
-	if !h.cfg.Admin && !IsAdminFromContext(r.Context()) {
+	if !h.cfg.Admin && !core.IsAdminFromContext(r.Context()) {
 		writeError(w, http.StatusForbidden, CodeForbidden, msg, "")
 		return false
 	}
@@ -118,7 +118,7 @@ func (h *branchHandler) listBranches(w http.ResponseWriter, r *http.Request) {
 
 	branches, err := h.svc.ListBranches(ctx, userID, staleOnly)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -184,7 +184,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.CreateBranch(ctx, b)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -199,7 +199,7 @@ func (h *branchHandler) getBranch(w http.ResponseWriter, r *http.Request) {
 
 	b, err := h.svc.Branch(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -214,7 +214,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 
 	b, err := h.svc.Branch(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -258,7 +258,7 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateBranch(ctx, b)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -276,13 +276,13 @@ func firstNonNilStringPtr(primary, fallback *string) *string {
 // validateBranchReferences verifies multi-tenant authorization for optional template set and tailoring strategy IDs.
 func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.ResponseWriter, userID, templateSetID string, strategyID *string) bool {
 	if templateSetID != "" {
-		if _, err := fetchAuthorizedTemplate(ctx, h.cfg.TemplateStore, userID, templateSetID); err != nil {
+		if _, err := access.Template(ctx, h.cfg.TemplateStore, userID, templateSetID); err != nil {
 			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return false
 		}
 	}
 	if strategyID != nil && *strategyID != "" {
-		if _, err := fetchAuthorizedPreset(ctx, h.cfg.PresetStore, userID, *strategyID); err != nil {
+		if _, err := access.Preset(ctx, h.cfg.PresetStore, userID, h.cfg.DefaultUserID, *strategyID); err != nil {
 			writeAccessError(w, err, "cannot access foreign or nonexistent tailoring strategy")
 			return false
 		}
@@ -293,13 +293,13 @@ func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.Res
 // validateModelAndReasoning validates optional reasoning level and provider/model override combinations.
 func (h *branchHandler) validateModelAndReasoning(w http.ResponseWriter, providerOverride, modelOverride, reasoningLevel string, checkModel, checkReasoning bool) bool {
 	if checkReasoning {
-		if err := validateReasoningLevel(reasoningLevel); err != nil {
+		if err := core.ValidateReasoningLevel(reasoningLevel); err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 			return false
 		}
 	}
 	if checkModel {
-		if err := validateModelOverride(h.cfg.ModelEnumerator, providerOverride, modelOverride); err != nil {
+		if err := core.ValidateModelOverride(h.cfg.ModelEnumerator, providerOverride, modelOverride); err != nil {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
 			return false
 		}
@@ -369,7 +369,7 @@ func (h *branchHandler) deleteBranch(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := h.svc.DeleteBranch(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -394,7 +394,7 @@ func (h *branchHandler) syncBranches(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

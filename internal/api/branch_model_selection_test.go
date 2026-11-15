@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
@@ -46,16 +47,16 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 		t.Fatalf("failed to seed memory store: %v", err)
 	}
 
-	var verifier core.TokenVerifier
+	var authProvider auth.Provider
 	if !admin {
-		verifier = &mockVerifierForBranchModel{
+		authProvider = auth.NewTokenVerifierProvider("test", &mockVerifierForBranchModel{
 			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "token-regular-user" {
 					return &core.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
 				}
 				return nil, core.ErrUnauthorized
 			},
-		}
+		})
 	}
 
 	cfg := api.RouterConfig{
@@ -67,7 +68,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 		QuotaStore:      store,
 		ModelEnumerator: enumerator,
 		Admin:           admin,
-		TokenVerifier:   verifier,
+		AuthProvider:    authProvider,
 	}
 
 	handler := api.NewRouter(cfg)
