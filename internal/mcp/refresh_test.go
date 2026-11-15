@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -284,7 +285,11 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Fatalf("expected list_presets success, got: %+v, err: %v", listRes, err)
 	}
 	var presetList []core.Preset
-	if err := json.Unmarshal([]byte(listRes.Content[0].(mcpSDK.TextContent).Text), &presetList); err != nil {
+	listTextContent, ok := listRes.Content[0].(mcpSDK.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", listRes.Content[0])
+	}
+	if err := json.Unmarshal([]byte(listTextContent.Text), &presetList); err != nil {
 		t.Fatalf("failed to unmarshal preset list: %v", err)
 	}
 	if len(presetList) < 2 {
@@ -317,7 +322,11 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		DefaultLanguage    string   `json:"default_language"`
 		SupportedLanguages []string `json:"supported_languages"`
 	}
-	if err := json.Unmarshal([]byte(langRes.Content[0].(mcpSDK.TextContent).Text), &langPayload); err != nil {
+	langTextContent, ok := langRes.Content[0].(mcpSDK.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", langRes.Content[0])
+	}
+	if err := json.Unmarshal([]byte(langTextContent.Text), &langPayload); err != nil {
 		t.Fatalf("failed to unmarshal language list: %v", err)
 	}
 	if langPayload.DefaultLanguage != core.DefaultLanguage {
@@ -696,12 +705,16 @@ func TestMCP_CareerStoreSeparation(t *testing.T) {
 	})
 }
 
-type failingGetBranchStore struct {
+type failingBranchStore struct {
 	core.BranchStore
-	err error
+	err   error
+	calls atomic.Int32
 }
 
-func (f *failingGetBranchStore) GetBranch(ctx context.Context, id string) (*core.Branch, error) {
+var _ core.BranchStore = (*failingBranchStore)(nil)
+
+func (f *failingBranchStore) Branch(_ context.Context, _, _ string) (*core.Branch, error) {
+	f.calls.Add(1)
 	return nil, f.err
 }
 
@@ -942,7 +955,7 @@ func TestMCP_DependencyGuardsAndFailClosed(t *testing.T) {
 		}
 
 		rawLeakErr := errors.New("secret upstream dsn postgres://db.internal:5432")
-		failingBranches := &failingGetBranchStore{BranchStore: store, err: rawLeakErr}
+		failingBranches := &failingBranchStore{BranchStore: store, err: rawLeakErr}
 		failingBranchSvc := newBranchSvc(failingBranches, store, store, store)
 		failingServer := resumeeeMCP.NewServer(resumeeeMCP.ServerConfig{
 			BranchService: failingBranchSvc,
@@ -955,11 +968,14 @@ func TestMCP_DependencyGuardsAndFailClosed(t *testing.T) {
 		})
 
 		simLeakRes, err := failingServer.GetTool("simulate_ats").Handler(userCtx, toolReq("simulate_ats", map[string]any{
-			"branch_id": defaultBranchID,
+			"branch_id": "custom-branch-id",
 			"format":    "markdown",
 		}))
 		if err != nil {
 			t.Fatalf("unexpected protocol error: %v", err)
+		}
+		if failingBranches.calls.Load() == 0 {
+			t.Fatal("expected failingBranches.Branch to be called by simulate_ats")
 		}
 		if !simLeakRes.IsError {
 			t.Fatalf("expected simulate_ats error on failing store, got %+v", simLeakRes)
@@ -967,6 +983,10 @@ func TestMCP_DependencyGuardsAndFailClosed(t *testing.T) {
 		simLeakText := simLeakRes.Content[0].(mcpSDK.TextContent).Text
 		if strings.Contains(simLeakText, "db.internal") || strings.Contains(simLeakText, "postgres://") {
 			t.Errorf("expected internal store error to be sanitized, got %q", simLeakText)
+		}
+		const wantSanitized = "failed to simulate ATS score due to an internal error"
+		if simLeakText != wantSanitized {
+			t.Errorf("expected sanitized error %q, got %q", wantSanitized, simLeakText)
 		}
 	})
 }

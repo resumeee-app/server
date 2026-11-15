@@ -1189,6 +1189,8 @@ paths:
                 type: string
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/TemplateValidationError'
         '500':

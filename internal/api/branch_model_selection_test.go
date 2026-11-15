@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
@@ -46,16 +47,16 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 		t.Fatalf("failed to seed memory store: %v", err)
 	}
 
-	var verifier core.TokenVerifier
+	var authProvider auth.Provider
 	if !admin {
-		verifier = &mockVerifierForBranchModel{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+		authProvider = auth.NewTokenVerifierProvider("test", &mockVerifierForBranchModel{
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "token-regular-user" {
 					return &core.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
 				}
 				return nil, core.ErrUnauthorized
 			},
-		}
+		})
 	}
 
 	cfg := api.RouterConfig{
@@ -67,7 +68,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 		QuotaStore:      store,
 		ModelEnumerator: enumerator,
 		Admin:           admin,
-		TokenVerifier:   verifier,
+		AuthProvider:    authProvider,
 	}
 
 	handler := api.NewRouter(cfg)
@@ -372,6 +373,44 @@ func TestBranchModelSelection_CreateBranchWithReasoning(t *testing.T) {
 		resp, body := doRequest(t, client, http.MethodPost, server.URL+"/api/v1/branches", req, nil)
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400 Bad Request, got %d: %s", resp.StatusCode, string(body))
+		}
+	})
+
+	t.Run("Admin true paired with external AuthProvider still rejects non-admin overrides", func(t *testing.T) {
+		ctx := context.Background()
+		defaultUser := "user-mixed-cfg"
+		store, err := memory.NewSeeded(ctx, defaultUser)
+		if err != nil {
+			t.Fatalf("failed to seed memory store: %v", err)
+		}
+		authProvider := auth.NewTokenVerifierProvider("test", &mockVerifierForBranchModel{
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
+				if token == "token-regular" {
+					return &core.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
+				}
+				return nil, core.ErrUnauthorized
+			},
+		})
+		cfg := api.NewRouterConfigFromStore(store)
+		cfg.DefaultUserID = defaultUser
+		cfg.Admin = true
+		cfg.AuthProvider = authProvider
+		cfg.ModelEnumerator = enumerator
+
+		mixedSrv := httptest.NewServer(api.NewRouter(cfg))
+		defer mixedSrv.Close()
+
+		req := api.CreateBranchRequest{
+			Name:             "Non-Admin Override Attempt",
+			TemplateSetID:    core.TemplateStandardCleanID,
+			ProviderOverride: "gemini",
+			ModelOverride:    "gemini-3.8-flash",
+		}
+		resp, body := doRequest(t, mixedSrv.Client(), http.MethodPost, mixedSrv.URL+"/api/v1/branches", req, map[string]string{
+			"Authorization": "Bearer token-regular",
+		})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden when Admin=true is paired with external AuthProvider, got %d: %s", resp.StatusCode, string(body))
 		}
 	})
 }

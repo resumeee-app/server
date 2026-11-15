@@ -9,6 +9,7 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -95,24 +96,18 @@ func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
 // Returns:
 //   - ResourceHandlerFunc compatible with the MCP SDK.
 func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+	return func(ctx context.Context, _ mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
 		defer cancel()
 
 		userID := UserIDFromContext(ctx, cfg.DefaultUserID)
 		_ = cfg.EnsureTenant(ctx, userID)
 
-		var snapshot *core.MainProfileSnapshot
-		var err error
-		if cfg.ProfileService != nil {
-			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
-		} else if cfg.ProfileStore != nil {
-			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
-		} else {
-			return nil, errors.New("profile service and store unavailable")
-		}
-
+		snapshot, err := fetchProfileSnapshot(ctx, cfg, userID)
 		if err != nil {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
+				return nil, errors.New(msg)
+			}
 			cfg.Logger.ErrorContext(ctx, "failed to read main profile resource", "user_id", userID, "err", err)
 			return nil, errors.New("failed to retrieve profile due to an internal store error")
 		}
@@ -127,12 +122,24 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 	}
 }
 
+// supportedLanguagesPayload serializes the default and supported tailoring languages.
+type supportedLanguagesPayload struct {
+	DefaultLanguage    string   `json:"default_language"`
+	SupportedLanguages []string `json:"supported_languages"`
+}
+
+// branchDetailsPayload serializes a branch alongside its active version when present.
+type branchDetailsPayload struct {
+	Branch        *core.Branch        `json:"branch"`
+	ActiveVersion *core.BranchVersion `json:"active_version"`
+}
+
 // handleResourceSupportedLanguages returns the supported and default languages for resume tailoring.
 func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
-		payload := map[string]any{
-			"default_language":    core.DefaultLanguage,
-			"supported_languages": core.SupportedLanguages,
+	return func(_ context.Context, _ mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+		payload := supportedLanguagesPayload{
+			DefaultLanguage:    core.DefaultLanguage,
+			SupportedLanguages: core.SupportedLanguages,
 		}
 		return jsonResourceContents("resumeee://languages", payload)
 	}
@@ -170,16 +177,16 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("branch not found or access denied")
 		}
 
-		var activeVer any
+		var activeVer *core.BranchVersion
 		if branch.ActiveVersionID != nil && *branch.ActiveVersionID != "" {
 			if v, vErr := cfg.BranchStore.Version(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
 				activeVer = v
 			}
 		}
 
-		payload := map[string]any{
-			"branch":         branch,
-			"active_version": activeVer,
+		payload := branchDetailsPayload{
+			Branch:        branch,
+			ActiveVersion: activeVer,
 		}
 
 		contents, err := jsonResourceContents(req.Params.URI, payload)
@@ -214,9 +221,9 @@ func handleResourceTemplateSet(cfg ServerConfig) serverSDK.ResourceTemplateHandl
 			return nil, errors.New("invalid template URI: missing template ID")
 		}
 
-		tmpl, err := fetchAccessibleTemplate(ctx, cfg.TemplateStore, userID, templateID)
+		tmpl, err := access.Template(ctx, cfg.TemplateStore, userID, templateID)
 		if err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return nil, errors.New(msg)
 			}
 			cfg.Logger.WarnContext(ctx, "template resource not found or access denied", "template_id", templateID, "user_id", userID)
@@ -248,9 +255,9 @@ func handleResourcePresetDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("invalid preset URI: missing preset ID")
 		}
 
-		preset, err := fetchAccessiblePreset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
+		preset, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID)
 		if err != nil {
-			if msg, ok := unavailableErrorMessage(err); ok {
+			if msg, ok := access.StoreUnavailableMessage(err); ok {
 				return nil, errors.New(msg)
 			}
 			cfg.Logger.WarnContext(ctx, "preset resource not found or access denied", "preset_id", presetID, "user_id", userID)

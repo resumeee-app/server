@@ -12,6 +12,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -78,28 +79,80 @@ type sessionIDHolder struct {
 	id string
 }
 
+// maxMCPRequestBodyBytes caps incoming MCP HTTP POST and SSE request bodies at 10 MiB.
+const maxMCPRequestBodyBytes = 10 << 20
+
+// withSessionHolder attaches holder to ctx so the SSE session generator can record the generated ID.
+func withSessionHolder(ctx context.Context, holder *sessionIDHolder) context.Context {
+	return context.WithValue(ctx, sessionHolderKey, holder)
+}
+
+// sessionHolderFromContext returns the active sessionIDHolder attached to ctx, if present.
+func sessionHolderFromContext(ctx context.Context) *sessionIDHolder {
+	holder, ok := ctx.Value(sessionHolderKey).(*sessionIDHolder)
+	if !ok {
+		return nil
+	}
+	return holder
+}
+
+// sessionRegistry tracks the authenticated owner of each active MCP SSE session.
+type sessionRegistry struct {
+	mu     sync.RWMutex
+	owners map[string]string
+}
+
+// newSessionRegistry constructs an empty sessionRegistry.
+func newSessionRegistry() *sessionRegistry {
+	return &sessionRegistry{
+		owners: make(map[string]string),
+	}
+}
+
+// bind records userID as the owner of sessionID.
+func (sr *sessionRegistry) bind(sessionID, userID string) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	sr.owners[sessionID] = userID
+}
+
+// owner returns the owning userID for sessionID and whether the session is registered.
+func (sr *sessionRegistry) owner(sessionID string) (string, bool) {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+	userID, ok := sr.owners[sessionID]
+	return userID, ok
+}
+
+// delete removes sessionID from the registry once its SSE connection closes.
+func (sr *sessionRegistry) delete(sessionID string) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	delete(sr.owners, sessionID)
+}
+
 // authenticateRequest extracts and verifies the client identity from the request's Authorization header,
-// falling back to development headers or the configured default user ID.
+// falling back to development headers or the configured default user ID in local admin mode.
 //
 // Parameters:
 //   - r: Incoming *http.Request.
-//   - cfg: ServerConfig providing AuthTokens dictionary and DefaultUserID fallback.
+//   - cfg: ServerConfig providing AuthTokens dictionary, AuthProvider, and DefaultUserID fallback.
 //
 // Returns:
-//   - Authenticated user ID string, or an error if authorization fails.
-func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
+//   - Authenticated *core.TokenInfo, or an error if authorization fails.
+func authenticateRequest(r *http.Request, cfg ServerConfig) (*core.TokenInfo, error) {
 	bearerToken, _ := auth.ExtractBearerToken(r)
 
 	// 1. If explicit token dictionary configured, require valid Bearer token
 	if len(cfg.AuthTokens) > 0 {
 		if bearerToken == "" {
-			return "", errors.New("missing or malformed Authorization Bearer header")
+			return nil, errors.New("missing or malformed Authorization Bearer header")
 		}
 		userID, ok := cfg.AuthTokens[bearerToken]
 		if !ok || userID == "" {
-			return "", errors.New("invalid authorization token")
+			return nil, errors.New("invalid authorization token")
 		}
-		return userID, nil
+		return &core.TokenInfo{UID: userID}, nil
 	}
 
 	// 2. AuthProvider if configured
@@ -107,38 +160,31 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 		tokenInfo, err := cfg.AuthProvider.AuthenticateRequest(r)
 		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
 			if cfg.AuthProvider.Name() != auth.ProviderAdmin && err != nil && (errors.Is(err, auth.ErrMissingBearerHeader) || errors.Is(err, auth.ErrEmptyBearerToken)) {
-				return "", errors.New("missing or malformed Authorization Bearer header")
+				return nil, errors.New("missing or malformed Authorization Bearer header")
 			}
-			return "", core.ErrUnauthorized
+			return nil, core.ErrUnauthorized
 		}
-		return tokenInfo.UID, nil
+		return tokenInfo, nil
 	}
 
-	// 3. Multi-tenant mode (not Admin): strictly require token verification
+	// 3. Multi-tenant mode (not Admin): strictly require an AuthProvider or AuthTokens
 	if !cfg.Admin {
-		if cfg.TokenVerifier == nil {
-			return "", core.ErrUnauthorized
-		}
-		if bearerToken == "" {
-			return "", errors.New("missing or malformed Authorization Bearer header")
-		}
-		tokenInfo, err := cfg.TokenVerifier.VerifyIDToken(r.Context(), bearerToken)
-		if err != nil || tokenInfo == nil || tokenInfo.UID == "" {
-			return "", core.ErrUnauthorized
-		}
-		return tokenInfo.UID, nil
+		return nil, core.ErrUnauthorized
 	}
 
 	// 4. Local Admin Mode (cfg.Admin is true): X-User-ID -> DefaultUserID
-	if uid := strings.TrimSpace(r.Header.Get("X-User-ID")); uid != "" {
-		return uid, nil
+	uid := strings.TrimSpace(r.Header.Get("X-User-ID"))
+	if uid == "" {
+		uid = cfg.DefaultUserID
 	}
-
-	if cfg.DefaultUserID != "" {
-		return cfg.DefaultUserID, nil
+	if uid == "" {
+		uid = config.DefaultUserID
 	}
-
-	return "default", nil
+	return &core.TokenInfo{
+		UID:   uid,
+		Admin: true,
+		Role:  string(core.UserRoleAdmin),
+	}, nil
 }
 
 // NewHTTPHandler constructs an http.Handler wrapping the MCP SSEServer with authentication,
@@ -153,90 +199,110 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handler {
 	cfg.setDefaults()
 
-	var sessionOwners sync.Map
+	sessions := newSessionRegistry()
 	limiter := newConnectionLimiter(cfg.MaxConnectionsPerUser, cfg.MaxTotalConnections)
+	mcpSSE := newSSEServer(mcpServer, cfg, sessions)
 
-	mcpSSE := serverSDK.NewSSEServer(
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenInfo, err := authenticateRequest(r, cfg)
+		if err != nil {
+			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+		userID := tokenInfo.UID
+		ctx := WithUserID(r.Context(), userID)
+		ctx = core.WithIsAdmin(ctx, tokenInfo.IsAdmin())
+		if isAdminBypass(cfg) {
+			ctx = withSkipTenantProvision(ctx)
+		} else if pErr := cfg.EnsureTenant(ctx, userID); pErr != nil {
+			cfg.Logger.ErrorContext(ctx, "failed to lazily provision tenant", "user_id", userID, "err", pErr)
+			http.Error(w, "internal server error provisioning tenant", http.StatusInternalServerError)
+			return
+		}
+		r = r.WithContext(ctx)
+
+		if r.Method == http.MethodGet && (r.URL.Path == "/mcp/sse" || strings.HasSuffix(r.URL.Path, "/sse")) {
+			serveSSERequest(w, r, userID, limiter, sessions, mcpSSE)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			if !validatePostMessage(w, r, userID, sessions) {
+				return
+			}
+		}
+
+		mcpSSE.ServeHTTP(w, r)
+	})
+}
+
+// newSSEServer constructs the underlying MCP SSEServer wired to session ownership tracking and tenant context.
+func newSSEServer(mcpServer *serverSDK.MCPServer, cfg ServerConfig, sessions *sessionRegistry) *serverSDK.SSEServer {
+	return serverSDK.NewSSEServer(
 		mcpServer,
 		serverSDK.WithStaticBasePath("/mcp"),
 		serverSDK.WithMessageEndpoint("/messages"),
-		serverSDK.WithSSEMaxRequestBodyBytes(10<<20),
+		serverSDK.WithSSEMaxRequestBodyBytes(maxMCPRequestBodyBytes),
 		serverSDK.WithKeepAlive(true),
-		serverSDK.WithKeepAliveInterval(15*time.Second),
-		serverSDK.WithSessionIDGenerator(func(ctx context.Context, r *http.Request) (string, error) {
+		serverSDK.WithKeepAliveInterval(cfg.SSEKeepAliveInterval),
+		serverSDK.WithSessionIDGenerator(func(_ context.Context, r *http.Request) (string, error) {
 			sessionID := uuid.New().String()
 			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
-			sessionOwners.Store(sessionID, userID)
-			if h, ok := r.Context().Value(sessionHolderKey).(*sessionIDHolder); ok && h != nil {
+			sessions.bind(sessionID, userID)
+			if h := sessionHolderFromContext(r.Context()); h != nil {
 				h.id = sessionID
 			}
 			return sessionID, nil
 		}),
 		serverSDK.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
-			return WithUserID(ctx, userID)
+			ctx = WithUserID(ctx, userID)
+			ctx = core.WithIsAdmin(ctx, core.IsAdminFromContext(r.Context()))
+			if isAdminBypass(cfg) || skipTenantProvisionFromContext(r.Context()) {
+				ctx = withSkipTenantProvision(ctx)
+			}
+			return ctx
 		}),
 	)
+}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. Authenticate Request
-		userID, err := authenticateRequest(r, cfg)
-		if err != nil {
-			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
-			return
+// serveSSERequest enforces SSE connection limits, registers cleanup of the session owner, and streams SSE events.
+func serveSSERequest(w http.ResponseWriter, r *http.Request, userID string, limiter *connectionLimiter, sessions *sessionRegistry, mcpSSE *serverSDK.SSEServer) {
+	if !limiter.acquire(userID) {
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
+	defer limiter.release(userID)
+
+	holder := &sessionIDHolder{}
+	r = r.WithContext(withSessionHolder(r.Context(), holder))
+	defer func() {
+		if holder.id != "" {
+			sessions.delete(holder.id)
 		}
-		if pErr := cfg.EnsureTenant(r.Context(), userID); pErr != nil {
-			cfg.Logger.ErrorContext(r.Context(), "failed to lazily provision tenant", "user_id", userID, "err", pErr)
-		}
-		ctx := WithUserID(r.Context(), userID)
-		r = r.WithContext(ctx)
+	}()
 
-		// 2. Handle SSE Stream: Connection Limiting & WriteDeadline Reset & Session Lifecycle Cleanup
-		if r.Method == http.MethodGet && (r.URL.Path == "/mcp/sse" || strings.HasSuffix(r.URL.Path, "/sse")) {
-			if !limiter.acquire(userID) {
-				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-				return
-			}
-			defer limiter.release(userID)
+	// Clear write deadlines so long-lived SSE streams are not interrupted by server HTTP timeouts.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
 
-			holder := &sessionIDHolder{}
-			r = r.WithContext(context.WithValue(r.Context(), sessionHolderKey, holder))
-			defer func() {
-				if holder.id != "" {
-					sessionOwners.Delete(holder.id)
-				}
-			}()
+	mcpSSE.ServeHTTP(w, r)
+}
 
-			rc := http.NewResponseController(w)
-			_ = rc.SetWriteDeadline(time.Time{})
-
-			mcpSSE.ServeHTTP(w, r)
-			return
-		}
-
-		// 3. Handle Messages: 10MB Payload Limit & Session Ownership Validation
-		if r.Method == http.MethodPost {
-			// Enforce 10MB body boundary
-			if r.ContentLength > 10<<20 {
-				http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-
-			// Session hijacking defense
-			sessionID := r.URL.Query().Get("sessionId")
-			if sessionID != "" {
-				ownerVal, loaded := sessionOwners.Load(sessionID)
-				if loaded {
-					if owner, ok := ownerVal.(string); ok && owner != userID {
-						http.Error(w, "Forbidden: session belongs to another user", http.StatusForbidden)
-						return
-					}
-				}
-				// If not loaded, do NOT store spurious sessions into sessionOwners
-			}
-		}
-
-		mcpSSE.ServeHTTP(w, r)
-	})
+// validatePostMessage enforces POST body size limits and verifies that any targeted session belongs to userID.
+func validatePostMessage(w http.ResponseWriter, r *http.Request, userID string, sessions *sessionRegistry) bool {
+	if r.ContentLength > maxMCPRequestBodyBytes {
+		http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBodyBytes)
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		return true
+	}
+	if owner, ok := sessions.owner(sessionID); ok && owner != userID {
+		http.Error(w, "Forbidden: session belongs to another user", http.StatusForbidden)
+		return false
+	}
+	return true
 }

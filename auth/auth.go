@@ -12,8 +12,11 @@ import (
 
 // Provider identifier constants.
 const (
+	// ProviderFirebase identifies the Firebase JWT authentication provider.
 	ProviderFirebase = "firebase"
-	ProviderAdmin    = "admin"
+
+	// ProviderAdmin identifies the local single-user admin authentication provider.
+	ProviderAdmin = "admin"
 )
 
 // Authentication failure sentinel errors.

@@ -5,14 +5,15 @@ import (
 	"errors"
 	htmltemplate "html/template"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
+// templateHandler serves resume template set CRUD and preview rendering endpoints.
 type templateHandler struct {
 	cfg RouterConfig
 }
@@ -42,6 +43,7 @@ type RenderTemplatePreviewRequest struct {
 	TextTemplate     string `json:"text_template"`
 }
 
+// CreateTemplateRequest defines the JSON payload for creating a custom resume template set.
 type CreateTemplateRequest struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
@@ -51,6 +53,7 @@ type CreateTemplateRequest struct {
 	TextTemplate     string `json:"text_template"`
 }
 
+// UpdateTemplateRequest defines the partial JSON payload for updating a custom resume template set.
 type UpdateTemplateRequest struct {
 	Name             *string `json:"name"`
 	Description      *string `json:"description"`
@@ -63,11 +66,11 @@ type UpdateTemplateRequest struct {
 // listTemplates returns all custom and built-in template sets for the user.
 func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	templates, err := h.cfg.TemplateStore.ListTemplates(ctx, userID)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 	if templates == nil {
@@ -79,7 +82,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 // createTemplate validates syntax across templates and saves a new template set.
 func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateTemplateRequest
 	if !decodeJSON(w, r, &req) {
@@ -112,7 +115,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -122,37 +125,55 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 // getTemplate retrieves a template set by its identifier.
 func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
+		return
+	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, tmpl)
 }
 
-// updateTemplate validates updated templates and updates the template set.
-func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
+// loadMutableTemplate fetches template id for userID and rejects system/built-in or foreign templates.
+func (h *templateHandler) loadMutableTemplate(ctx context.Context, w http.ResponseWriter, userID, id, immutableMsg string) (*core.TemplateSet, bool) {
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		writeDomainError(w, h.cfg.Logger, err)
+		return nil, false
+	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
+		return nil, false
 	}
 
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be modified", "")
-		return
+	if access.IsSystemTemplate(tmpl) {
+		writeError(w, http.StatusForbidden, CodeForbidden, immutableMsg, "")
+		return nil, false
 	}
 
 	if tmpl.UserID != userID {
 		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+		return nil, false
+	}
+
+	return tmpl, true
+}
+
+// updateTemplate validates updated templates and updates the template set.
+func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := requestUserID(r, h.cfg.DefaultUserID)
+	id := r.PathValue("id")
+
+	tmpl, ok := h.loadMutableTemplate(ctx, w, userID, id, "built-in templates cannot be modified")
+	if !ok {
 		return
 	}
 
@@ -190,7 +211,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, "template syntax error", err.Error())
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -200,63 +221,45 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 // deleteTemplate removes a custom template set by its identifier.
 func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
-	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	if tmpl.IsBuiltIn || strings.HasPrefix(tmpl.ID, "builtin-") || tmpl.UserID == core.SystemUserID {
-		writeError(w, http.StatusForbidden, CodeForbidden, "built-in templates cannot be deleted", "")
-		return
-	}
-
-	if tmpl.UserID != userID {
-		writeError(w, http.StatusForbidden, CodeForbidden, "access denied to template", "")
+	if _, ok := h.loadMutableTemplate(ctx, w, userID, id, "built-in templates cannot be deleted"); !ok {
 		return
 	}
 
 	if err := h.cfg.TemplateStore.DeleteTemplate(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getRenderContext constructs a comprehensive execution context for template rendering.
-func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
-	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
-}
-
-// renderAllFormats compiles and executes all template formats (HTML, Markdown, PlainText) using the provided context.
-func (h *templateHandler) renderAllFormats(tmpl *core.TemplateSet, renderCtx *renderer.RenderContext) (core.RenderOutput, error) {
-	return renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
-}
-
 // previewTemplate renders a saved template set on the server across HTML, Markdown, and text formats.
 func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
 	if err != nil {
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
+		return
+	}
+	if tmpl == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", "")
 		return
 	}
 
-	renderCtx := h.getRenderContext(ctx, userID, tmpl)
-	out, err := h.renderAllFormats(tmpl, renderCtx)
+	renderCtx := renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
+	out, err := renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 	if err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 
@@ -265,8 +268,10 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 
 // renderPreview renders draft Go template definitions on the server for real-time editor previews.
 func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	ctx, cancel := withRenderPreviewTimeout(w, r, h.cfg)
+	defer cancel()
+
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req RenderTemplatePreviewRequest
 	if !decodeJSON(w, r, &req) {
@@ -279,16 +284,15 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 	txtTmpl := req.TextTemplate
 
 	if htmlTmpl == "" && mdTmpl == "" && txtTmpl == "" && req.TemplateID != "" {
-		if h.cfg.TemplateStore == nil {
-			writeError(w, http.StatusInternalServerError, CodeInternalError, "template store unavailable", "")
+		orig, err := access.Template(ctx, h.cfg.TemplateStore, userID, req.TemplateID)
+		if err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return
 		}
-		if orig, err := h.cfg.TemplateStore.Template(ctx, userID, req.TemplateID); err == nil && orig != nil && (orig.UserID == userID || orig.IsBuiltIn || orig.UserID == core.SystemUserID) {
-			htmlTmpl = orig.HTMLTemplate
-			cssStyles = orig.CSSStyles
-			mdTmpl = orig.MarkdownTemplate
-			txtTmpl = orig.TextTemplate
-		}
+		htmlTmpl = orig.HTMLTemplate
+		cssStyles = orig.CSSStyles
+		mdTmpl = orig.MarkdownTemplate
+		txtTmpl = orig.TextTemplate
 	}
 
 	tmpl := &core.TemplateSet{
@@ -298,18 +302,18 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 		TextTemplate:     txtTmpl,
 	}
 
-	renderCtx := h.getRenderContext(ctx, userID, tmpl)
+	renderCtx := renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
 	if cssStyles != "" {
 		renderCtx.CSSStyles = htmltemplate.CSS(cssStyles)
 	}
 
-	out, err := h.renderAllFormats(tmpl, renderCtx)
+	out, err := renderer.RenderAllFormats(h.cfg.Renderer, tmpl, renderCtx)
 	if err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
 			writeError(w, http.StatusUnprocessableEntity, CodeTemplateValidationError, err.Error(), "")
 			return
 		}
-		writeDomainError(w, err)
+		writeDomainError(w, h.cfg.Logger, err)
 		return
 	}
 

@@ -19,104 +19,21 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/memory"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/renderer"
-	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
-
-// ChannelQueue provides a generic bounded channel-backed queue for asynchronous task dispatch.
-type ChannelQueue[T any] struct {
-	ch chan T
-}
-
-// NewChannelQueue constructs a ChannelQueue with the specified buffer capacity.
-func NewChannelQueue[T any](capacity int) *ChannelQueue[T] {
-	if capacity <= 0 {
-		capacity = 100
-	}
-	return &ChannelQueue[T]{
-		ch: make(chan T, capacity),
-	}
-}
-
-// Push sends an item to the buffered channel or returns core.ErrQueueFull if saturated.
-func (q *ChannelQueue[T]) Push(item T) error {
-	select {
-	case q.ch <- item:
-		return nil
-	default:
-		return core.ErrQueueFull
-	}
-}
-
-// Channel exposes the underlying receive channel for background consumers.
-func (q *ChannelQueue[T]) Channel() <-chan T {
-	return q.ch
-}
-
-// ChannelJobEnqueuer implements branch.JobEnqueuer backed by ChannelQueue[core.GenerationJob].
-type ChannelJobEnqueuer struct {
-	queue *ChannelQueue[core.GenerationJob]
-}
-
-// Compile-time assertion ensuring ChannelJobEnqueuer satisfies branch.JobEnqueuer.
-var _ branch.JobEnqueuer = (*ChannelJobEnqueuer)(nil)
-
-// NewChannelJobEnqueuer creates a new ChannelJobEnqueuer with the given buffer capacity.
-func NewChannelJobEnqueuer(capacity int) *ChannelJobEnqueuer {
-	return &ChannelJobEnqueuer{
-		queue: NewChannelQueue[core.GenerationJob](capacity),
-	}
-}
-
-// Enqueue sends a GenerationJob to the buffered channel or returns core.ErrQueueFull if saturated.
-func (e *ChannelJobEnqueuer) Enqueue(job core.GenerationJob) error {
-	return e.queue.Push(job)
-}
-
-// Channel exposes the underlying receive channel for background workers.
-func (e *ChannelJobEnqueuer) Channel() <-chan core.GenerationJob {
-	return e.queue.Channel()
-}
-
-// ChannelPDFJobEnqueuer implements core.PDFJobEnqueuer backed by ChannelQueue[core.PDFParseJobTask].
-type ChannelPDFJobEnqueuer struct {
-	queue *ChannelQueue[core.PDFParseJobTask]
-}
-
-// Compile-time assertion ensuring ChannelPDFJobEnqueuer satisfies core.PDFJobEnqueuer.
-var _ core.PDFJobEnqueuer = (*ChannelPDFJobEnqueuer)(nil)
-
-// NewChannelPDFJobEnqueuer creates a new ChannelPDFJobEnqueuer with the given buffer capacity.
-func NewChannelPDFJobEnqueuer(capacity int) *ChannelPDFJobEnqueuer {
-	return &ChannelPDFJobEnqueuer{
-		queue: NewChannelQueue[core.PDFParseJobTask](capacity),
-	}
-}
-
-// EnqueuePDFJob sends a PDFParseJobTask to the buffered channel or returns core.ErrQueueFull if saturated.
-func (e *ChannelPDFJobEnqueuer) EnqueuePDFJob(task core.PDFParseJobTask) error {
-	return e.queue.Push(task)
-}
-
-// Channel exposes the underlying receive channel for background workers.
-func (e *ChannelPDFJobEnqueuer) Channel() <-chan core.PDFParseJobTask {
-	return e.queue.Channel()
-}
 
 // PDFTextExtractor defines the narrow PDF text extraction contract required by upload handlers.
 type PDFTextExtractor interface {
@@ -131,130 +48,99 @@ type TemplateRenderer interface {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileStore      core.ProfileStore
-	CareerStore       core.CareerStore
-	PresetStore       core.PresetStore
-	TemplateStore     core.TemplateStore
-	BranchStore       core.BranchStore
-	PDFJobStore       core.PDFJobStore
-	PDFJobEnqueuer    core.PDFJobEnqueuer
-	QuotaStore        core.QuotaStore
-	BranchService     *branch.Service
-	ProfileService    *profile.Service
-	PDFExtractor      PDFTextExtractor
-	ResumeExtractor   worker.ResumeExtractor
-	Renderer          TemplateRenderer
-	Validator         branch.ProvenanceValidator
-	JobEnqueuer       branch.JobEnqueuer
-	PromptCompiler    branch.PromptCompiler
-	ModelEnumerator   core.ModelEnumerator
-	DefaultUserID     string
-	Admin             bool
-	AuthProvider      auth.Provider
-	TokenVerifier     core.TokenVerifier
-	FirebaseProjectID string
-	UserStore         core.UserStore
-	Store             core.Store
-	Provisioner       TenantProvisioner
-	Logger            *slog.Logger
-	RESTTimeout       time.Duration
-	LLMTimeout        time.Duration
-	DailyRequestLimit int
-	MonthlyTokenLimit int
+	ProfileStore    core.ProfileStore
+	CareerStore     core.CareerStore
+	PresetStore     core.PresetStore
+	TemplateStore   core.TemplateStore
+	BranchStore     core.BranchStore
+	PDFJobStore     core.PDFJobStore
+	PDFJobEnqueuer  core.PDFJobEnqueuer
+	QuotaStore      core.QuotaStore
+	BranchService   BranchService
+	ProfileService  ProfileService
+	PDFExtractor    PDFTextExtractor
+	ResumeExtractor worker.ResumeExtractor
+	Renderer        TemplateRenderer
+	Validator       branch.ProvenanceValidator
+	JobEnqueuer     branch.JobEnqueuer
+	PromptCompiler  branch.PromptCompiler
+	ModelEnumerator core.ModelEnumerator
+	DefaultUserID   string
+	Admin           bool
+	AuthProvider    auth.Provider
+	UserStore       core.UserStore
+	Provisioner     TenantProvisioner
+	Logger          *slog.Logger
+	RESTTimeout     time.Duration
+	LLMTimeout      time.Duration
+	// PDFParseTimeout bounds synchronous PDF resume extraction. When <= 0, NewRouter inherits
+	// an explicit positive LLMTimeout if provided, otherwise falling back to config.DefaultPDFParseTimeout.
+	PDFParseTimeout      time.Duration
+	RenderPreviewTimeout time.Duration
+	// HTTPWriteTimeoutBuffer is added to handler-scoped timeouts when extending response write deadlines.
+	HTTPWriteTimeoutBuffer time.Duration
+	DailyRequestLimit      int
+	MonthlyTokenLimit      int
 }
 
-// defaultTenantProvisioner lazily seeds default tenant data on first authenticated request.
-type defaultTenantProvisioner struct {
-	store         core.Store
-	profileStore  core.ProfileStore
-	branchStore   core.BranchStore
-	templateStore core.TemplateStore
-	userStore     core.UserStore
-	provisioned   sync.Map
+// NewRouterConfigFromStore populates a RouterConfig's sub-store fields from a composite core.Store.
+func NewRouterConfigFromStore(store core.Store) RouterConfig {
+	if store == nil {
+		return RouterConfig{}
+	}
+	return RouterConfig{
+		ProfileStore:  store.Profiles(),
+		CareerStore:   store.Career(),
+		PresetStore:   store.Presets(),
+		TemplateStore: store.Templates(),
+		BranchStore:   store.Branches(),
+		PDFJobStore:   store.PDFJobs(),
+		QuotaStore:    store.Quotas(),
+		UserStore:     store.Users(),
+	}
 }
 
-// Compile-time assertion ensuring defaultTenantProvisioner satisfies TenantProvisioner.
-var _ TenantProvisioner = (*defaultTenantProvisioner)(nil)
-
-// EnsureTenantProvisioned idempotently provisions default tenant records for userID if not already cached.
-func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, userID string, userInfo *core.User) error {
-	if _, ok := p.provisioned.Load(userID); ok {
-		return nil
-	}
-	var err error
-	if p.store != nil {
-		err = seed.EnsureTenantProvisioned(ctx, p.store, userID, userInfo)
-	} else if p.profileStore != nil && p.branchStore != nil && p.templateStore != nil {
-		err = seed.EnsureTenantProvisionedStores(ctx, p.profileStore, p.branchStore, p.templateStore, p.userStore, userID, userInfo)
-	}
-	if err == nil {
-		p.provisioned.Store(userID, true)
-	}
-	return err
-}
-
-// getUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
-func getUserID(r *http.Request, defaultID string) string {
-	if uid, err := UserIDFromContext(r.Context()); err == nil && uid != "" {
+// requestUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
+func requestUserID(r *http.Request, defaultID string) string {
+	if uid, err := core.UserIDFromContext(r.Context()); err == nil && uid != "" {
 		return uid
 	}
 	if defaultID != "" {
 		return defaultID
 	}
-	return "default"
-}
-
-// resolveStoreDefaults populates any unset individual store fields from cfg.Store.
-func resolveStoreDefaults(cfg *RouterConfig) {
-	if cfg.Store == nil {
-		return
-	}
-	if cfg.ProfileStore == nil {
-		cfg.ProfileStore = cfg.Store.Profiles()
-	}
-	if cfg.CareerStore == nil {
-		cfg.CareerStore = cfg.Store.Career()
-	}
-	if cfg.PresetStore == nil {
-		cfg.PresetStore = cfg.Store.Presets()
-	}
-	if cfg.TemplateStore == nil {
-		cfg.TemplateStore = cfg.Store.Templates()
-	}
-	if cfg.BranchStore == nil {
-		cfg.BranchStore = cfg.Store.Branches()
-	}
-	if cfg.PDFJobStore == nil {
-		cfg.PDFJobStore = cfg.Store.PDFJobs()
-	}
-	if cfg.QuotaStore == nil {
-		cfg.QuotaStore = cfg.Store.Quotas()
-	}
-	if cfg.UserStore == nil {
-		cfg.UserStore = cfg.Store.Users()
-	}
+	return config.DefaultUserID
 }
 
 // NewRouter constructs a net/http router and registers all OpenAPI routes under /api/v1.
 func NewRouter(cfg RouterConfig) http.Handler {
-	resolveStoreDefaults(&cfg)
 	if cfg.DefaultUserID == "" {
-		cfg.DefaultUserID = "default"
+		cfg.DefaultUserID = config.DefaultUserID
 	}
 	if cfg.RESTTimeout <= 0 {
-		cfg.RESTTimeout = 20 * time.Second
+		cfg.RESTTimeout = config.DefaultRESTTimeout
 	}
+	origLLMTimeout := cfg.LLMTimeout
 	if cfg.LLMTimeout <= 0 {
-		cfg.LLMTimeout = 10 * time.Minute
+		cfg.LLMTimeout = config.DefaultLLMTimeout
+	}
+	if cfg.PDFParseTimeout <= 0 {
+		if origLLMTimeout > 0 {
+			cfg.PDFParseTimeout = origLLMTimeout
+		} else {
+			cfg.PDFParseTimeout = config.DefaultPDFParseTimeout
+		}
+	}
+	if cfg.RenderPreviewTimeout <= 0 {
+		cfg.RenderPreviewTimeout = config.DefaultRenderPreviewTimeout
+	}
+	if cfg.HTTPWriteTimeoutBuffer <= 0 {
+		cfg.HTTPWriteTimeoutBuffer = config.DefaultHTTPWriteTimeoutBuffer
 	}
 	if cfg.DailyRequestLimit <= 0 {
-		cfg.DailyRequestLimit = 50
+		cfg.DailyRequestLimit = config.DefaultLLMDailyRequestLimit
 	}
 	if cfg.MonthlyTokenLimit <= 0 {
-		cfg.MonthlyTokenLimit = 1000000
-	}
-	if cfg.PDFJobStore == nil {
-		cfg.PDFJobStore = memory.New()
+		cfg.MonthlyTokenLimit = config.DefaultLLMMonthlyTokenLimit
 	}
 	if cfg.PDFExtractor == nil {
 		cfg.PDFExtractor = pdf.NewExtractor()
@@ -303,9 +189,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	registerQuotaRoutes(mux, cfg)
 
 	provisioner := cfg.Provisioner
-	if provisioner == nil && (cfg.Store != nil || cfg.ProfileStore != nil) {
+	if provisioner == nil && cfg.ProfileStore != nil && cfg.BranchStore != nil && cfg.TemplateStore != nil {
 		provisioner = &defaultTenantProvisioner{
-			store:         cfg.Store,
 			profileStore:  cfg.ProfileStore,
 			branchStore:   cfg.BranchStore,
 			templateStore: cfg.TemplateStore,
@@ -318,11 +203,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	handler = ContentTypeMiddleware(handler)
 	handler = TimeoutMiddleware(cfg.RESTTimeout)(handler)
 
-	if cfg.AuthProvider != nil {
-		handler = AuthMiddlewareWithProvider(cfg.AuthProvider, provisioner)(handler)
-	} else {
-		handler = AuthMiddleware(cfg.Admin, cfg.DefaultUserID, cfg.TokenVerifier, provisioner)(handler)
+	authProvider := cfg.AuthProvider
+	if authProvider == nil && cfg.Admin {
+		authProvider = auth.NewAdminProvider(cfg.DefaultUserID)
 	}
+	handler = AuthMiddlewareWithProvider(authProvider, provisioner, cfg.Logger)(handler)
 
 	handler = CORSMiddleware(handler)
 	handler = LoggingMiddleware(cfg.Logger)(handler)
@@ -380,48 +265,4 @@ func withRouteGuards(fn http.HandlerFunc, guards ...routeGuard) http.HandlerFunc
 		}
 		fn(w, r)
 	}
-}
-
-// storeUnavailableError indicates a required domain store was omitted from RouterConfig.
-type storeUnavailableError struct {
-	msg string
-}
-
-// Error returns the client-safe store unavailability message.
-func (e *storeUnavailableError) Error() string {
-	return e.msg
-}
-
-// writeAccessError translates store-unavailability or forbidden errors into 500 or 403 JSON responses.
-func writeAccessError(w http.ResponseWriter, err error, forbiddenMsg string) {
-	var unavailable *storeUnavailableError
-	if errors.As(err, &unavailable) {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, unavailable.Error(), "")
-		return
-	}
-	writeError(w, http.StatusForbidden, CodeForbidden, forbiddenMsg, "")
-}
-
-// fetchAuthorizedTemplate resolves templateID from store and verifies tenant ownership or built-in visibility.
-func fetchAuthorizedTemplate(ctx context.Context, store core.TemplateStore, userID, templateID string) (*core.TemplateSet, error) {
-	if store == nil {
-		return nil, &storeUnavailableError{msg: "template store unavailable"}
-	}
-	tmpl, err := store.Template(ctx, userID, templateID)
-	if err != nil || tmpl == nil || (tmpl.UserID != userID && !tmpl.IsBuiltIn && tmpl.UserID != core.SystemUserID) {
-		return nil, core.ErrForbidden
-	}
-	return tmpl, nil
-}
-
-// fetchAuthorizedPreset resolves presetID from store and verifies tenant ownership or built-in visibility.
-func fetchAuthorizedPreset(ctx context.Context, store core.PresetStore, userID, presetID string) (*core.Preset, error) {
-	if store == nil {
-		return nil, &storeUnavailableError{msg: "preset store unavailable"}
-	}
-	preset, err := store.Preset(ctx, userID, presetID)
-	if err != nil || preset == nil || (preset.UserID != userID && !preset.IsBuiltIn() && preset.UserID != core.SystemUserID) {
-		return nil, core.ErrForbidden
-	}
-	return preset, nil
 }

@@ -10,14 +10,19 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
+// responseWriterRecorder wraps http.ResponseWriter to record the HTTP status code written by downstream handlers.
 type responseWriterRecorder struct {
 	http.ResponseWriter
 	statusCode int
 	written    bool
 }
+
+// Compile-time assertion ensuring responseWriterRecorder satisfies http.ResponseWriter.
+var _ http.ResponseWriter = (*responseWriterRecorder)(nil)
 
 // WriteHeader captures the HTTP response status code before delegating to the wrapped ResponseWriter.
 func (rw *responseWriterRecorder) WriteHeader(code int) {
@@ -35,6 +40,11 @@ func (rw *responseWriterRecorder) Write(b []byte) (int, error) {
 		rw.written = true
 	}
 	return rw.ResponseWriter.Write(b)
+}
+
+// Unwrap exposes the underlying ResponseWriter for http.ResponseController deadline adjustments.
+func (rw *responseWriterRecorder) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
 }
 
 // LoggingMiddleware logs incoming HTTP requests with method, path, status, and duration.
@@ -128,16 +138,17 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 }
 
 // TimeoutMiddleware sets a request context cancellation deadline bounded by the given duration.
-// If timeout <= 0, it falls back to a 20-second default boundary.
-// For /profile/pdf/parse (normalized), handler-level timeout budgeting is used to accommodate LLM extraction.
+// If timeout <= 0, it falls back to config.DefaultRESTTimeout.
+// Handler-scoped endpoints (POST /profile/pdf/parse, POST /templates/preview, and
+// POST /{branches,resumes}/{id}/versions/{v}/render-preview) bypass this wrapper so
+// they can apply PDFParseTimeout or RenderPreviewTimeout directly.
 func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	if timeout <= 0 {
-		timeout = 20 * time.Second
+		timeout = config.DefaultRESTTimeout
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cleanPath := path.Clean(r.URL.Path)
-			if cleanPath == "/api/v1/profile/pdf/parse" || strings.HasSuffix(cleanPath, "/profile/pdf/parse") {
+			if usesHandlerTimeout(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -146,6 +157,41 @@ func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// usesHandlerTimeout reports whether r manages its own handler-scoped timeout instead of RESTTimeout.
+func usesHandlerTimeout(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	relPath := stripAPIV1Prefix(path.Clean(r.URL.Path))
+	if relPath == "/profile/pdf/parse" || relPath == "/templates/preview" {
+		return true
+	}
+	return isVersionRenderPreviewPath(relPath)
+}
+
+// stripAPIV1Prefix removes a leading /api/v1 segment from cleanPath while preserving root-relative paths.
+func stripAPIV1Prefix(cleanPath string) string {
+	if cleanPath == "/api/v1" {
+		return "/"
+	}
+	if strings.HasPrefix(cleanPath, "/api/v1/") {
+		return strings.TrimPrefix(cleanPath, "/api/v1")
+	}
+	return cleanPath
+}
+
+// isVersionRenderPreviewPath reports whether relPath matches /{branches|resumes}/{id}/versions/{v}/render-preview.
+func isVersionRenderPreviewPath(relPath string) bool {
+	segments := strings.Split(strings.TrimPrefix(relPath, "/"), "/")
+	if len(segments) != 5 {
+		return false
+	}
+	if segments[0] != "branches" && segments[0] != "resumes" {
+		return false
+	}
+	return segments[1] != "" && segments[2] == "versions" && segments[3] != "" && segments[4] == "render-preview"
 }
 
 // isPublicRoute checks if a request path is exempt from authentication.
@@ -161,12 +207,10 @@ type TenantProvisioner interface {
 
 // AuthMiddlewareWithProvider inspects incoming requests using the provided auth.Provider
 // and injects the authenticated tenant ID and admin privileges into context.
-func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
-	var provisioner TenantProvisioner
-	if len(provisioners) > 0 {
-		provisioner = provisioners[0]
+func AuthMiddlewareWithProvider(provider auth.Provider, provisioner TenantProvisioner, logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
 	}
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodOptions || isPublicRoute(r.URL.Path) {
@@ -193,8 +237,8 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 				return
 			}
 
-			ctx := WithUserID(r.Context(), tokenInfo.UID)
-			ctx = WithIsAdmin(ctx, tokenInfo.IsAdmin())
+			ctx := core.WithUserID(r.Context(), tokenInfo.UID)
+			ctx = core.WithIsAdmin(ctx, tokenInfo.IsAdmin())
 			if provisioner != nil && provider.Name() != auth.ProviderAdmin {
 				role := core.UserRoleUser
 				if tokenInfo.IsAdmin() {
@@ -206,7 +250,7 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 					Role:     role,
 					IsActive: true,
 				}); err != nil {
-					slog.ErrorContext(r.Context(), "failed to provision tenant", "user_id", tokenInfo.UID, "error", err)
+					logger.ErrorContext(r.Context(), "failed to provision tenant", "user_id", tokenInfo.UID, "error", err)
 					writeError(w, http.StatusInternalServerError, CodeInternalError, "internal server error provisioning tenant", "")
 					return
 				}
@@ -214,25 +258,4 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-// AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
-// Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
-func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
-	if defaultUserID == "" {
-		defaultUserID = "default"
-	}
-
-	var provider auth.Provider
-	if admin {
-		provider = auth.NewAdminAuthProvider(defaultUserID)
-	} else if verifier != nil {
-		if p, ok := verifier.(auth.Provider); ok {
-			provider = p
-		} else {
-			provider = auth.NewTokenVerifierProvider("verifier", verifier)
-		}
-	}
-
-	return AuthMiddlewareWithProvider(provider, provisioners...)
 }

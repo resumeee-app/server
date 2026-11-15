@@ -11,12 +11,18 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 )
 
+// promptTemplateFS embeds the MCP prompt Go templates from the templates directory.
+//
 //go:embed templates/*
 var promptTemplateFS embed.FS
 
+// Parsed MCP prompt templates loaded from promptTemplateFS.
 var (
+	// prepareJobApplicationTmpl renders the prompt for preparing a job application.
 	prepareJobApplicationTmpl = template.Must(template.ParseFS(promptTemplateFS, "templates/prepare_job_application.tmpl"))
-	mockInterviewPrepTmpl     = template.Must(template.ParseFS(promptTemplateFS, "templates/mock_interview_prep.tmpl"))
+
+	// mockInterviewPrepTmpl renders the prompt for mock interview preparation.
+	mockInterviewPrepTmpl = template.Must(template.ParseFS(promptTemplateFS, "templates/mock_interview_prep.tmpl"))
 )
 
 // prepareJobApplicationPromptContext defines the data passed to prepare_job_application.tmpl.
@@ -67,15 +73,15 @@ func registerPrompts(s *serverSDK.MCPServer, cfg ServerConfig) {
 // Returns:
 //   - PromptHandlerFunc compatible with the MCP server SDK.
 func handlePromptPrepareJobApplication(_ ServerConfig) serverSDK.PromptHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
+	return func(_ context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
 		jobDescription := strings.TrimSpace(req.Params.Arguments["job_description"])
-		branchName := strings.TrimSpace(req.Params.Arguments["branch_name"])
+		branchName := sanitizeInlinePromptValue(req.Params.Arguments["branch_name"])
 		if branchName == "" {
 			branchName = "Target Role Branch"
 		}
 
 		promptCtx := prepareJobApplicationPromptContext{
-			JobDescription: jobDescription,
+			JobDescription: SanitizeXMLFence(jobDescription, "target_job_description"),
 			BranchName:     branchName,
 		}
 
@@ -102,8 +108,8 @@ func handlePromptPrepareJobApplication(_ ServerConfig) serverSDK.PromptHandlerFu
 // Returns:
 //   - PromptHandlerFunc compatible with the MCP server SDK.
 func handlePromptMockInterviewPrep(_ ServerConfig) serverSDK.PromptHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
-		branchID := strings.TrimSpace(req.Params.Arguments["branch_id"])
+	return func(_ context.Context, req mcpSDK.GetPromptRequest) (*mcpSDK.GetPromptResult, error) {
+		branchID := sanitizeInlinePromptValue(req.Params.Arguments["branch_id"])
 		focusArea := strings.TrimSpace(req.Params.Arguments["focus_area"])
 		if focusArea == "" {
 			focusArea = "General Behavioral and Technical Alignment"
@@ -111,7 +117,7 @@ func handlePromptMockInterviewPrep(_ ServerConfig) serverSDK.PromptHandlerFunc {
 
 		promptCtx := mockInterviewPrepPromptContext{
 			BranchID:  branchID,
-			FocusArea: focusArea,
+			FocusArea: SanitizeXMLFence(focusArea, "focus_area"),
 		}
 
 		var sb strings.Builder

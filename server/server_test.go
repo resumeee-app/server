@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
@@ -28,7 +29,12 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("failed to find free port: %v", err)
 	}
-	port := l.Addr().(*net.TCPAddr).Port
+	tcpAddr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = l.Close()
+		t.Fatalf("expected *net.TCPAddr listener address, got %T", l.Addr())
+	}
+	port := tcpAddr.Port
 	_ = l.Close()
 	return port
 }
@@ -373,6 +379,22 @@ func TestServer_OptionValidation(t *testing.T) {
 		opt  Option
 	}{
 		{"nil Config", WithConfig(nil)},
+		{"WithConfig invalid port", WithConfig(func() *Config { c := DefaultConfig(); c.Port = 0; return c }())},
+		{"WithConfig empty DefaultUserID", WithConfig(func() *Config { c := DefaultConfig(); c.DefaultUserID = "  "; return c }())},
+		{"WithConfig zero daily quota", WithConfig(func() *Config { c := DefaultConfig(); c.LLMDailyRequestLimit = 0; return c }())},
+		{"WithConfig zero worker concurrency", WithConfig(func() *Config { c := DefaultConfig(); c.WorkerConcurrency = 0; return c }())},
+		{"WithConfig zero RESTTimeout", WithConfig(func() *Config { c := DefaultConfig(); c.RESTTimeout = 0; return c }())},
+		{"WithConfig zero HTTPReadHeaderTimeout", WithConfig(func() *Config { c := DefaultConfig(); c.HTTPReadHeaderTimeout = 0; return c }())},
+		{"WithConfig zero MCPSSEKeepAliveInterval", WithConfig(func() *Config { c := DefaultConfig(); c.MCPSSEKeepAliveInterval = 0; return c }())},
+		{"invalid WithHandlerTimeouts pdfParse", WithHandlerTimeouts(0, time.Second, time.Second)},
+		{"invalid WithHandlerTimeouts renderPreview", WithHandlerTimeouts(time.Second, 0, time.Second)},
+		{"invalid WithHandlerTimeouts keepAlive", WithHandlerTimeouts(time.Second, time.Second, 0)},
+		{"invalid WithHTTPTimeouts readHeader", WithHTTPTimeouts(0, time.Second, time.Second, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts read", WithHTTPTimeouts(time.Second, 0, time.Second, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts minWrite", WithHTTPTimeouts(time.Second, time.Second, 0, time.Second, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts writeBuffer", WithHTTPTimeouts(time.Second, time.Second, time.Second, 0, time.Second, time.Second)},
+		{"invalid WithHTTPTimeouts idle", WithHTTPTimeouts(time.Second, time.Second, time.Second, time.Second, 0, time.Second)},
+		{"invalid WithHTTPTimeouts shutdown", WithHTTPTimeouts(time.Second, time.Second, time.Second, time.Second, time.Second, 0)},
 		{"invalid port 0", WithPort(0)},
 		{"invalid port 70000", WithPort(70000)},
 		{"empty DefaultUserID", WithDefaultUserID("")},
@@ -385,7 +407,11 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"invalid llmTimeout", WithTimeouts(time.Second, 0)},
 		{"nil Store", WithStore(nil)},
 		{"nil AuthProvider", WithAuthProvider(nil)},
+		{"admin AuthProvider in WithAuthProvider", WithAuthProvider(auth.NewAdminProvider("default"))},
+		{"nil RequestAuthProvider", WithRequestAuthProvider(nil)},
 		{"nil TokenVerifier", WithTokenVerifier("custom", nil)},
+		{"empty TokenVerifier name", WithTokenVerifier("   ", &mockAuthProvider{})},
+		{"admin TokenVerifier name", WithTokenVerifier("admin", &mockAuthProvider{})},
 		{"nil LLMRegistry", WithLLMRegistry(nil)},
 		{"nil LLMClient", WithLLMClient(nil)},
 		{"nil TemplateRenderer", WithTemplateRenderer(nil)},
@@ -401,5 +427,95 @@ func TestServer_OptionValidation(t *testing.T) {
 				t.Errorf("expected validation error for %s, got nil", tc.name)
 			}
 		})
+	}
+}
+
+func TestServer_WithRequestAuthProvider(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	memStore, err := memory.NewSeeded(ctx)
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
+
+	adminProv := auth.NewAdminProvider("request-tenant")
+	if err := memStore.UpsertProfile(ctx, &core.Profile{
+		UserID:   "request-tenant",
+		FullName: "Grace Hopper",
+	}); err != nil {
+		t.Fatalf("failed to seed profile: %v", err)
+	}
+
+	port := freePort(t)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx,
+			WithPort(port),
+			WithAdminMode(false),
+			WithStore(memStore),
+			WithRequestAuthProvider(adminProv),
+			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		)
+	}()
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForHealthy(t, baseURL)
+
+	resp, err := http.Get(baseURL + "/api/v1/profile")
+	if err != nil {
+		t.Fatalf("GET /api/v1/profile failed: %v", err)
+	}
+	var prof core.Profile
+	if err := json.NewDecoder(resp.Body).Decode(&prof); err != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("failed decoding profile: %v", err)
+	}
+	_ = resp.Body.Close()
+	if prof.UserID != "request-tenant" || prof.FullName != "Grace Hopper" {
+		t.Errorf("unexpected profile from WithRequestAuthProvider: %+v", prof)
+	}
+
+	http.DefaultClient.CloseIdleConnections()
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected shutdown error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
+	}
+}
+
+func TestServer_TimeoutAndConfigOptions(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DefaultUserID = "  custom-user  "
+	cfg.Environment = " "
+	cfg.LLMDebugDir = ""
+
+	srv, err := New(
+		WithConfig(cfg),
+		WithHandlerTimeouts(12*time.Minute, 15*time.Second, 20*time.Second),
+		WithHTTPTimeouts(6*time.Second, 70*time.Second, 40*time.Second, 15*time.Second, 150*time.Second, 12*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("expected valid config and timeout options, got error: %v", err)
+	}
+	if srv.cfg.DefaultUserID != "custom-user" {
+		t.Errorf("expected trimmed DefaultUserID 'custom-user', got %q", srv.cfg.DefaultUserID)
+	}
+	if srv.cfg.Environment != DefaultConfig().Environment {
+		t.Errorf("expected normalized Environment %q, got %q", DefaultConfig().Environment, srv.cfg.Environment)
+	}
+	if srv.cfg.LLMDebugDir != DefaultConfig().LLMDebugDir {
+		t.Errorf("expected normalized LLMDebugDir %q, got %q", DefaultConfig().LLMDebugDir, srv.cfg.LLMDebugDir)
+	}
+	if srv.cfg.PDFParseTimeout != 12*time.Minute || srv.cfg.RenderPreviewTimeout != 15*time.Second || srv.cfg.MCPSSEKeepAliveInterval != 20*time.Second {
+		t.Errorf("unexpected handler timeouts: %+v", srv.cfg)
+	}
+	if srv.cfg.HTTPReadHeaderTimeout != 6*time.Second || srv.cfg.HTTPReadTimeout != 70*time.Second || srv.cfg.HTTPMinWriteTimeout != 40*time.Second ||
+		srv.cfg.HTTPWriteTimeoutBuffer != 15*time.Second || srv.cfg.HTTPIdleTimeout != 150*time.Second || srv.cfg.HTTPShutdownTimeout != 12*time.Second {
+		t.Errorf("unexpected HTTP timeouts: %+v", srv.cfg)
 	}
 }

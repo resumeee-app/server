@@ -1,31 +1,48 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
 // Standard OpenAPI error codes.
 const (
-	CodeInvalidRequest          = "INVALID_REQUEST"
-	CodeUnauthorized            = "UNAUTHORIZED"
-	CodeForbidden               = "FORBIDDEN"
-	CodeNotFound                = "NOT_FOUND"
-	CodeConflict                = "CONFLICT"
-	CodeQuotaExceeded           = "QUOTA_EXCEEDED"
+	// CodeInvalidRequest indicates malformed input, missing required fields, or validation failure.
+	CodeInvalidRequest = "INVALID_REQUEST"
+	// CodeUnauthorized indicates missing, malformed, or expired authentication credentials.
+	CodeUnauthorized = "UNAUTHORIZED"
+	// CodeForbidden indicates the authenticated tenant lacks permission or tried to mutate an immutable resource.
+	CodeForbidden = "FORBIDDEN"
+	// CodeNotFound indicates the requested resource does not exist for the authenticated tenant.
+	CodeNotFound = "NOT_FOUND"
+	// CodeConflict indicates a state conflict such as duplicate creation or concurrent modification.
+	CodeConflict = "CONFLICT"
+	// CodeQuotaExceeded indicates the tenant exceeded its daily LLM request or monthly token quota.
+	CodeQuotaExceeded = "QUOTA_EXCEEDED"
+	// CodeTemplateValidationError indicates syntax or rendering validation failure in a template set.
 	CodeTemplateValidationError = "TEMPLATE_VALIDATION_ERROR"
-	CodeProvenanceError         = "PROVENANCE_ERROR"
-	CodeQueueFull               = "QUEUE_FULL"
-	CodeInternalError           = "INTERNAL_ERROR"
-	CodePayloadTooLarge         = "PAYLOAD_TOO_LARGE"
-	CodeUpstreamError           = "UPSTREAM_ERROR"
-	CodeServiceUnavailable      = "SERVICE_UNAVAILABLE"
+	// CodeProvenanceError indicates generated content failed provenance anchoring checks.
+	CodeProvenanceError = "PROVENANCE_ERROR"
+	// CodeQueueFull indicates the asynchronous worker queue cannot currently accept additional jobs.
+	CodeQueueFull = "QUEUE_FULL"
+	// CodeInternalError indicates an unexpected server-side failure.
+	CodeInternalError = "INTERNAL_ERROR"
+	// CodePayloadTooLarge indicates an uploaded body or file exceeds allowed size limits.
+	CodePayloadTooLarge = "PAYLOAD_TOO_LARGE"
+	// CodeUpstreamError indicates an upstream dependency such as an LLM provider failed.
+	CodeUpstreamError = "UPSTREAM_ERROR"
+	// CodeServiceUnavailable indicates a required service component is temporarily unavailable.
+	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
 )
 
 // ErrorDetail describes an error payload in the uniform JSON error envelope.
@@ -87,12 +104,24 @@ func writeError(w http.ResponseWriter, status int, code, message, details string
 	})
 }
 
-// writeDomainError translates known domain errors into uniform JSON error envelopes.
-func writeDomainError(w http.ResponseWriter, err error) {
+// writeAccessError translates store-unavailability or forbidden errors into 500 or 403 JSON responses.
+func writeAccessError(w http.ResponseWriter, err error, forbiddenMsg string) {
+	if msg, ok := access.StoreUnavailableMessage(err); ok {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, msg, "")
+		return
+	}
+	writeError(w, http.StatusForbidden, CodeForbidden, forbiddenMsg, "")
+}
+
+// writeDomainError translates known domain errors into uniform JSON error envelopes,
+// logging unexpected internal failures through logger (or slog.Default() when nil).
+func writeDomainError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	if err == nil {
 		return
 	}
 
+	// Domain sentinels carry client-safe diagnostics constructed by resumeee-core;
+	// storage adapters must never wrap raw SQL or DSN strings inside core.Err* sentinels.
 	if errors.Is(err, core.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", err.Error())
 		return
@@ -142,29 +171,45 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		return
 	}
 
-	slog.Default().Error("unhandled internal api error", "error", err)
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("unhandled internal api error", "error", err)
 	writeError(w, http.StatusInternalServerError, CodeInternalError, "an internal error occurred while processing the request", "")
+}
+
+// writeFormattedTextOutput writes html, markdown/md, or text/txt rendered outputs and returns true when handled.
+func writeFormattedTextOutput(w http.ResponseWriter, format string, out core.RenderOutput) bool {
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.HTML))
+		return true
+	case "markdown", "md":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.Markdown))
+		return true
+	case "text", "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(out.PlainText))
+		return true
+	default:
+		return false
+	}
 }
 
 // writeRenderOutput writes rendered resume output according to the format query parameter (html, markdown, text, or default json).
 func writeRenderOutput(w http.ResponseWriter, r *http.Request, out core.RenderOutput) {
 	format := strings.ToLower(r.URL.Query().Get("format"))
-	switch format {
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.HTML))
-	case "markdown", "md":
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.Markdown))
-	case "text", "txt":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(out.PlainText))
-	default:
-		writeJSON(w, http.StatusOK, out)
+	if writeFormattedTextOutput(w, format, out) {
+		return
 	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // writeQuotaError writes a structured 429 Too Many Requests response with guaranteed Retry-After header.
@@ -174,4 +219,28 @@ func writeQuotaError(w http.ResponseWriter, retryAfterSeconds int, message, deta
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 	writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, message, details)
+}
+
+// extendResponseWriteDeadline extends the per-request HTTP write deadline beyond timeout by
+// writeBuffer (falling back to config.DefaultHTTPWriteTimeoutBuffer when <= 0) so timeout
+// error responses can flush after context cancellation.
+func extendResponseWriteDeadline(w http.ResponseWriter, timeout, writeBuffer time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	if writeBuffer <= 0 {
+		writeBuffer = config.DefaultHTTPWriteTimeoutBuffer
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + writeBuffer))
+}
+
+// withRenderPreviewTimeout extends the response write deadline and derives a request context
+// bounded by cfg.RenderPreviewTimeout (falling back to config.DefaultRenderPreviewTimeout when <= 0).
+func withRenderPreviewTimeout(w http.ResponseWriter, r *http.Request, cfg RouterConfig) (context.Context, context.CancelFunc) {
+	previewTimeout := cfg.RenderPreviewTimeout
+	if previewTimeout <= 0 {
+		previewTimeout = config.DefaultRenderPreviewTimeout
+	}
+	extendResponseWriteDeadline(w, previewTimeout, cfg.HTTPWriteTimeoutBuffer)
+	return context.WithTimeout(r.Context(), previewTimeout)
 }

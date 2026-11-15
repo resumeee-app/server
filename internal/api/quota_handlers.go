@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 )
 
@@ -24,29 +25,34 @@ func registerQuotaRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("GET /quota", h.getQuota)
 }
 
+// quotaHandler serves tenant rate-limit and token quota endpoints.
 type quotaHandler struct {
 	cfg RouterConfig
+}
+
+// resolveQuotaLimits returns positive daily request and monthly token limits, falling back to config defaults.
+func resolveQuotaLimits(dailyLimit, monthlyLimit int) (int, int) {
+	if dailyLimit <= 0 {
+		dailyLimit = config.DefaultLLMDailyRequestLimit
+	}
+	if monthlyLimit <= 0 {
+		monthlyLimit = config.DefaultLLMMonthlyTokenLimit
+	}
+	return dailyLimit, monthlyLimit
 }
 
 // getQuota returns the current rate limit and token quota status for the authenticated tenant.
 func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
-	dailyLimit := h.cfg.DailyRequestLimit
-	if dailyLimit <= 0 {
-		dailyLimit = 50
-	}
-	monthlyLimit := h.cfg.MonthlyTokenLimit
-	if monthlyLimit <= 0 {
-		monthlyLimit = 1000000
-	}
+	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
 
 	var quota *core.TenantQuota
 	if h.cfg.QuotaStore != nil {
 		q, err := h.cfg.QuotaStore.Quota(ctx, userID)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
-			writeDomainError(w, err)
+			writeDomainError(w, h.cfg.Logger, err)
 			return
 		}
 		quota = q

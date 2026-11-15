@@ -83,10 +83,10 @@ github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112064701-762c32f45922 h1:4wUUF7jTlodDKCdpLNcDvszY9HYdKynSs9qm+QZVBqo=
-github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261112064701-762c32f45922/go.mod h1:z7NWszCpu4O/PMz7yVWpd0cgg6l9TMqssqXkyos3jRo=
-github.com/resumeee-app/resumeee-core v0.0.0-20261114210326-7401737feb72 h1:reA4Km4YI3c7W9/mXaglSD0e1HV39lWv/qZgPV1Cq7E=
-github.com/resumeee-app/resumeee-core v0.0.0-20261114210326-7401737feb72/go.mod h1:0IKQXgzjvUHcQ6Pti0VmRa6Ee0bzZnmIPELUs8NzSUw=
+github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261114223836-f1c8866fbe49 h1:j1NKiXS35eTGxndYBbtC2MJBIgb5cVJIJZf4TMUbJ/k=
+github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261114223836-f1c8866fbe49/go.mod h1:9d5NWpXxVQOij68uEs5YNEKnMpZX5gVcBcNXhgHit/I=
+github.com/resumeee-app/resumeee-core v0.0.0-20261115001056-a30f31308421 h1:ym9qmx9xJ1MCvRnwoly7NOd6wyEk2Bii1DMN+81EEiI=
+github.com/resumeee-app/resumeee-core v0.0.0-20261115001056-a30f31308421/go.mod h1:0IKQXgzjvUHcQ6Pti0VmRa6Ee0bzZnmIPELUs8NzSUw=
 github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261114212115-7614e1876d06 h1:tTevEgETAlCJPitaaKOw2fdJ+ch37SS1sYwgrOFauKI=
 github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261114212115-7614e1876d06/go.mod h1:kXRokNuggBtlHlETIo6mrN1yFmQdLZVapPacMTpa3T8=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=

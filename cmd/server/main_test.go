@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/resumeee-api/server"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
 )
@@ -27,7 +28,12 @@ func freePort(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("failed to find free port: %v", err)
 	}
-	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	tcpAddr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = l.Close()
+		t.Fatalf("expected *net.TCPAddr listener address, got %T", l.Addr())
+	}
+	port := strconv.Itoa(tcpAddr.Port)
 	_ = l.Close()
 	return port
 }
@@ -139,24 +145,24 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 
 func TestBuildRootHandler(t *testing.T) {
 	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /api/v1/profile", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /api/v1/profile", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"full_name":"Test User"}`))
 	})
 
-	handler := buildRootHandler(apiMux)
+	handler := server.BuildRootHandler(apiMux, nil)
 
 	tests := []struct {
 		name         string
@@ -271,7 +277,7 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 	// Wait for server to come up
 	clientNoRedirect := &http.Client{
 		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
@@ -373,39 +379,44 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 
 func TestBuildServer_Configuration(t *testing.T) {
 	mux := http.NewServeMux()
-	server := buildServer(":8080", mux, 11*time.Minute)
+	srv := server.BuildHTTPServer(":8080", mux, server.HTTPTimeouts{
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      11 * time.Minute,
+		IdleTimeout:       120 * time.Second,
+	})
 
-	if server.Addr != ":8080" {
-		t.Errorf("expected Addr :8080, got %s", server.Addr)
+	if srv.Addr != ":8080" {
+		t.Errorf("expected Addr :8080, got %s", srv.Addr)
 	}
-	if server.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("expected ReadHeaderTimeout 5s, got %v", server.ReadHeaderTimeout)
+	if srv.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("expected ReadHeaderTimeout 5s, got %v", srv.ReadHeaderTimeout)
 	}
-	if server.ReadTimeout != 60*time.Second {
-		t.Errorf("expected ReadTimeout 60s, got %v", server.ReadTimeout)
+	if srv.ReadTimeout != 60*time.Second {
+		t.Errorf("expected ReadTimeout 60s, got %v", srv.ReadTimeout)
 	}
-	if server.WriteTimeout != 11*time.Minute {
-		t.Errorf("expected WriteTimeout 11m, got %v", server.WriteTimeout)
+	if srv.WriteTimeout != 11*time.Minute {
+		t.Errorf("expected WriteTimeout 11m, got %v", srv.WriteTimeout)
 	}
-	if server.IdleTimeout != 120*time.Second {
-		t.Errorf("expected IdleTimeout 120s, got %v", server.IdleTimeout)
+	if srv.IdleTimeout != 120*time.Second {
+		t.Errorf("expected IdleTimeout 120s, got %v", srv.IdleTimeout)
 	}
-	if server.MaxHeaderBytes != 1<<20 {
-		t.Errorf("expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
+	if srv.MaxHeaderBytes != 1<<20 {
+		t.Errorf("expected MaxHeaderBytes 1MB, got %d", srv.MaxHeaderBytes)
 	}
 }
 
 func TestBuildRootHandler_MCPRouting(t *testing.T) {
-	apiMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiMux := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("api"))
 	})
-	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("mcp"))
 	})
 
-	root := buildRootHandler(apiMux, mcpMux)
+	root := server.BuildRootHandler(apiMux, mcpMux)
 
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/mcp/sse", nil)

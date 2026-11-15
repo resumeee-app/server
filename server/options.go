@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
@@ -37,16 +38,94 @@ type PDFTextExtractor interface {
 // Option configures a Server instance during construction.
 type Option func(*Server) error
 
-// WithConfig replaces the server's configuration with the provided Config struct.
+// WithConfig validates, normalizes, and replaces the server's configuration with the provided Config struct.
 func WithConfig(cfg *Config) Option {
 	return func(s *Server) error {
-		if cfg == nil {
-			return errors.New("server: Config cannot be nil")
+		normalized, err := validateAndNormalizeConfig(cfg)
+		if err != nil {
+			return err
 		}
-		copied := *cfg
-		s.cfg = &copied
+		s.cfg = &normalized
 		return nil
 	}
+}
+
+// validateAndNormalizeConfig enforces Config bounds and normalizes optional string defaults.
+func validateAndNormalizeConfig(cfg *Config) (Config, error) {
+	if cfg == nil {
+		return Config{}, errors.New("server: Config cannot be nil")
+	}
+	copied := *cfg
+	if copied.Port < 1 || copied.Port > 65535 {
+		return Config{}, fmt.Errorf("server: invalid port %d: must be between 1 and 65535", copied.Port)
+	}
+	copied.DefaultUserID = strings.TrimSpace(copied.DefaultUserID)
+	if copied.DefaultUserID == "" {
+		return Config{}, errors.New("server: defaultUserID cannot be empty")
+	}
+	if err := validateConfigLimits(&copied); err != nil {
+		return Config{}, err
+	}
+	if err := validateConfigDurations(&copied); err != nil {
+		return Config{}, err
+	}
+	if strings.TrimSpace(copied.Environment) == "" {
+		copied.Environment = config.DefaultEnvironment
+	} else {
+		copied.Environment = strings.TrimSpace(copied.Environment)
+	}
+	if strings.TrimSpace(copied.LLMDebugDir) == "" {
+		copied.LLMDebugDir = config.DefaultLLMDebugDir
+	} else {
+		copied.LLMDebugDir = strings.TrimSpace(copied.LLMDebugDir)
+	}
+	return copied, nil
+}
+
+// validateConfigLimits verifies non-duration numeric ceilings inside Config are positive.
+func validateConfigLimits(cfg *Config) error {
+	limits := []struct {
+		name string
+		val  int
+	}{
+		{"LLMDailyRequestLimit", cfg.LLMDailyRequestLimit},
+		{"LLMMonthlyTokenLimit", cfg.LLMMonthlyTokenLimit},
+		{"WorkerConcurrency", cfg.WorkerConcurrency},
+		{"WorkerQueueSize", cfg.WorkerQueueSize},
+		{"MaxConcurrentJobsPerTenant", cfg.MaxConcurrentJobsPerTenant},
+	}
+	for _, limit := range limits {
+		if limit.val <= 0 {
+			return fmt.Errorf("server: %s must be > 0, got %d", limit.name, limit.val)
+		}
+	}
+	return nil
+}
+
+// validateConfigDurations verifies every configured timeout and interval inside Config is positive.
+func validateConfigDurations(cfg *Config) error {
+	durations := []struct {
+		name string
+		val  time.Duration
+	}{
+		{"RESTTimeout", cfg.RESTTimeout},
+		{"LLMTimeout", cfg.LLMTimeout},
+		{"PDFParseTimeout", cfg.PDFParseTimeout},
+		{"RenderPreviewTimeout", cfg.RenderPreviewTimeout},
+		{"HTTPReadHeaderTimeout", cfg.HTTPReadHeaderTimeout},
+		{"HTTPReadTimeout", cfg.HTTPReadTimeout},
+		{"HTTPMinWriteTimeout", cfg.HTTPMinWriteTimeout},
+		{"HTTPWriteTimeoutBuffer", cfg.HTTPWriteTimeoutBuffer},
+		{"HTTPIdleTimeout", cfg.HTTPIdleTimeout},
+		{"HTTPShutdownTimeout", cfg.HTTPShutdownTimeout},
+		{"MCPSSEKeepAliveInterval", cfg.MCPSSEKeepAliveInterval},
+	}
+	for _, d := range durations {
+		if d.val <= 0 {
+			return fmt.Errorf("server: %s must be > 0, got %v", d.name, d.val)
+		}
+	}
+	return nil
 }
 
 // WithPort overrides the TCP port the HTTP server listens on.
@@ -129,6 +208,55 @@ func WithTimeouts(restTimeout, llmTimeout time.Duration) Option {
 	}
 }
 
+// WithHandlerTimeouts configures execution timeouts for synchronous PDF extraction,
+// template preview rendering, and MCP SSE heartbeat cadences.
+func WithHandlerTimeouts(pdfParseTimeout, renderPreviewTimeout, mcpSSEKeepAliveInterval time.Duration) Option {
+	return func(s *Server) error {
+		if pdfParseTimeout <= 0 {
+			return fmt.Errorf("server: pdfParseTimeout must be > 0, got %v", pdfParseTimeout)
+		}
+		if renderPreviewTimeout <= 0 {
+			return fmt.Errorf("server: renderPreviewTimeout must be > 0, got %v", renderPreviewTimeout)
+		}
+		if mcpSSEKeepAliveInterval <= 0 {
+			return fmt.Errorf("server: mcpSSEKeepAliveInterval must be > 0, got %v", mcpSSEKeepAliveInterval)
+		}
+		s.cfg.PDFParseTimeout = pdfParseTimeout
+		s.cfg.RenderPreviewTimeout = renderPreviewTimeout
+		s.cfg.MCPSSEKeepAliveInterval = mcpSSEKeepAliveInterval
+		return nil
+	}
+}
+
+// WithHTTPTimeouts configures socket-level HTTP server read, write, idle, and graceful shutdown bounds.
+func WithHTTPTimeouts(readHeader, read, minWrite, writeBuffer, idle, shutdown time.Duration) Option {
+	return func(s *Server) error {
+		checks := []struct {
+			name string
+			val  time.Duration
+		}{
+			{"readHeader", readHeader},
+			{"read", read},
+			{"minWrite", minWrite},
+			{"writeBuffer", writeBuffer},
+			{"idle", idle},
+			{"shutdown", shutdown},
+		}
+		for _, c := range checks {
+			if c.val <= 0 {
+				return fmt.Errorf("server: %s timeout must be > 0, got %v", c.name, c.val)
+			}
+		}
+		s.cfg.HTTPReadHeaderTimeout = readHeader
+		s.cfg.HTTPReadTimeout = read
+		s.cfg.HTTPMinWriteTimeout = minWrite
+		s.cfg.HTTPWriteTimeoutBuffer = writeBuffer
+		s.cfg.HTTPIdleTimeout = idle
+		s.cfg.HTTPShutdownTimeout = shutdown
+		return nil
+	}
+}
+
 // WithLLMDebug enables or disables persisting outbound LLM prompts and responses to disk.
 func WithLLMDebug(enabled bool, dir string) Option {
 	return func(s *Server) error {
@@ -177,11 +305,33 @@ func WithStore(store core.Store) Option {
 	}
 }
 
-// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase).
+// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase),
+// wrapping it via auth.NewTokenVerifierProvider for HTTP Bearer token extraction. Callers supplying
+// an HTTP-aware auth.Provider (such as auth.AdminProvider or a non-Bearer request authenticator) must
+// use WithRequestAuthProvider instead; passing an "admin" provider is rejected so local admin auth is
+// never silently replaced with Bearer-only parsing.
 func WithAuthProvider(provider core.AuthProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: AuthProvider cannot be nil")
+		}
+		name := strings.TrimSpace(provider.Name())
+		if name == "" {
+			return errors.New("server: AuthProvider name cannot be empty")
+		}
+		if strings.EqualFold(name, auth.ProviderAdmin) {
+			return errors.New("server: admin AuthProvider requires WithRequestAuthProvider or WithAdminMode(true)")
+		}
+		s.authProvider = auth.NewTokenVerifierProvider(name, provider)
+		return nil
+	}
+}
+
+// WithRequestAuthProvider injects an HTTP-aware auth.Provider implementation directly.
+func WithRequestAuthProvider(provider auth.Provider) Option {
+	return func(s *Server) error {
+		if provider == nil {
+			return errors.New("server: RequestAuthProvider cannot be nil")
 		}
 		s.authProvider = provider
 		return nil
@@ -194,7 +344,14 @@ func WithTokenVerifier(name string, verifier core.TokenVerifier) Option {
 		if verifier == nil {
 			return errors.New("server: TokenVerifier cannot be nil")
 		}
-		s.authProvider = auth.NewTokenVerifierProvider(name, verifier)
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return errors.New("server: TokenVerifier name cannot be empty")
+		}
+		if strings.EqualFold(trimmed, auth.ProviderAdmin) {
+			return errors.New("server: provider name \"admin\" is reserved for AdminProvider")
+		}
+		s.authProvider = auth.NewTokenVerifierProvider(trimmed, verifier)
 		return nil
 	}
 }
