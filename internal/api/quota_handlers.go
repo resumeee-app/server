@@ -24,6 +24,7 @@ func registerQuotaRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	mux.HandleFunc("GET /quota", h.getQuota)
 }
 
+// quotaHandler serves tenant rate-limit and token quota endpoints.
 type quotaHandler struct {
 	cfg RouterConfig
 }
@@ -31,7 +32,7 @@ type quotaHandler struct {
 // getQuota returns the current rate limit and token quota status for the authenticated tenant.
 func (h *quotaHandler) getQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	dailyLimit := h.cfg.DailyRequestLimit
 	if dailyLimit <= 0 {

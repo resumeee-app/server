@@ -13,6 +13,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
+// templateHandler serves resume template set CRUD and preview rendering endpoints.
 type templateHandler struct {
 	cfg RouterConfig
 }
@@ -42,6 +43,7 @@ type RenderTemplatePreviewRequest struct {
 	TextTemplate     string `json:"text_template"`
 }
 
+// CreateTemplateRequest defines the JSON payload for creating a custom resume template set.
 type CreateTemplateRequest struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
@@ -51,6 +53,7 @@ type CreateTemplateRequest struct {
 	TextTemplate     string `json:"text_template"`
 }
 
+// UpdateTemplateRequest defines the partial JSON payload for updating a custom resume template set.
 type UpdateTemplateRequest struct {
 	Name             *string `json:"name"`
 	Description      *string `json:"description"`
@@ -63,7 +66,7 @@ type UpdateTemplateRequest struct {
 // listTemplates returns all custom and built-in template sets for the user.
 func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	templates, err := h.cfg.TemplateStore.ListTemplates(ctx, userID)
 	if err != nil {
@@ -79,7 +82,7 @@ func (h *templateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 // createTemplate validates syntax across templates and saves a new template set.
 func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req CreateTemplateRequest
 	if !decodeJSON(w, r, &req) {
@@ -122,7 +125,7 @@ func (h *templateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 // getTemplate retrieves a template set by its identifier.
 func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
@@ -137,7 +140,7 @@ func (h *templateHandler) getTemplate(w http.ResponseWriter, r *http.Request) {
 // updateTemplate validates updated templates and updates the template set.
 func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
@@ -200,7 +203,7 @@ func (h *templateHandler) updateTemplate(w http.ResponseWriter, r *http.Request)
 // deleteTemplate removes a custom template set by its identifier.
 func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
@@ -227,8 +230,8 @@ func (h *templateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getRenderContext constructs a comprehensive execution context for template rendering.
-func (h *templateHandler) getRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
+// buildRenderContext constructs a comprehensive execution context for template rendering.
+func (h *templateHandler) buildRenderContext(ctx context.Context, userID string, tmpl *core.TemplateSet) *renderer.RenderContext {
 	return renderer.BuildPreviewRenderContext(ctx, h.cfg.ProfileStore, userID, tmpl)
 }
 
@@ -240,7 +243,7 @@ func (h *templateHandler) renderAllFormats(tmpl *core.TemplateSet, renderCtx *re
 // previewTemplate renders a saved template set on the server across HTML, Markdown, and text formats.
 func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	tmpl, err := h.cfg.TemplateStore.Template(ctx, userID, id)
@@ -249,7 +252,7 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	renderCtx := h.getRenderContext(ctx, userID, tmpl)
+	renderCtx := h.buildRenderContext(ctx, userID, tmpl)
 	out, err := h.renderAllFormats(tmpl, renderCtx)
 	if err != nil {
 		if errors.Is(err, core.ErrTemplateSyntax) {
@@ -266,7 +269,7 @@ func (h *templateHandler) previewTemplate(w http.ResponseWriter, r *http.Request
 // renderPreview renders draft Go template definitions on the server for real-time editor previews.
 func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req RenderTemplatePreviewRequest
 	if !decodeJSON(w, r, &req) {
@@ -298,7 +301,7 @@ func (h *templateHandler) renderPreview(w http.ResponseWriter, r *http.Request) 
 		TextTemplate:     txtTmpl,
 	}
 
-	renderCtx := h.getRenderContext(ctx, userID, tmpl)
+	renderCtx := h.buildRenderContext(ctx, userID, tmpl)
 	if cssStyles != "" {
 		renderCtx.CSSStyles = htmltemplate.CSS(cssStyles)
 	}

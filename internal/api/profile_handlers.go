@@ -1,23 +1,16 @@
 package api
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/llm"
 )
 
+// profileHandler serves main profile, JSON Resume import/export, PDF parsing, and career graph entity endpoints.
 type profileHandler struct {
 	cfg RouterConfig
 }
@@ -30,7 +23,7 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	serviceGuard := routeGuard{ok: cfg.ProfileService != nil, msg: "profile service unavailable"}
 	careerGuard := routeGuard{ok: cfg.CareerStore != nil, msg: "career store unavailable"}
 
-	// Main Profile
+	// Main profile, JSON Resume, and PDF ingestion routes.
 	mux.HandleFunc("GET /api/v1/profile", withRouteGuards(h.getProfile, profileGuard))
 	mux.HandleFunc("PUT /api/v1/profile", withRouteGuards(h.updateProfile, profileGuard))
 	mux.HandleFunc("GET /api/v1/profile/full", withRouteGuards(h.getFullProfile, profileGuard))
@@ -89,8 +82,7 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	handleCareer("DELETE /api/v1/facts/{id}", h.deleteFact)
 }
 
-// --- Request DTOs ---
-
+// UpdateProfileRequest defines the partial JSON payload for updating a user's main profile.
 type UpdateProfileRequest struct {
 	FullName           *string           `json:"full_name"`
 	Headline           *string           `json:"headline"`
@@ -103,154 +95,46 @@ type UpdateProfileRequest struct {
 	Metadata           map[string]any    `json:"metadata"`
 }
 
-type CreateSkillRequest struct {
-	ShortID         string         `json:"short_id,omitempty"`
-	Name            string         `json:"name"`
-	Category        string         `json:"category"`
-	Proficiency     string         `json:"proficiency"`
-	YearsExperience float64        `json:"years_experience"`
-	Keywords        []string       `json:"keywords"`
-	Metadata        map[string]any `json:"metadata"`
-}
-
-type UpdateSkillRequest struct {
-	ShortID         *string        `json:"short_id,omitempty"`
-	Name            *string        `json:"name"`
-	Category        *string        `json:"category"`
-	Proficiency     *string        `json:"proficiency"`
-	YearsExperience *float64       `json:"years_experience"`
-	Keywords        []string       `json:"keywords"`
-	Metadata        map[string]any `json:"metadata"`
-}
-
-type CreateExperienceRequest struct {
-	ShortID           string              `json:"short_id,omitempty"`
-	Company           string              `json:"company"`
-	RoleTitle         string              `json:"role_title"`
-	EmploymentType    core.EmploymentType `json:"employment_type"`
-	StartDate         core.Date           `json:"start_date"`
-	EndDate           *core.Date          `json:"end_date"`
-	IsCurrent         bool                `json:"is_current"`
-	Location          core.Location       `json:"location"`
-	CompanyLocation   *core.Location      `json:"company_location"`
-	CompanyContact    *core.ContactDetail `json:"company_contact"`
-	HoursPerWeek      *int                `json:"hours_per_week"`
-	SupervisorName    string              `json:"supervisor_name"`
-	SupervisorContact string              `json:"supervisor_contact"`
-	DutiesSummary     string              `json:"duties_summary"`
-	SkillIDs          []string            `json:"skill_ids"`
-	Metadata          map[string]any      `json:"metadata"`
-}
-
-type UpdateExperienceRequest struct {
-	ShortID           *string              `json:"short_id,omitempty"`
-	Company           *string              `json:"company"`
-	RoleTitle         *string              `json:"role_title"`
-	EmploymentType    *core.EmploymentType `json:"employment_type"`
-	StartDate         *core.Date           `json:"start_date"`
-	EndDate           *core.Date           `json:"end_date"`
-	IsCurrent         *bool                `json:"is_current"`
-	Location          *core.Location       `json:"location"`
-	CompanyLocation   *core.Location       `json:"company_location"`
-	CompanyContact    *core.ContactDetail  `json:"company_contact"`
-	HoursPerWeek      *int                 `json:"hours_per_week"`
-	SupervisorName    *string              `json:"supervisor_name"`
-	SupervisorContact *string              `json:"supervisor_contact"`
-	DutiesSummary     *string              `json:"duties_summary"`
-	SkillIDs          []string             `json:"skill_ids"`
-	Metadata          map[string]any       `json:"metadata"`
-}
-
-type CreateProjectRequest struct {
-	ShortID   string         `json:"short_id,omitempty"`
-	Name      string         `json:"name"`
-	Role      string         `json:"role"`
-	URL       string         `json:"url"`
-	StartDate *core.Date     `json:"start_date"`
-	EndDate   *core.Date     `json:"end_date"`
-	Summary   string         `json:"summary"`
-	SkillIDs  []string       `json:"skill_ids"`
-	Metadata  map[string]any `json:"metadata"`
-}
-
-type UpdateProjectRequest struct {
-	ShortID   *string        `json:"short_id,omitempty"`
-	Name      *string        `json:"name"`
-	Role      *string        `json:"role"`
-	URL       *string        `json:"url"`
-	StartDate *core.Date     `json:"start_date"`
-	EndDate   *core.Date     `json:"end_date"`
-	Summary   *string        `json:"summary"`
-	SkillIDs  []string       `json:"skill_ids"`
-	Metadata  map[string]any `json:"metadata"`
-}
-
-type CreateEducationRequest struct {
-	ShortID     string         `json:"short_id,omitempty"`
-	Institution string         `json:"institution"`
-	Degree      string         `json:"degree"`
-	Field       string         `json:"field"`
-	StartDate   *core.Date     `json:"start_date"`
-	EndDate     *core.Date     `json:"end_date"`
-	Score       string         `json:"score"`
-	Location    core.Location  `json:"location"`
-	Metadata    map[string]any `json:"metadata"`
-}
-
-type UpdateEducationRequest struct {
-	ShortID     *string        `json:"short_id,omitempty"`
-	Institution *string        `json:"institution"`
-	Degree      *string        `json:"degree"`
-	Field       *string        `json:"field"`
-	StartDate   *core.Date     `json:"start_date"`
-	EndDate     *core.Date     `json:"end_date"`
-	Score       *string        `json:"score"`
-	Location    *core.Location `json:"location"`
-	Metadata    map[string]any `json:"metadata"`
-}
-
-type CreateCertificationRequest struct {
-	ShortID  string         `json:"short_id,omitempty"`
-	Name     string         `json:"name"`
-	Issuer   string         `json:"issuer"`
-	Date     *core.Date     `json:"date"`
-	URL      string         `json:"url"`
-	Summary  string         `json:"summary"`
-	Metadata map[string]any `json:"metadata"`
-}
-
-type UpdateCertificationRequest struct {
-	ShortID  *string        `json:"short_id,omitempty"`
-	Name     *string        `json:"name"`
-	Issuer   *string        `json:"issuer"`
-	Date     *core.Date     `json:"date"`
-	URL      *string        `json:"url"`
-	Summary  *string        `json:"summary"`
-	Metadata map[string]any `json:"metadata"`
-}
-
-type CreateFactRequest struct {
-	ShortID   string         `json:"short_id,omitempty"`
-	OwnerID   string         `json:"owner_id"`
-	OwnerType core.OwnerType `json:"owner_type"`
-	Statement string         `json:"statement"`
-	Impact    string         `json:"impact"`
-	SkillIDs  []string       `json:"skill_ids"`
-}
-
-type UpdateFactRequest struct {
-	ShortID   *string  `json:"short_id,omitempty"`
-	Statement *string  `json:"statement"`
-	Impact    *string  `json:"impact"`
-	SkillIDs  []string `json:"skill_ids"`
-}
-
 // parseSkillsInput converts raw skill identifier/name strings from user payloads into core.Skill instances.
 func parseSkillsInput(skillIDs []string) []core.Skill {
 	return core.ParseSkillsInput(skillIDs)
 }
 
-// --- Main Profile Handlers ---
+// resolveEntityShortID returns the trimmed client shortID or generates a prefixed one when blank.
+func resolveEntityShortID(raw, prefix string) string {
+	shortID := strings.TrimSpace(raw)
+	if shortID == "" {
+		return core.GenerateShortID(prefix)
+	}
+	return shortID
+}
+
+// applyShortIDUpdate overwrites target with *shortID when shortID is non-nil and non-blank.
+func applyShortIDUpdate(target *string, shortID *string) {
+	if shortID != nil && strings.TrimSpace(*shortID) != "" {
+		*target = strings.TrimSpace(*shortID)
+	}
+}
+
+// optionalDatePtr returns d if non-nil and non-zero, or nil otherwise.
+func optionalDatePtr(d *core.Date) *core.Date {
+	if d == nil || d.IsZero() {
+		return nil
+	}
+	return d
+}
+
+// applyOptionalDate updates *target from src when src is non-nil, clearing *target when src is zero.
+func applyOptionalDate(target **core.Date, src *core.Date) {
+	if src == nil {
+		return
+	}
+	if src.IsZero() {
+		*target = nil
+		return
+	}
+	*target = src
+}
 
 // ensureProfileService checks that ProfileService is configured and writes a 500 JSON error otherwise.
 func (h *profileHandler) ensureProfileService(w http.ResponseWriter) bool {
@@ -264,7 +148,7 @@ func (h *profileHandler) ensureProfileService(w http.ResponseWriter) bool {
 // getProfile retrieves basic profile fields for the authenticated user.
 func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
@@ -278,7 +162,7 @@ func (h *profileHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 // updateProfile validates and upserts the user's main profile record.
 func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req UpdateProfileRequest
 	if !decodeJSON(w, r, &req) {
@@ -287,18 +171,35 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 
 	prof, err := h.cfg.ProfileStore.Profile(ctx, userID)
 	if err != nil {
-		if errors.Is(err, core.ErrNotFound) {
-			prof = &core.Profile{
-				ID:           "profile-" + userID,
-				UserID:       userID,
-				MainRevision: 0,
-			}
-		} else {
+		if !errors.Is(err, core.ErrNotFound) {
 			writeDomainError(w, err)
 			return
 		}
+		prof = &core.Profile{
+			ID:           "profile-" + userID,
+			UserID:       userID,
+			MainRevision: 0,
+		}
 	}
 
+	applyProfileUpdates(prof, req)
+
+	if err := h.cfg.ProfileStore.UpsertProfile(ctx, prof); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	updated, err := h.cfg.ProfileStore.Profile(ctx, userID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// applyProfileUpdates copies non-nil scalar and slice fields from req onto prof.
+func applyProfileUpdates(prof *core.Profile, req UpdateProfileRequest) {
 	if req.FullName != nil {
 		prof.FullName = *req.FullName
 	}
@@ -326,25 +227,12 @@ func (h *profileHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Metadata != nil {
 		prof.Metadata = req.Metadata
 	}
-
-	if err := h.cfg.ProfileStore.UpsertProfile(ctx, prof); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	updated, err := h.cfg.ProfileStore.Profile(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, updated)
 }
 
 // getFullProfile returns the full Career Graph snapshot for the authenticated user.
 func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	snap, err := h.cfg.ProfileStore.Snapshot(ctx, userID)
 	if err != nil {
@@ -357,18 +245,23 @@ func (h *profileHandler) getFullProfile(w http.ResponseWriter, r *http.Request) 
 
 // importJSONResume imports an entire profile and career graph from raw JSON Resume bytes.
 func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request) {
+	h.handleJSONResumeImport(w, r, "empty JSON Resume payload", "empty or unreadable JSON Resume payload")
+}
+
+// handleJSONResumeImport validates raw JSON Resume request bytes and imports them via ProfileService.
+func (h *profileHandler) handleJSONResumeImport(w http.ResponseWriter, r *http.Request, emptyMsg, unreadableMsg string) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	if r.Body == nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty JSON Resume payload", "")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, emptyMsg, "")
 		return
 	}
 	defer func() { _ = r.Body.Close() }()
 
 	payload, err := io.ReadAll(r.Body)
 	if err != nil || len(payload) == 0 {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty or unreadable JSON Resume payload", "")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, unreadableMsg, "")
 		return
 	}
 
@@ -398,7 +291,7 @@ func (h *profileHandler) importJSONResume(w http.ResponseWriter, r *http.Request
 // exportJSONResume exports the user's main career graph as a standard JSON Resume document.
 func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var versionIDPtr *string
 	if v := strings.TrimSpace(r.URL.Query().Get("version_id")); v != "" {
@@ -412,1376 +305,4 @@ func (h *profileHandler) exportJSONResume(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, resume)
-}
-
-// DefaultPDFParseTimeout defines the timeout budget for parsing PDF resumes and extracting structured data with an LLM.
-const DefaultPDFParseTimeout = 10 * time.Minute
-
-// AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
-type AsyncPDFJobResponse struct {
-	JobID   string                 `json:"job_id"`
-	Status  core.PDFParseJobStatus `json:"status"`
-	Message string                 `json:"message"`
-}
-
-// reserveQuota reserves quota for an LLM operation, writing error responses directly and returning (reservationID, ok).
-func (h *profileHandler) reserveQuota(ctx context.Context, w http.ResponseWriter, userID string, op core.LLMOperationType, estimatedTokens, dailyLimit, monthlyLimit int) (string, bool) {
-	if h.cfg.QuotaStore == nil {
-		return "", true
-	}
-	rec, qErr := h.cfg.QuotaStore.ReserveQuota(ctx, userID, op, estimatedTokens, dailyLimit, monthlyLimit)
-	if qErr != nil {
-		if errors.Is(qErr, core.ErrQuotaExceeded) {
-			writeQuotaError(w, 3600, "llm operation quota exceeded", qErr.Error())
-			return "", false
-		}
-		writeDomainError(w, qErr)
-		return "", false
-	}
-	return rec.ID, true
-}
-
-// parsePDFResume parses an uploaded candidate resume PDF. By default, it operates asynchronously,
-// enqueuing the extraction task and returning 202 Accepted with a job ID for status polling.
-// If the request explicitly supplies ?sync=true, it executes synchronously for backward compatibility.
-func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// 10 MB maximum upload size
-	const maxUploadSize = 10 << 20
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxUploadSize, "error", err)
-			}
-			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
-			return
-		}
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.WarnContext(ctx, "failed to parse multipart form for pdf upload", "error", err)
-		}
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "file exceeds maximum allowed size (10MB) or invalid form data", err.Error())
-		return
-	}
-	defer func() {
-		if r.MultipartForm != nil {
-			_ = r.MultipartForm.RemoveAll()
-		}
-	}()
-
-	file, fileHeader, err := r.FormFile("file")
-	if err != nil {
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.WarnContext(ctx, "missing required 'file' form field", "error", err)
-		}
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "missing required 'file' form field", err.Error())
-		return
-	}
-	defer func() { _ = file.Close() }()
-
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	provider := strings.TrimSpace(r.FormValue("provider"))
-	model := strings.TrimSpace(r.FormValue("model"))
-
-	fileSize := fileHeader.Size
-	if fileSize <= 0 {
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.WarnContext(ctx, "empty file uploaded", "filename", fileHeader.Filename)
-		}
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty file uploaded", "")
-		return
-	}
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.WarnContext(ctx, "pdf upload exceeded maximum size limit", "limit_bytes", maxUploadSize, "error", err)
-			}
-			writeError(w, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "file exceeds maximum allowed size (10MB)", "")
-			return
-		}
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "failed to read uploaded file", "filename", fileHeader.Filename, "error", err)
-		}
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "failed to read uploaded file", err.Error())
-		return
-	}
-
-	readerAt := bytes.NewReader(data)
-	text, err := h.cfg.PDFExtractor.ExtractText(ctx, readerAt, int64(len(data)))
-	if err != nil {
-		if errors.Is(err, core.ErrValidation) {
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.WarnContext(ctx, "pdf text extraction validation failed", "filename", fileHeader.Filename, "error", err)
-			}
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error(), "")
-			return
-		}
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "unexpected pdf extraction error", "filename", fileHeader.Filename, "error", err)
-		}
-		writeDomainError(w, err)
-		return
-	}
-
-	if h.cfg.ResumeExtractor == nil {
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "LLM resume extractor not configured", "filename", fileHeader.Filename)
-		}
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "LLM resume extractor not configured", "")
-		return
-	}
-
-	// Determine execution mode: asynchronous by default when an enqueuer is configured
-	// (or when ?async=true), synchronous when ?sync=true or when no worker queue is configured.
-	runAsync := strings.EqualFold(r.URL.Query().Get("async"), "true") || (h.cfg.PDFJobEnqueuer != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
-
-	dailyLimit := h.cfg.DailyRequestLimit
-	if dailyLimit <= 0 {
-		dailyLimit = 50
-	}
-	monthlyLimit := h.cfg.MonthlyTokenLimit
-	if monthlyLimit <= 0 {
-		monthlyLimit = 1000000
-	}
-
-	// Synchronous execution path
-	if !runAsync {
-		reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
-		if !ok {
-			return
-		}
-
-		llmTimeout := h.cfg.LLMTimeout
-		if llmTimeout <= 0 {
-			llmTimeout = DefaultPDFParseTimeout
-		}
-		syncCtx, cancel := context.WithTimeout(r.Context(), llmTimeout)
-		defer cancel()
-
-		extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, provider, model, 1000)
-		if err != nil {
-			if h.cfg.QuotaStore != nil && reservationID != "" {
-				_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, err.Error())
-			}
-
-			logLevel := slog.LevelError
-			var (
-				logMsg     string
-				statusCode int
-				errorCode  string
-				respMsg    string
-			)
-
-			switch {
-			case errors.Is(err, llm.ErrNoProviders):
-				logMsg = "no LLM provider configured on server"
-				statusCode = http.StatusServiceUnavailable
-				errorCode = CodeServiceUnavailable
-			case errors.Is(err, llm.ErrUnauthorized):
-				logMsg = "upstream LLM provider authentication failed"
-				statusCode = http.StatusBadGateway
-				errorCode = CodeUpstreamError
-			case errors.Is(err, llm.ErrRateLimited):
-				logMsg = "upstream LLM provider rate limit exceeded"
-				statusCode = http.StatusTooManyRequests
-				errorCode = CodeUpstreamError
-				respMsg = "upstream LLM provider rate limit exceeded; retry shortly"
-			case errors.Is(err, llm.ErrUpstream):
-				logMsg = "upstream LLM provider returned server error"
-				statusCode = http.StatusBadGateway
-				errorCode = CodeUpstreamError
-			case errors.Is(err, llm.ErrInvalidResponse):
-				logMsg = "upstream LLM provider returned invalid response"
-				statusCode = http.StatusBadGateway
-				errorCode = CodeUpstreamError
-			case errors.Is(err, llm.ErrProviderNotFound):
-				logLevel = slog.LevelWarn
-				logMsg = "requested LLM provider not configured"
-				statusCode = http.StatusBadRequest
-				errorCode = CodeInvalidRequest
-			case errors.Is(err, context.DeadlineExceeded):
-				logMsg = "upstream LLM request timed out"
-				statusCode = http.StatusGatewayTimeout
-				errorCode = CodeUpstreamError
-				respMsg = "upstream LLM parsing timed out after 10 minutes"
-			case errors.Is(err, core.ErrValidation):
-				logLevel = slog.LevelWarn
-				logMsg = "failed to extract structured resume validation error"
-				statusCode = http.StatusBadRequest
-				errorCode = CodeInvalidRequest
-				respMsg = "failed to extract structured resume: " + err.Error()
-			default:
-				logMsg = "unexpected error during resume extraction"
-			}
-
-			if respMsg == "" {
-				respMsg = logMsg
-			}
-
-			if h.cfg.Logger != nil {
-				h.cfg.Logger.Log(ctx, logLevel, logMsg, "error", err, "provider", provider)
-			}
-
-			if statusCode > 0 {
-				writeError(w, statusCode, errorCode, respMsg, "")
-			} else {
-				writeDomainError(w, err)
-			}
-			return
-		}
-
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.CommitUsage(ctx, reservationID, usage)
-		}
-
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.InfoContext(ctx, "successfully parsed pdf resume synchronously", "filename", fileHeader.Filename, "provider", provider, "model", model)
-		}
-		writeJSON(w, http.StatusOK, extracted)
-		return
-	}
-
-	// Asynchronous mode (default): enqueue and return 202 Accepted
-	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
-		return
-	}
-
-	if h.cfg.PDFJobEnqueuer == nil {
-		if h.cfg.Logger != nil {
-			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server", "job_id", "")
-		}
-		writeError(w, http.StatusServiceUnavailable, CodeServiceUnavailable, "PDF worker queue not configured on server", "")
-		return
-	}
-
-	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, 1000, dailyLimit, monthlyLimit)
-	if !ok {
-		return
-	}
-
-	jobID := "pdf-job-" + uuid.New().String()
-	now := time.Now().UTC()
-	job := &core.PDFParseJob{
-		ID:        jobID,
-		UserID:    userID,
-		Status:    core.PDFParseJobStatusPending,
-		Filename:  fileHeader.Filename,
-		Provider:  provider,
-		Model:     model,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	if err := h.cfg.PDFJobStore.CreateJob(ctx, job); err != nil {
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
-		}
-		writeDomainError(w, err)
-		return
-	}
-
-	task := core.PDFParseJobTask{
-		JobID:         jobID,
-		UserID:        userID,
-		RawText:       text,
-		Provider:      provider,
-		Model:         model,
-		ReservationID: reservationID,
-	}
-
-	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
-		}
-		if errors.Is(err, core.ErrQueueFull) {
-			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
-			return
-		}
-		writeDomainError(w, err)
-		return
-	}
-
-	if h.cfg.Logger != nil {
-		h.cfg.Logger.InfoContext(ctx, "enqueued pdf resume parse job", "job_id", jobID, "filename", fileHeader.Filename)
-	}
-
-	writeJSON(w, http.StatusAccepted, AsyncPDFJobResponse{
-		JobID:   jobID,
-		Status:  core.PDFParseJobStatusPending,
-		Message: "PDF parsing job queued",
-	})
-}
-
-// getPDFParseJob returns the status and candidate result of an asynchronous PDF resume parsing job.
-func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	jobID := r.PathValue("id")
-	if jobID == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "job id is required", "")
-		return
-	}
-
-	if h.cfg.PDFJobStore == nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "PDF job store not configured", "")
-		return
-	}
-
-	job, err := h.cfg.PDFJobStore.Job(ctx, userID, jobID)
-	if err != nil {
-		if errors.Is(err, core.ErrNotFound) {
-			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
-			return
-		}
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, job)
-}
-
-// commitPDFResume commits approved JSON Resume data into the user's main career graph.
-func (h *profileHandler) commitPDFResume(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	if r.Body == nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty request body", "")
-		return
-	}
-	defer func() { _ = r.Body.Close() }()
-
-	payload, err := io.ReadAll(r.Body)
-	if err != nil || len(payload) == 0 {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "empty or unreadable payload", "")
-		return
-	}
-
-	var testMap map[string]any
-	if err := json.Unmarshal(payload, &testMap); err != nil {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "malformed JSON payload", err.Error())
-		return
-	}
-
-	if !h.ensureProfileService(w) {
-		return
-	}
-
-	snap, err := h.cfg.ProfileService.ImportJSONResume(ctx, userID, payload)
-	if err != nil {
-		if errors.Is(err, core.ErrValidation) {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid JSON Resume payload", err.Error())
-			return
-		}
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, snap)
-}
-
-// --- Skills Handlers ---
-
-// listSkills returns skills registered under the authenticated user, optionally filtered by origin type.
-func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var (
-		skills []core.Skill
-		err    error
-	)
-
-	skillType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
-	switch skillType {
-	case "", "all":
-		skills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
-	case "global":
-		skills, err = h.cfg.CareerStore.ListGlobalSkills(ctx)
-	case "custom":
-		var allSkills []core.Skill
-		allSkills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
-		if err == nil {
-			skills = make([]core.Skill, 0, len(allSkills))
-			for _, s := range allSkills {
-				if !s.IsGlobal && s.UserID == userID {
-					skills = append(skills, s)
-				}
-			}
-		}
-	default:
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid skill type filter: must be one of all, global, custom", "")
-		return
-	}
-
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if skills == nil {
-		skills = []core.Skill{}
-	}
-	writeJSON(w, http.StatusOK, skills)
-}
-
-// createSkill handles POST /api/v1/skills requests, persisting a new Skill.
-// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
-func (h *profileHandler) createSkill(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateSkillRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name is required", "")
-		return
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("skill")
-	}
-
-	skill := core.Skill{
-		ID:              core.GenerateID("skill"),
-		ShortID:         shortID,
-		UserID:          userID,
-		Name:            req.Name,
-		Category:        req.Category,
-		Proficiency:     req.Proficiency,
-		YearsExperience: req.YearsExperience,
-		Keywords:        req.Keywords,
-		Metadata:        req.Metadata,
-	}
-
-	if err := h.cfg.CareerStore.CreateSkill(ctx, &skill); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, skill)
-}
-
-// getSkill retrieves a single skill by ID.
-func (h *profileHandler) getSkill(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, skill)
-}
-
-// updateSkill handles PUT/PATCH /api/v1/skills/{id} requests, updating skill attributes
-// including optional short_id updates.
-func (h *profileHandler) updateSkill(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	skill, err := h.cfg.CareerStore.Skill(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateSkillRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		skill.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Name != nil {
-		skill.Name = *req.Name
-	}
-	if req.Category != nil {
-		skill.Category = *req.Category
-	}
-	if req.Proficiency != nil {
-		skill.Proficiency = *req.Proficiency
-	}
-	if req.YearsExperience != nil {
-		skill.YearsExperience = *req.YearsExperience
-	}
-	if req.Keywords != nil {
-		skill.Keywords = req.Keywords
-	}
-	if req.Metadata != nil {
-		skill.Metadata = req.Metadata
-	}
-
-	if err := h.cfg.CareerStore.UpdateSkill(ctx, skill); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, skill)
-}
-
-// deleteSkill deletes a skill by ID.
-func (h *profileHandler) deleteSkill(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteSkill(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Work Experiences Handlers ---
-
-// listExperiences retrieves all work experience entries for the authenticated user.
-func (h *profileHandler) listExperiences(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	exps, err := h.cfg.CareerStore.ListExperiences(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if exps == nil {
-		exps = []core.WorkExperience{}
-	}
-	writeJSON(w, http.StatusOK, exps)
-}
-
-// createExperience handles POST /api/v1/experiences requests, persisting a new WorkExperience.
-// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
-func (h *profileHandler) createExperience(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateExperienceRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.Company == "" || req.RoleTitle == "" || req.StartDate.IsZero() {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "company, role_title, and start_date are required", "")
-		return
-	}
-
-	var skills []core.Skill
-	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("exp")
-	}
-
-	var endDate *core.Date
-	if req.EndDate != nil && !req.EndDate.IsZero() {
-		endDate = req.EndDate
-	}
-
-	exp := core.WorkExperience{
-		ID:                core.GenerateID("exp"),
-		ShortID:           shortID,
-		UserID:            userID,
-		Company:           req.Company,
-		RoleTitle:         req.RoleTitle,
-		EmploymentType:    req.EmploymentType,
-		StartDate:         req.StartDate,
-		EndDate:           endDate,
-		IsCurrent:         req.IsCurrent,
-		Location:          req.Location,
-		HoursPerWeek:      req.HoursPerWeek,
-		SupervisorName:    req.SupervisorName,
-		SupervisorContact: req.SupervisorContact,
-		DutiesSummary:     req.DutiesSummary,
-		Skills:            skills,
-		Metadata:          req.Metadata,
-	}
-	if req.CompanyLocation != nil {
-		exp.CompanyLocation = *req.CompanyLocation
-	}
-	if req.CompanyContact != nil {
-		exp.CompanyContact = req.CompanyContact
-	}
-
-	if err := h.cfg.CareerStore.CreateExperience(ctx, &exp); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, exp)
-}
-
-// getExperience retrieves a specific work experience entry by its identifier.
-func (h *profileHandler) getExperience(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, exp)
-}
-
-// updateExperience handles PUT/PATCH /api/v1/experiences/{id} requests, updating experience attributes
-// including optional short_id updates.
-func (h *profileHandler) updateExperience(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	exp, err := h.cfg.CareerStore.Experience(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateExperienceRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		exp.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Company != nil {
-		exp.Company = *req.Company
-	}
-	if req.RoleTitle != nil {
-		exp.RoleTitle = *req.RoleTitle
-	}
-	if req.EmploymentType != nil {
-		exp.EmploymentType = *req.EmploymentType
-	}
-	if req.StartDate != nil {
-		exp.StartDate = *req.StartDate
-	}
-	if req.EndDate != nil {
-		if req.EndDate.IsZero() {
-			exp.EndDate = nil
-		} else {
-			exp.EndDate = req.EndDate
-		}
-	}
-	if req.IsCurrent != nil {
-		exp.IsCurrent = *req.IsCurrent
-	}
-	if req.Location != nil {
-		exp.Location = *req.Location
-	}
-	if req.CompanyLocation != nil {
-		exp.CompanyLocation = *req.CompanyLocation
-	}
-	if req.CompanyContact != nil {
-		if req.CompanyContact.Value == "" {
-			exp.CompanyContact = nil
-		} else {
-			exp.CompanyContact = req.CompanyContact
-		}
-	}
-	if req.HoursPerWeek != nil {
-		if *req.HoursPerWeek <= 0 {
-			exp.HoursPerWeek = nil
-		} else {
-			exp.HoursPerWeek = req.HoursPerWeek
-		}
-	}
-	if req.SupervisorName != nil {
-		exp.SupervisorName = *req.SupervisorName
-	}
-	if req.SupervisorContact != nil {
-		exp.SupervisorContact = *req.SupervisorContact
-	}
-	if req.DutiesSummary != nil {
-		exp.DutiesSummary = *req.DutiesSummary
-	}
-	if req.Metadata != nil {
-		exp.Metadata = req.Metadata
-	}
-	if req.SkillIDs != nil {
-		exp.Skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	if err := h.cfg.CareerStore.UpdateExperience(ctx, exp); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, exp)
-}
-
-// deleteExperience removes a work experience entry by its identifier.
-func (h *profileHandler) deleteExperience(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteExperience(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Projects Handlers ---
-
-// listProjects returns all portfolio projects for the authenticated user.
-func (h *profileHandler) listProjects(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	projs, err := h.cfg.CareerStore.ListProjects(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if projs == nil {
-		projs = []core.Project{}
-	}
-	writeJSON(w, http.StatusOK, projs)
-}
-
-// createProject handles POST /api/v1/projects requests, persisting a new Project.
-// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
-func (h *profileHandler) createProject(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateProjectRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name is required", "")
-		return
-	}
-
-	var skills []core.Skill
-	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("proj")
-	}
-
-	var startDate *core.Date
-	if req.StartDate != nil && !req.StartDate.IsZero() {
-		startDate = req.StartDate
-	}
-	var endDate *core.Date
-	if req.EndDate != nil && !req.EndDate.IsZero() {
-		endDate = req.EndDate
-	}
-
-	proj := core.Project{
-		ID:        core.GenerateID("proj"),
-		ShortID:   shortID,
-		UserID:    userID,
-		Name:      req.Name,
-		Role:      req.Role,
-		URL:       req.URL,
-		StartDate: startDate,
-		EndDate:   endDate,
-		Summary:   req.Summary,
-		Skills:    skills,
-		Metadata:  req.Metadata,
-	}
-
-	if err := h.cfg.CareerStore.CreateProject(ctx, &proj); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, proj)
-}
-
-// getProject retrieves a project record by its identifier.
-func (h *profileHandler) getProject(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, proj)
-}
-
-// updateProject handles PUT/PATCH /api/v1/projects/{id} requests, updating project attributes
-// including optional short_id updates.
-func (h *profileHandler) updateProject(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	proj, err := h.cfg.CareerStore.Project(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateProjectRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		proj.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Name != nil {
-		proj.Name = *req.Name
-	}
-	if req.Role != nil {
-		proj.Role = *req.Role
-	}
-	if req.URL != nil {
-		proj.URL = *req.URL
-	}
-	if req.StartDate != nil {
-		if req.StartDate.IsZero() {
-			proj.StartDate = nil
-		} else {
-			proj.StartDate = req.StartDate
-		}
-	}
-	if req.EndDate != nil {
-		if req.EndDate.IsZero() {
-			proj.EndDate = nil
-		} else {
-			proj.EndDate = req.EndDate
-		}
-	}
-	if req.Summary != nil {
-		proj.Summary = *req.Summary
-	}
-	if req.Metadata != nil {
-		proj.Metadata = req.Metadata
-	}
-	if req.SkillIDs != nil {
-		proj.Skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	if err := h.cfg.CareerStore.UpdateProject(ctx, proj); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, proj)
-}
-
-// deleteProject removes a project entry by its identifier.
-func (h *profileHandler) deleteProject(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteProject(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Education Handlers ---
-
-// listEducation returns all education records for the authenticated user.
-func (h *profileHandler) listEducation(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	edus, err := h.cfg.CareerStore.ListEducation(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if edus == nil {
-		edus = []core.Education{}
-	}
-	writeJSON(w, http.StatusOK, edus)
-}
-
-// createEducation handles POST /api/v1/education requests, persisting a new Education record.
-// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
-func (h *profileHandler) createEducation(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateEducationRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.Institution == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "institution is required", "")
-		return
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("edu")
-	}
-
-	var startDate *core.Date
-	if req.StartDate != nil && !req.StartDate.IsZero() {
-		startDate = req.StartDate
-	}
-	var endDate *core.Date
-	if req.EndDate != nil && !req.EndDate.IsZero() {
-		endDate = req.EndDate
-	}
-
-	edu := core.Education{
-		ID:          core.GenerateID("edu"),
-		ShortID:     shortID,
-		UserID:      userID,
-		Institution: req.Institution,
-		Degree:      req.Degree,
-		Field:       req.Field,
-		StartDate:   startDate,
-		EndDate:     endDate,
-		Score:       req.Score,
-		Location:    req.Location,
-		Metadata:    req.Metadata,
-	}
-
-	if err := h.cfg.CareerStore.CreateEducation(ctx, &edu); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, edu)
-}
-
-// getEducation retrieves an education record by its identifier.
-func (h *profileHandler) getEducation(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, edu)
-}
-
-// updateEducation handles PUT/PATCH /api/v1/education/{id} requests, updating education attributes
-// including optional short_id updates.
-func (h *profileHandler) updateEducation(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	edu, err := h.cfg.CareerStore.Education(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateEducationRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		edu.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Institution != nil {
-		edu.Institution = *req.Institution
-	}
-	if req.Degree != nil {
-		edu.Degree = *req.Degree
-	}
-	if req.Field != nil {
-		edu.Field = *req.Field
-	}
-	if req.StartDate != nil {
-		if req.StartDate.IsZero() {
-			edu.StartDate = nil
-		} else {
-			edu.StartDate = req.StartDate
-		}
-	}
-	if req.EndDate != nil {
-		if req.EndDate.IsZero() {
-			edu.EndDate = nil
-		} else {
-			edu.EndDate = req.EndDate
-		}
-	}
-	if req.Score != nil {
-		edu.Score = *req.Score
-	}
-	if req.Location != nil {
-		edu.Location = *req.Location
-	}
-	if req.Metadata != nil {
-		edu.Metadata = req.Metadata
-	}
-
-	if err := h.cfg.CareerStore.UpdateEducation(ctx, edu); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, edu)
-}
-
-// deleteEducation removes an education entry by its identifier.
-func (h *profileHandler) deleteEducation(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteEducation(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Certifications Handlers ---
-
-// listCertifications returns all professional certifications recorded for the user.
-func (h *profileHandler) listCertifications(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	certs, err := h.cfg.CareerStore.ListCertifications(ctx, userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if certs == nil {
-		certs = []core.Certification{}
-	}
-	writeJSON(w, http.StatusOK, certs)
-}
-
-// createCertification handles POST /api/v1/certifications requests, persisting a new Certification.
-// It generates a canonical UUID and auto-generates a compact short_id unless explicitly provided by the caller.
-func (h *profileHandler) createCertification(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateCertificationRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "name is required", "")
-		return
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("cert")
-	}
-
-	var certDate *core.Date
-	if req.Date != nil && !req.Date.IsZero() {
-		certDate = req.Date
-	}
-
-	cert := core.Certification{
-		ID:       core.GenerateID("cert"),
-		ShortID:  shortID,
-		UserID:   userID,
-		Name:     req.Name,
-		Issuer:   req.Issuer,
-		Date:     certDate,
-		URL:      req.URL,
-		Summary:  req.Summary,
-		Metadata: req.Metadata,
-	}
-
-	if err := h.cfg.CareerStore.CreateCertification(ctx, &cert); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, cert)
-}
-
-// getCertification retrieves a certification record by its identifier.
-func (h *profileHandler) getCertification(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, cert)
-}
-
-// updateCertification handles PUT/PATCH /api/v1/certifications/{id} requests, updating certification attributes
-// including optional short_id updates.
-func (h *profileHandler) updateCertification(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	cert, err := h.cfg.CareerStore.Certification(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateCertificationRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		cert.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Name != nil {
-		cert.Name = *req.Name
-	}
-	if req.Issuer != nil {
-		cert.Issuer = *req.Issuer
-	}
-	if req.Date != nil {
-		if req.Date.IsZero() {
-			cert.Date = nil
-		} else {
-			cert.Date = req.Date
-		}
-	}
-	if req.URL != nil {
-		cert.URL = *req.URL
-	}
-	if req.Summary != nil {
-		cert.Summary = *req.Summary
-	}
-	if req.Metadata != nil {
-		cert.Metadata = req.Metadata
-	}
-
-	if err := h.cfg.CareerStore.UpdateCertification(ctx, cert); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, cert)
-}
-
-// deleteCertification deletes a certification record by its identifier.
-func (h *profileHandler) deleteCertification(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteCertification(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Facts Handlers ---
-
-// listFacts returns career facts associated with an entity specified by owner_type and owner_id query params.
-func (h *profileHandler) listFacts(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	ownerType := r.URL.Query().Get("owner_type")
-	ownerID := r.URL.Query().Get("owner_id")
-
-	if ownerType == "" || ownerID == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "owner_type and owner_id query parameters are required", "")
-		return
-	}
-
-	facts, err := h.cfg.CareerStore.ListFactsByOwner(ctx, userID, ownerType, ownerID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if facts == nil {
-		facts = []core.Fact{}
-	}
-	writeJSON(w, http.StatusOK, facts)
-}
-
-// createFact handles POST /api/v1/facts requests, persisting a new child Fact.
-// It generates a canonical UUID, auto-generates a short_id if omitted, and resolves owner_id to its canonical UUID.
-func (h *profileHandler) createFact(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-
-	var req CreateFactRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.OwnerID == "" || req.OwnerType == "" || req.Statement == "" {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "owner_id, owner_type, and statement are required", "")
-		return
-	}
-
-	var canonicalOwnerID string
-	switch req.OwnerType {
-	case core.OwnerTypeWorkExperience:
-		exp, err := h.cfg.CareerStore.Experience(ctx, userID, req.OwnerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for work_experience", err.Error())
-			return
-		}
-		canonicalOwnerID = exp.ID
-	case core.OwnerTypeProject:
-		proj, err := h.cfg.CareerStore.Project(ctx, userID, req.OwnerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for project", err.Error())
-			return
-		}
-		canonicalOwnerID = proj.ID
-	case core.OwnerTypeEducation:
-		edu, err := h.cfg.CareerStore.Education(ctx, userID, req.OwnerID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid owner_id for education", err.Error())
-			return
-		}
-		canonicalOwnerID = edu.ID
-	default:
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("invalid owner_type: %q", req.OwnerType), "")
-		return
-	}
-
-	var skills []core.Skill
-	if len(req.SkillIDs) > 0 {
-		skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	shortID := strings.TrimSpace(req.ShortID)
-	if shortID == "" {
-		shortID = core.GenerateShortID("fact")
-	}
-
-	fact := core.Fact{
-		ID:        core.GenerateID("fact"),
-		ShortID:   shortID,
-		UserID:    userID,
-		OwnerID:   canonicalOwnerID,
-		OwnerType: req.OwnerType,
-		Statement: req.Statement,
-		Impact:    req.Impact,
-		Skills:    skills,
-	}
-
-	if err := h.cfg.CareerStore.CreateFact(ctx, &fact); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, fact)
-}
-
-// getFact retrieves an individual fact by its identifier.
-func (h *profileHandler) getFact(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, fact)
-}
-
-// updateFact handles PUT/PATCH /api/v1/facts/{id} requests, updating fact attributes
-// including optional short_id updates.
-func (h *profileHandler) updateFact(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	fact, err := h.cfg.CareerStore.Fact(ctx, userID, id)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	var req UpdateFactRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	if req.ShortID != nil && strings.TrimSpace(*req.ShortID) != "" {
-		fact.ShortID = strings.TrimSpace(*req.ShortID)
-	}
-	if req.Statement != nil {
-		fact.Statement = *req.Statement
-	}
-	if req.Impact != nil {
-		fact.Impact = *req.Impact
-	}
-	if req.SkillIDs != nil {
-		fact.Skills = parseSkillsInput(req.SkillIDs)
-	}
-
-	if err := h.cfg.CareerStore.UpdateFact(ctx, fact); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, fact)
-}
-
-// deleteFact removes a fact record by its identifier.
-func (h *profileHandler) deleteFact(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
-	id := r.PathValue("id")
-
-	if err := h.cfg.CareerStore.DeleteFact(ctx, userID, id); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }

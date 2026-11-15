@@ -95,7 +95,7 @@ func registerResources(s *serverSDK.MCPServer, cfg ServerConfig) {
 // Returns:
 //   - ResourceHandlerFunc compatible with the MCP SDK.
 func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+	return func(ctx context.Context, _ mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.RESTTimeout)
 		defer cancel()
 
@@ -104,11 +104,12 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 
 		var snapshot *core.MainProfileSnapshot
 		var err error
-		if cfg.ProfileService != nil {
+		switch {
+		case cfg.ProfileService != nil:
 			snapshot, err = cfg.ProfileService.Snapshot(ctx, userID)
-		} else if cfg.ProfileStore != nil {
+		case cfg.ProfileStore != nil:
 			snapshot, err = cfg.ProfileStore.Snapshot(ctx, userID)
-		} else {
+		default:
 			return nil, errors.New("profile service and store unavailable")
 		}
 
@@ -127,12 +128,24 @@ func handleResourceMainProfile(cfg ServerConfig) serverSDK.ResourceHandlerFunc {
 	}
 }
 
+// supportedLanguagesPayload serializes the default and supported tailoring languages.
+type supportedLanguagesPayload struct {
+	DefaultLanguage    string   `json:"default_language"`
+	SupportedLanguages []string `json:"supported_languages"`
+}
+
+// branchDetailsPayload serializes a branch alongside its active version when present.
+type branchDetailsPayload struct {
+	Branch        *core.Branch        `json:"branch"`
+	ActiveVersion *core.BranchVersion `json:"active_version"`
+}
+
 // handleResourceSupportedLanguages returns the supported and default languages for resume tailoring.
 func handleResourceSupportedLanguages(_ ServerConfig) serverSDK.ResourceHandlerFunc {
-	return func(ctx context.Context, req mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
-		payload := map[string]any{
-			"default_language":    core.DefaultLanguage,
-			"supported_languages": core.SupportedLanguages,
+	return func(_ context.Context, _ mcpSDK.ReadResourceRequest) ([]mcpSDK.ResourceContents, error) {
+		payload := supportedLanguagesPayload{
+			DefaultLanguage:    core.DefaultLanguage,
+			SupportedLanguages: core.SupportedLanguages,
 		}
 		return jsonResourceContents("resumeee://languages", payload)
 	}
@@ -170,16 +183,16 @@ func handleResourceBranchDetails(cfg ServerConfig) serverSDK.ResourceTemplateHan
 			return nil, errors.New("branch not found or access denied")
 		}
 
-		var activeVer any
+		var activeVer *core.BranchVersion
 		if branch.ActiveVersionID != nil && *branch.ActiveVersionID != "" {
 			if v, vErr := cfg.BranchStore.Version(ctx, branch.ID, *branch.ActiveVersionID); vErr == nil && v != nil {
 				activeVer = v
 			}
 		}
 
-		payload := map[string]any{
-			"branch":         branch,
-			"active_version": activeVer,
+		payload := branchDetailsPayload{
+			Branch:        branch,
+			ActiveVersion: activeVer,
 		}
 
 		contents, err := jsonResourceContents(req.Params.URI, payload)

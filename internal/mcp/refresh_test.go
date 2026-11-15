@@ -284,7 +284,11 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Fatalf("expected list_presets success, got: %+v, err: %v", listRes, err)
 	}
 	var presetList []core.Preset
-	if err := json.Unmarshal([]byte(listRes.Content[0].(mcpSDK.TextContent).Text), &presetList); err != nil {
+	listTextContent, ok := listRes.Content[0].(mcpSDK.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", listRes.Content[0])
+	}
+	if err := json.Unmarshal([]byte(listTextContent.Text), &presetList); err != nil {
 		t.Fatalf("failed to unmarshal preset list: %v", err)
 	}
 	if len(presetList) < 2 {
@@ -317,7 +321,11 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		DefaultLanguage    string   `json:"default_language"`
 		SupportedLanguages []string `json:"supported_languages"`
 	}
-	if err := json.Unmarshal([]byte(langRes.Content[0].(mcpSDK.TextContent).Text), &langPayload); err != nil {
+	langTextContent, ok := langRes.Content[0].(mcpSDK.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", langRes.Content[0])
+	}
+	if err := json.Unmarshal([]byte(langTextContent.Text), &langPayload); err != nil {
 		t.Fatalf("failed to unmarshal language list: %v", err)
 	}
 	if langPayload.DefaultLanguage != core.DefaultLanguage {
@@ -701,7 +709,7 @@ type failingGetBranchStore struct {
 	err error
 }
 
-func (f *failingGetBranchStore) GetBranch(ctx context.Context, id string) (*core.Branch, error) {
+func (f *failingGetBranchStore) GetBranch(_ context.Context, _ string) (*core.Branch, error) {
 	return nil, f.err
 }
 

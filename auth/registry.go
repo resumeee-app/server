@@ -43,13 +43,13 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 	}
 
 	// Always register Admin provider
-	adminProvider := NewAdminAuthProvider(defaultUserID)
+	adminProvider := NewAdminProvider(defaultUserID)
 	r.Register(adminProvider)
 
 	// Register Firebase provider if project ID is provided
 	if cfg.FirebaseProjectID != "" {
 		firebaseProvider := firebase.NewFirebaseTokenVerifier(cfg.FirebaseProjectID, opts...)
-		r.Register(firebaseProvider)
+		r.RegisterVerifier(firebaseProvider)
 	}
 
 	// Reset defaultProvider under mutex so explicit selection hierarchy determines the active default
@@ -74,9 +74,8 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 	return r, nil
 }
 
-// Register adds a core.AuthProvider (or auth.Provider) to the registry.
-// If the provider does not directly implement RequestAuthenticator, it is wrapped via NewTokenVerifierProvider.
-func (r *Registry) Register(provider core.AuthProvider) {
+// Register adds an HTTP-aware Provider to the registry under its normalized lowercase name.
+func (r *Registry) Register(provider Provider) {
 	if r == nil || provider == nil {
 		return
 	}
@@ -85,18 +84,25 @@ func (r *Registry) Register(provider core.AuthProvider) {
 		return
 	}
 
-	p, ok := provider.(Provider)
-	if !ok {
-		p = NewTokenVerifierProvider(name, provider)
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.providers[name] = p
+	r.providers[name] = provider
 	if r.defaultProvider == "" {
 		r.defaultProvider = name
 	}
+}
+
+// RegisterVerifier adapts a bearer-only core.AuthProvider via NewTokenVerifierProvider and registers it.
+func (r *Registry) RegisterVerifier(provider core.AuthProvider) {
+	if r == nil || provider == nil {
+		return
+	}
+	name := strings.ToLower(strings.TrimSpace(provider.Name()))
+	if name == "" {
+		return
+	}
+	r.Register(NewTokenVerifierProvider(name, provider))
 }
 
 // Get retrieves a registered provider by name (case-insensitive).

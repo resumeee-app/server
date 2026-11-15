@@ -366,16 +366,16 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		t.Fatalf("failed to create attacker template: %v", err)
 	}
 
-	// Seed private strategy owned by attacker
-	foreignStrat := &core.Preset{
-		ID:                 "strat-foreign-attacker",
+	// Seed private preset owned by attacker
+	foreignPreset := &core.Preset{
+		ID:                 "preset-foreign-attacker",
 		UserID:             attackerID,
 		Name:               "Secret Attacker Strategy",
 		SystemInstructions: "Strictly confidential attacker directives",
 		TemplateSetID:      "builtin-standard-clean",
 	}
-	if err := env.presetStore.CreatePreset(ctx, foreignStrat); err != nil {
-		t.Fatalf("failed to create attacker strategy: %v", err)
+	if err := env.presetStore.CreatePreset(ctx, foreignPreset); err != nil {
+		t.Fatalf("failed to create attacker preset: %v", err)
 	}
 
 	// Helper for checking error response envelope
@@ -417,7 +417,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		reqBody := map[string]any{
 			"name":                  "Infiltrator Branch Strategy",
 			"template_set_id":       "builtin-standard-clean",
-			"tailoring_strategy_id": foreignStrat.ID,
+			"tailoring_strategy_id": foreignPreset.ID,
 		}
 		raw, _ := json.Marshal(reqBody)
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches", bytes.NewReader(raw))
@@ -436,7 +436,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		reqBody := map[string]any{
 			"name":            "Infiltrator Branch Preset",
 			"template_set_id": "builtin-standard-clean",
-			"preset_id":       foreignStrat.ID,
+			"preset_id":       foreignPreset.ID,
 		}
 		raw, _ := json.Marshal(reqBody)
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches", bytes.NewReader(raw))
@@ -481,7 +481,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	// 5. PUT /branches/{id} with foreign tailoring_strategy_id -> 403 Forbidden
 	t.Run("UpdateBranch_ForeignTailoringStrategyID_Returns403", func(t *testing.T) {
 		reqBody := map[string]any{
-			"tailoring_strategy_id": foreignStrat.ID,
+			"tailoring_strategy_id": foreignPreset.ID,
 		}
 		raw, _ := json.Marshal(reqBody)
 		req, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/branches/"+legitBranch.ID, bytes.NewReader(raw))
@@ -498,7 +498,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	// 6. PUT /branches/{id} with foreign preset_id -> 403 Forbidden
 	t.Run("UpdateBranch_ForeignPresetID_Returns403", func(t *testing.T) {
 		reqBody := map[string]any{
-			"preset_id": foreignStrat.ID,
+			"preset_id": foreignPreset.ID,
 		}
 		raw, _ := json.Marshal(reqBody)
 		req, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/branches/"+legitBranch.ID, bytes.NewReader(raw))

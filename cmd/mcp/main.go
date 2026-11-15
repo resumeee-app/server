@@ -28,20 +28,26 @@ import (
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
+// Operational defaults for the standalone stdio MCP server.
+const (
+	// mcpWorkerConcurrency sets the number of concurrent async tailoring workers in stdio CLI mode.
+	mcpWorkerConcurrency = 2
+
+	// mcpWorkerQueueSize caps buffered async tailoring tasks in stdio CLI mode.
+	mcpWorkerQueueSize = 50
+
+	// mcpFallbackDBPath is used if loading config from environment fails unexpectedly.
+	mcpFallbackDBPath = "data/resumeee.db"
+
+	// mcpFallbackRESTTimeout bounds synchronous tool/resource calls when fallback config is active.
+	mcpFallbackRESTTimeout = 30 * time.Second
+)
+
 // StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
 type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
 
 // defaultSQLiteInitializer creates a SQLite persistence backend and seeds default records.
-//
-// Parameters:
-//   - ctx: Startup context.
-//   - cfg: MCP runtime configuration.
-//   - logger: System logger for recording operational messages.
-//
-// Returns:
-//   - core.Store: Initialized SQLite store.
-//   - error: Non-nil if SQLite connection or seeding fails.
-func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error) {
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, _ *slog.Logger) (core.Store, error) {
 	return storage.Open(ctx, storage.Config{
 		Driver:        storage.DriverSQLite,
 		DSN:           cfg.DBPath,
@@ -50,43 +56,54 @@ func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *s
 	})
 }
 
-// main is the primary process entrypoint, listening for OS interrupt signals and launching run().
+// main is the primary process entrypoint launching the stdio MCP server.
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, os.Stdin, os.Stdout, os.Args[1:]...); err != nil {
+	if err := run(context.Background(), os.Stdin, os.Stdout, os.Args[1:]...); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 // run parses CLI flags and configuration, initializes database and services using default SQLite persistence, and serves MCP JSON-RPC over stdio.
-//
-// Parameters:
-//   - parent: Cancellation context for process lifecycle.
-//   - in: Standard input reader for incoming JSON-RPC requests.
-//   - out: Standard output writer for outgoing JSON-RPC responses.
-//   - args: Command-line arguments passed to flag parsing.
-//
-// Returns:
-//   - error: Non-nil if configuration, database initialization, or stdio serving encounters an unrecoverable failure.
 func run(parent context.Context, in io.Reader, out io.Writer, args ...string) error {
 	return runWithStore(parent, defaultSQLiteInitializer, in, out, args...)
 }
 
 // runWithStore parses CLI flags and configuration, initializes injected storage and services, and serves MCP JSON-RPC over stdio.
-//
-// Parameters:
-//   - parent: Cancellation context for process lifecycle.
-//   - storeInit: Storage backend initializer injecting store implementations.
-//   - in: Standard input reader for incoming JSON-RPC requests.
-//   - out: Standard output writer for outgoing JSON-RPC responses.
-//   - args: Command-line arguments passed to flag parsing.
-//
-// Returns:
-//   - error: Non-nil if configuration, storage initialization, or stdio serving encounters an unrecoverable failure.
 func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Reader, out io.Writer, args ...string) error {
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg, err := loadMCPConfig(args)
+	if err != nil {
+		return err
+	}
+
+	// Logging must go to stderr so stdout remains purely reserved for JSON-RPC messages.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+	}))
+
+	store, err := storeInit(ctx, cfg, logger)
+	if err != nil {
+		return fmt.Errorf("initializing store: %w", err)
+	}
+	defer closeMCPStore(store, logger)
+
+	mcpCfg, workerPool := buildMCPServerConfig(ctx, cfg, store, logger)
+	workerPool.Start(ctx)
+	defer workerPool.Stop()
+
+	if err := mcpCfg.EnsureTenant(ctx, cfg.DefaultUserID); err != nil {
+		logger.WarnContext(ctx, "failed to provision default tenant", "user_id", cfg.DefaultUserID, "err", err)
+	}
+
+	mcpServer := resumeeeMCP.NewServer(mcpCfg)
+	return serverSDK.NewStdioServer(mcpServer).Listen(ctx, in, out)
+}
+
+// loadMCPConfig loads environment config and applies CLI flag overrides for the MCP binary.
+func loadMCPConfig(args []string) (*config.Config, error) {
 	fs := flag.NewFlagSet("resumeee-mcp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -96,7 +113,6 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		configFile string
 		adminMode  bool
 	)
-
 	fs.StringVar(&dbPath, "db", "", "Path to SQLite database file (or :memory:)")
 	fs.StringVar(&userID, "user-id", "", "Default authenticated user ID")
 	fs.StringVar(&configFile, "config", "", "Optional path to environment config file")
@@ -104,16 +120,17 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	fs.BoolVar(&adminMode, "admin", false, "Alias for -admin-mode")
 
 	if err := fs.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
+	_ = configFile
 
 	cfg, err := config.Load()
 	if err != nil {
 		cfg = &config.Config{
-			DBPath:        "data/resumeee.db",
-			DefaultUserID: "default",
-			RESTTimeout:   30 * time.Second,
-			LLMTimeout:    10 * time.Minute,
+			DBPath:        mcpFallbackDBPath,
+			DefaultUserID: config.DefaultUserID,
+			RESTTimeout:   mcpFallbackRESTTimeout,
+			LLMTimeout:    config.DefaultLLMTimeout,
 		}
 	}
 
@@ -123,11 +140,9 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 			adminExplicit = true
 		}
 	})
-
 	if adminExplicit {
 		cfg.Admin = adminMode
 	}
-
 	if dbPath != "" {
 		cfg.DBPath = dbPath
 	}
@@ -135,30 +150,21 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		cfg.DefaultUserID = userID
 	}
 
-	// Logging must go to stderr so stdout remains purely reserved for JSON-RPC messages
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
-	}))
+	return cfg, nil
+}
 
-	store, err := storeInit(parent, cfg, logger)
-	if err != nil {
-		return fmt.Errorf("initializing store: %w", err)
-	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			logger.Warn("failed to close store", "err", err)
-		}
-	}()
-
+// buildMCPServerConfig wires domain services, worker pool, and auth provider for MCP execution.
+func buildMCPServerConfig(ctx context.Context, cfg *config.Config, store core.Store, logger *slog.Logger) (resumeeeMCP.ServerConfig, *worker.Pool) {
 	profileStore := store.Profiles()
 	careerStore := store.Career()
 	presetStore := store.Presets()
 	templateStore := store.Templates()
 	branchStore := store.Branches()
 	userStore := store.Users()
+	quotaStore := store.Quotas()
+
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
-
 	profileSvc := profile.New(profileStore, careerStore, branchStore)
 
 	llmRegistry := cfg.NewLLMRegistry(logger)
@@ -166,13 +172,13 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 	resumeExtractor := llm.NewRegistryExtractor(llmRegistry)
 
 	workerPool := worker.New(worker.Config{
-		Concurrency:     2,
-		QueueSize:       50,
+		Concurrency:     mcpWorkerConcurrency,
+		QueueSize:       mcpWorkerQueueSize,
 		Branches:        branchStore,
 		Profiles:        profileStore,
 		Presets:         presetStore,
 		Templates:       templateStore,
-		Quotas:          store.Quotas(),
+		Quotas:          quotaStore,
 		ResumeExtractor: resumeExtractor,
 		LLMTimeout:      cfg.LLMTimeout,
 		Generator:       llmService,
@@ -180,15 +186,13 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		Renderer:        templateRenderer,
 		Logger:          logger,
 	})
-	workerPool.Start(parent)
-	defer workerPool.Stop()
 
 	branchSvc := branch.New(branch.Config{
 		Branches:       branchStore,
 		Profiles:       profileStore,
 		Presets:        presetStore,
 		Templates:      templateStore,
-		Quotas:         store.Quotas(),
+		Quotas:         quotaStore,
 		JobEnqueuer:    workerPool,
 		Validator:      provValidator,
 		Renderer:       templateRenderer,
@@ -216,6 +220,12 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		TailoringTimeout: cfg.LLMTimeout,
 	}
 
+	resolveMCPAuthProvider(ctx, cfg, logger, &mcpCfg)
+	return mcpCfg, workerPool
+}
+
+// resolveMCPAuthProvider initializes auth from config and attaches any active provider onto mcpCfg.
+func resolveMCPAuthProvider(ctx context.Context, cfg *config.Config, logger *slog.Logger, mcpCfg *resumeeeMCP.ServerConfig) {
 	authReg, err := auth.NewRegistryFromConfig(auth.Config{
 		DefaultUserID:     cfg.DefaultUserID,
 		FirebaseProjectID: cfg.FirebaseProjectID,
@@ -223,20 +233,21 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		Admin:             cfg.Admin,
 	})
 	if err != nil {
-		logger.WarnContext(parent, "failed to initialize auth registry for mcp", "err", err)
-	} else if prov, err := authReg.Default(); err != nil {
-		logger.WarnContext(parent, "no active auth provider resolved for mcp from config", "err", err)
-	} else {
-		mcpCfg.AuthProvider = prov
-		mcpCfg.TokenVerifier = prov
+		logger.WarnContext(ctx, "failed to initialize auth registry for mcp", "err", err)
+		return
 	}
-
-	if err := mcpCfg.EnsureTenant(parent, cfg.DefaultUserID); err != nil {
-		logger.WarnContext(parent, "failed to provision default tenant", "user_id", cfg.DefaultUserID, "err", err)
+	prov, err := authReg.Default()
+	if err != nil {
+		logger.WarnContext(ctx, "no active auth provider resolved for mcp from config", "err", err)
+		return
 	}
+	mcpCfg.AuthProvider = prov
+	mcpCfg.TokenVerifier = prov
+}
 
-	mcpServer := resumeeeMCP.NewServer(mcpCfg)
-	stdioServer := serverSDK.NewStdioServer(mcpServer)
-
-	return stdioServer.Listen(parent, in, out)
+// closeMCPStore closes store on exit and logs any failure to stderr.
+func closeMCPStore(store core.Store, logger *slog.Logger) {
+	if err := store.Close(); err != nil {
+		logger.Warn("failed to close store", "err", err)
+	}
 }

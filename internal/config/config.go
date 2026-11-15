@@ -40,21 +40,46 @@ type Config struct {
 	LLMTimeout                 time.Duration
 }
 
-// Default configuration constants.
+// Default configuration constants applied when environment variables or flags are unset.
 const (
-	DefaultPort                       = 8080
-	DefaultDBPath                     = "./data/resumeee.db"
-	DefaultUserIDVal                  = "default"
-	DefaultAdmin                      = false
-	DefaultLLMDailyRequestLimit       = 50
-	DefaultLLMMonthlyTokenLimit       = 1000000
-	DefaultWorkerConcurrency          = 2
-	DefaultWorkerQueueSize            = 100
+	// DefaultPort is the default TCP port listened on by the unified HTTP server.
+	DefaultPort = 8080
+
+	// DefaultDBPath is the default filesystem path for the SQLite database.
+	DefaultDBPath = "./data/resumeee.db"
+
+	// DefaultUserID is the fallback tenant identifier used in local single-user admin mode.
+	DefaultUserID = "default"
+
+	// DefaultAdmin controls whether local single-user admin mode is enabled by default (multi-tenant safe).
+	DefaultAdmin = false
+
+	// DefaultLLMDailyRequestLimit bounds daily rolling LLM requests per tenant.
+	DefaultLLMDailyRequestLimit = 50
+
+	// DefaultLLMMonthlyTokenLimit bounds monthly rolling LLM tokens consumed per tenant.
+	DefaultLLMMonthlyTokenLimit = 1000000
+
+	// DefaultWorkerConcurrency sets the default number of concurrent background tailoring workers.
+	DefaultWorkerConcurrency = 2
+
+	// DefaultWorkerQueueSize sets the bounded in-memory task queue capacity across workers.
+	DefaultWorkerQueueSize = 100
+
+	// DefaultMaxConcurrentJobsPerTenant caps simultaneous in-flight LLM jobs for a single tenant.
 	DefaultMaxConcurrentJobsPerTenant = 2
-	DefaultEnvironment                = "development"
-	DefaultLLMDebugDir                = "data/llm"
-	DefaultRESTTimeout                = 20 * time.Second
-	DefaultLLMTimeout                 = 10 * time.Minute
+
+	// DefaultEnvironment identifies the deployment environment name for log formatting.
+	DefaultEnvironment = "development"
+
+	// DefaultLLMDebugDir specifies the directory where LLM prompt debug dumps are written when enabled.
+	DefaultLLMDebugDir = "data/llm"
+
+	// DefaultRESTTimeout bounds synchronous HTTP/MCP handler execution durations.
+	DefaultRESTTimeout = 20 * time.Second
+
+	// DefaultLLMTimeout bounds asynchronous LLM tailoring and PDF extraction durations.
+	DefaultLLMTimeout = 10 * time.Minute
 )
 
 // Load reads configuration from process environment variables and a local .env file if present.
@@ -68,10 +93,32 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		lookup = os.Getenv
 	}
 
-	cfg := &Config{
+	cfg := defaultConfig()
+	if err := loadServerConfig(cfg, lookup); err != nil {
+		return nil, err
+	}
+	if err := loadAuthConfig(cfg, lookup); err != nil {
+		return nil, err
+	}
+	if err := loadQuotaAndWorkerConfig(cfg, lookup); err != nil {
+		return nil, err
+	}
+	if err := loadTimeoutConfig(cfg, lookup); err != nil {
+		return nil, err
+	}
+	if err := loadLLMConfig(cfg, lookup); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// defaultConfig returns a Config initialized with standard baseline defaults.
+func defaultConfig() *Config {
+	return &Config{
 		Port:                       DefaultPort,
 		DBPath:                     DefaultDBPath,
-		DefaultUserID:              DefaultUserIDVal,
+		DefaultUserID:              DefaultUserID,
 		Admin:                      DefaultAdmin,
 		LLMDailyRequestLimit:       DefaultLLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       DefaultLLMMonthlyTokenLimit,
@@ -85,201 +132,171 @@ func LoadFrom(lookup func(string) string) (*Config, error) {
 		RESTTimeout:                DefaultRESTTimeout,
 		LLMTimeout:                 DefaultLLMTimeout,
 	}
+}
 
-	// Port
+// loadServerConfig populates listener port, persistence path, environment, and log level from lookup.
+func loadServerConfig(cfg *Config, lookup func(string) string) error {
 	if val := strings.TrimSpace(lookup("PORT")); val != "" {
 		p, err := strconv.Atoi(val)
 		if err != nil {
-			return nil, fmt.Errorf("invalid PORT value %q: must be an integer", val)
+			return fmt.Errorf("invalid PORT value %q: must be an integer", val)
 		}
 		if p < 1 || p > 65535 {
-			return nil, fmt.Errorf("invalid PORT value %d: must be between 1 and 65535", p)
+			return fmt.Errorf("invalid PORT value %d: must be between 1 and 65535", p)
 		}
 		cfg.Port = p
 	}
-
-	// DBPath
 	if val := strings.TrimSpace(lookup("DB_PATH")); val != "" {
 		cfg.DBPath = val
 	}
+	if val := firstNonEmpty(lookup, "ENV", "APP_ENV"); val != "" {
+		cfg.Environment = val
+	}
+	if val := strings.TrimSpace(lookup("LOG_LEVEL")); val != "" {
+		cfg.LogLevel = parseLogLevel(val)
+	}
+	return nil
+}
 
-	// DefaultUserID
+// loadAuthConfig populates tenant defaults, admin mode, and Firebase settings from lookup.
+func loadAuthConfig(cfg *Config, lookup func(string) string) error {
 	if val := strings.TrimSpace(lookup("DEFAULT_USER_ID")); val != "" {
 		cfg.DefaultUserID = val
 	}
-
-	// Admin mode: checks ADMIN_MODE
-	if adminVal := strings.TrimSpace(lookup("ADMIN_MODE")); adminVal != "" {
-		a, err := strconv.ParseBool(adminVal)
-		if err != nil {
-			return nil, fmt.Errorf("invalid ADMIN_MODE value %q: must be a boolean", adminVal)
-		}
-		cfg.Admin = a
+	if val, ok, err := parseBoolEnv(lookup, "ADMIN_MODE"); err != nil {
+		return err
+	} else if ok {
+		cfg.Admin = val
 	}
 
-	// AuthProvider
 	cfg.AuthProvider = strings.TrimSpace(lookup("AUTH_PROVIDER"))
-
-	// FirebaseProjectID
 	cfg.FirebaseProjectID = strings.TrimSpace(lookup("FIREBASE_PROJECT_ID"))
-
-	// FirebaseAPIKey
 	cfg.FirebaseAPIKey = strings.TrimSpace(lookup("FIREBASE_API_KEY"))
-
-	// FirebaseAuthDomain
 	cfg.FirebaseAuthDomain = strings.TrimSpace(lookup("FIREBASE_AUTH_DOMAIN"))
 	if cfg.FirebaseAuthDomain == "" && cfg.FirebaseProjectID != "" {
 		cfg.FirebaseAuthDomain = cfg.FirebaseProjectID + ".firebaseapp.com"
 	}
+	return nil
+}
 
-	// LLMDailyRequestLimit
-	if val := strings.TrimSpace(lookup("LLM_DAILY_REQUEST_LIMIT")); val != "" {
-		l, err := strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid LLM_DAILY_REQUEST_LIMIT value %q: must be an integer", val)
-		}
-		if l <= 0 {
-			return nil, fmt.Errorf("invalid LLM_DAILY_REQUEST_LIMIT value %d: must be greater than 0", l)
-		}
-		cfg.LLMDailyRequestLimit = l
+// loadQuotaAndWorkerConfig populates LLM quota ceilings and background worker pool parameters.
+func loadQuotaAndWorkerConfig(cfg *Config, lookup func(string) string) error {
+	intTargets := []struct {
+		key string
+		dst *int
+	}{
+		{key: "LLM_DAILY_REQUEST_LIMIT", dst: &cfg.LLMDailyRequestLimit},
+		{key: "LLM_MONTHLY_TOKEN_LIMIT", dst: &cfg.LLMMonthlyTokenLimit},
+		{key: "WORKER_CONCURRENCY", dst: &cfg.WorkerConcurrency},
+		{key: "WORKER_QUEUE_SIZE", dst: &cfg.WorkerQueueSize},
+		{key: "MAX_CONCURRENT_JOBS_PER_TENANT", dst: &cfg.MaxConcurrentJobsPerTenant},
 	}
-
-	// LLMMonthlyTokenLimit
-	if val := strings.TrimSpace(lookup("LLM_MONTHLY_TOKEN_LIMIT")); val != "" {
-		l, err := strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid LLM_MONTHLY_TOKEN_LIMIT value %q: must be an integer", val)
+	for _, target := range intTargets {
+		if err := parsePositiveInt(lookup, target.key, target.dst); err != nil {
+			return err
 		}
-		if l <= 0 {
-			return nil, fmt.Errorf("invalid LLM_MONTHLY_TOKEN_LIMIT value %d: must be greater than 0", l)
-		}
-		cfg.LLMMonthlyTokenLimit = l
 	}
+	return nil
+}
 
-	// WorkerConcurrency
-	if val := strings.TrimSpace(lookup("WORKER_CONCURRENCY")); val != "" {
-		c, err := strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid WORKER_CONCURRENCY value %q: must be an integer", val)
-		}
-		if c <= 0 {
-			return nil, fmt.Errorf("invalid WORKER_CONCURRENCY value %d: must be greater than 0", c)
-		}
-		cfg.WorkerConcurrency = c
+// loadTimeoutConfig parses synchronous REST and asynchronous LLM timeout durations.
+func loadTimeoutConfig(cfg *Config, lookup func(string) string) error {
+	if err := parsePositiveDuration(lookup, &cfg.RESTTimeout, "REST_TIMEOUT", "HTTP_TIMEOUT", "RESUMEEE_CLIENT_TIMEOUT"); err != nil {
+		return err
 	}
+	return parsePositiveDuration(lookup, &cfg.LLMTimeout, "LLM_TIMEOUT", "LLM_CALL_TIMEOUT")
+}
 
-	// WorkerQueueSize
-	if val := strings.TrimSpace(lookup("WORKER_QUEUE_SIZE")); val != "" {
-		q, err := strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid WORKER_QUEUE_SIZE value %q: must be an integer", val)
-		}
-		if q <= 0 {
-			return nil, fmt.Errorf("invalid WORKER_QUEUE_SIZE value %d: must be greater than 0", q)
-		}
-		cfg.WorkerQueueSize = q
-	}
-
-	// MaxConcurrentJobsPerTenant
-	if val := strings.TrimSpace(lookup("MAX_CONCURRENT_JOBS_PER_TENANT")); val != "" {
-		m, err := strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid MAX_CONCURRENT_JOBS_PER_TENANT value %q: must be an integer", val)
-		}
-		if m <= 0 {
-			return nil, fmt.Errorf("invalid MAX_CONCURRENT_JOBS_PER_TENANT value %d: must be greater than 0", m)
-		}
-		cfg.MaxConcurrentJobsPerTenant = m
-	}
-
-	// API Keys and URLs
+// loadLLMConfig reads LLM provider API credentials and debug prompt capture settings.
+func loadLLMConfig(cfg *Config, lookup func(string) string) error {
 	cfg.GeminiAPIKey = strings.TrimSpace(lookup("GEMINI_API_KEY"))
 	cfg.OpenAIAPIKey = strings.TrimSpace(lookup("OPENAI_API_KEY"))
 	cfg.AnthropicAPIKey = strings.TrimSpace(lookup("ANTHROPIC_API_KEY"))
 	cfg.OpenAICompatBaseURL = strings.TrimSpace(lookup("OPENAI_COMPAT_BASE_URL"))
 	cfg.OpenAICompatAPIKey = strings.TrimSpace(lookup("OPENAI_COMPAT_API_KEY"))
 
-	// Environment: check ENV first, then APP_ENV
-	if envVal := strings.TrimSpace(lookup("ENV")); envVal != "" {
-		cfg.Environment = envVal
-	} else if appEnvVal := strings.TrimSpace(lookup("APP_ENV")); appEnvVal != "" {
-		cfg.Environment = appEnvVal
+	if val, ok, err := parseBoolEnv(lookup, "LLM_DEBUG_PROMPTS", "DEBUG_LLM_PROMPTS"); err != nil {
+		return err
+	} else if ok {
+		cfg.LLMDebugPrompts = val
 	}
+	if dirVal := firstNonEmpty(lookup, "LLM_DEBUG_DIR", "DEBUG_LLM_DIR"); dirVal != "" {
+		cfg.LLMDebugDir = dirVal
+	}
+	return nil
+}
 
-	// Log Level
-	if levelVal := strings.TrimSpace(lookup("LOG_LEVEL")); levelVal != "" {
-		switch strings.ToUpper(levelVal) {
-		case "DEBUG":
-			cfg.LogLevel = slog.LevelDebug
-		case "INFO":
-			cfg.LogLevel = slog.LevelInfo
-		case "WARN", "WARNING":
-			cfg.LogLevel = slog.LevelWarn
-		case "ERROR":
-			cfg.LogLevel = slog.LevelError
-		default:
-			cfg.LogLevel = slog.LevelInfo
+// firstNonEmpty queries keys in order and returns the first non-empty trimmed value.
+func firstNonEmpty(lookup func(string) string, keys ...string) string {
+	for _, key := range keys {
+		if val := strings.TrimSpace(lookup(key)); val != "" {
+			return val
 		}
 	}
+	return ""
+}
 
-	// LLM Debug Prompts: checks LLM_DEBUG_PROMPTS, falling back to DEBUG_LLM_PROMPTS
-	debugPromptsVal := strings.TrimSpace(lookup("LLM_DEBUG_PROMPTS"))
-	if debugPromptsVal == "" {
-		debugPromptsVal = strings.TrimSpace(lookup("DEBUG_LLM_PROMPTS"))
+// parseBoolEnv resolves the first set key from keys as a boolean, attributing parse errors to keys[0].
+func parseBoolEnv(lookup func(string) string, keys ...string) (bool, bool, error) {
+	val := firstNonEmpty(lookup, keys...)
+	if val == "" {
+		return false, false, nil
 	}
-	if debugPromptsVal != "" {
-		p, err := strconv.ParseBool(debugPromptsVal)
-		if err != nil {
-			return nil, fmt.Errorf("invalid LLM_DEBUG_PROMPTS value %q: must be a boolean", debugPromptsVal)
-		}
-		cfg.LLMDebugPrompts = p
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, false, fmt.Errorf("invalid %s value %q: must be a boolean", keys[0], val)
 	}
+	return parsed, true, nil
+}
 
-	// LLM Debug Directory: checks LLM_DEBUG_DIR, falling back to DEBUG_LLM_DIR
-	debugDirVal := strings.TrimSpace(lookup("LLM_DEBUG_DIR"))
-	if debugDirVal == "" {
-		debugDirVal = strings.TrimSpace(lookup("DEBUG_LLM_DIR"))
+// parsePositiveInt reads key from lookup and stores a strictly positive integer into dst.
+func parsePositiveInt(lookup func(string) string, key string, dst *int) error {
+	val := strings.TrimSpace(lookup(key))
+	if val == "" {
+		return nil
 	}
-	if debugDirVal != "" {
-		cfg.LLMDebugDir = debugDirVal
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return fmt.Errorf("invalid %s value %q: must be an integer", key, val)
 	}
+	if n <= 0 {
+		return fmt.Errorf("invalid %s value %d: must be greater than 0", key, n)
+	}
+	*dst = n
+	return nil
+}
 
-	// REST Timeout: checks REST_TIMEOUT, falling back to HTTP_TIMEOUT and RESUMEEE_CLIENT_TIMEOUT
-	restTimeoutVal := strings.TrimSpace(lookup("REST_TIMEOUT"))
-	if restTimeoutVal == "" {
-		restTimeoutVal = strings.TrimSpace(lookup("HTTP_TIMEOUT"))
+// parsePositiveDuration reads the first set key from keys and stores a positive duration into dst.
+func parsePositiveDuration(lookup func(string) string, dst *time.Duration, keys ...string) error {
+	val := firstNonEmpty(lookup, keys...)
+	if val == "" {
+		return nil
 	}
-	if restTimeoutVal == "" {
-		restTimeoutVal = strings.TrimSpace(lookup("RESUMEEE_CLIENT_TIMEOUT"))
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return fmt.Errorf("invalid %s value %q: %w", keys[0], val, err)
 	}
-	if restTimeoutVal != "" {
-		d, err := time.ParseDuration(restTimeoutVal)
-		if err != nil {
-			return nil, fmt.Errorf("invalid REST_TIMEOUT value %q: %w", restTimeoutVal, err)
-		}
-		if d <= 0 {
-			return nil, fmt.Errorf("invalid REST_TIMEOUT value %v: must be greater than 0", d)
-		}
-		cfg.RESTTimeout = d
+	if d <= 0 {
+		return fmt.Errorf("invalid %s value %v: must be greater than 0", keys[0], d)
 	}
+	*dst = d
+	return nil
+}
 
-	// LLM Timeout: checks LLM_TIMEOUT, falling back to LLM_CALL_TIMEOUT
-	llmTimeoutVal := strings.TrimSpace(lookup("LLM_TIMEOUT"))
-	if llmTimeoutVal == "" {
-		llmTimeoutVal = strings.TrimSpace(lookup("LLM_CALL_TIMEOUT"))
+// parseLogLevel converts a case-insensitive log level label to slog.Level, defaulting to Info.
+func parseLogLevel(raw string) slog.Level {
+	switch strings.ToUpper(raw) {
+	case "DEBUG":
+		return slog.LevelDebug
+	case "INFO":
+		return slog.LevelInfo
+	case "WARN", "WARNING":
+		return slog.LevelWarn
+	case "ERROR":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
-	if llmTimeoutVal != "" {
-		d, err := time.ParseDuration(llmTimeoutVal)
-		if err != nil {
-			return nil, fmt.Errorf("invalid LLM_TIMEOUT value %q: %w", llmTimeoutVal, err)
-		}
-		if d <= 0 {
-			return nil, fmt.Errorf("invalid LLM_TIMEOUT value %v: must be greater than 0", d)
-		}
-		cfg.LLMTimeout = d
-	}
-
-	return cfg, nil
 }
 
 // ParseFlags parses command-line flags to override configuration fields.

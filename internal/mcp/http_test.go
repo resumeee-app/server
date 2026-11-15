@@ -69,7 +69,7 @@ func TestAuthenticateRequest(t *testing.T) {
 
 	t.Run("multi-tenant mode validates Bearer token via TokenVerifier", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "valid-token" {
 					return &core.TokenInfo{UID: "verified-uid-42"}, nil
 				}
@@ -127,7 +127,7 @@ func TestAuthenticateRequest(t *testing.T) {
 	})
 
 	t.Run("auth provider integration with AdminAuthProvider", func(t *testing.T) {
-		adminProvider := auth.NewAdminAuthProvider("default-user")
+		adminProvider := auth.NewAdminProvider("default-user")
 		cfg := ServerConfig{
 			AuthProvider: adminProvider,
 		}
@@ -145,7 +145,7 @@ func TestAuthenticateRequest(t *testing.T) {
 
 	t.Run("auth provider integration with custom TokenVerifierProvider", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "mcp-token" {
 					return &core.TokenInfo{UID: "custom-mcp-user"}, nil
 				}

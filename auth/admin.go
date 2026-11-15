@@ -8,33 +8,36 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 )
 
-// AdminAuthProvider implements auth.Provider for single-user local administration deployments.
+// AdminProvider implements Provider for single-user local administration deployments.
 // It bypasses external token verification and resolves identity from the X-User-ID header
 // or falls back to a configured default user identifier, always granting administrative privileges.
-type AdminAuthProvider struct {
+type AdminProvider struct {
 	defaultUserID string
 }
 
-// AdminOption configures an AdminAuthProvider.
-type AdminOption func(*AdminAuthProvider)
+// Compile-time check verifies AdminProvider implements Provider.
+var _ Provider = (*AdminProvider)(nil)
 
-// WithDefaultUserID sets the fallback default user ID on an AdminAuthProvider.
+// AdminOption configures an AdminProvider.
+type AdminOption func(*AdminProvider)
+
+// WithDefaultUserID sets the fallback default user ID on an AdminProvider.
 func WithDefaultUserID(userID string) AdminOption {
-	return func(p *AdminAuthProvider) {
+	return func(p *AdminProvider) {
 		if strings.TrimSpace(userID) != "" {
 			p.defaultUserID = strings.TrimSpace(userID)
 		}
 	}
 }
 
-// NewAdminAuthProvider constructs an AdminAuthProvider with the designated default tenant user identifier
+// NewAdminProvider constructs an AdminProvider with the designated default tenant user identifier
 // and optional functional AdminOptions.
-func NewAdminAuthProvider(defaultUserID string, opts ...AdminOption) *AdminAuthProvider {
+func NewAdminProvider(defaultUserID string, opts ...AdminOption) *AdminProvider {
 	trimmed := strings.TrimSpace(defaultUserID)
 	if trimmed == "" {
 		trimmed = "default"
 	}
-	p := &AdminAuthProvider{
+	p := &AdminProvider{
 		defaultUserID: trimmed,
 	}
 	for _, opt := range opts {
@@ -46,12 +49,12 @@ func NewAdminAuthProvider(defaultUserID string, opts ...AdminOption) *AdminAuthP
 }
 
 // Name returns the provider identifier "admin".
-func (p *AdminAuthProvider) Name() string {
+func (p *AdminProvider) Name() string {
 	return ProviderAdmin
 }
 
 // DefaultUserID returns the configured fallback tenant user identifier.
-func (p *AdminAuthProvider) DefaultUserID() string {
+func (p *AdminProvider) DefaultUserID() string {
 	if p == nil || p.defaultUserID == "" {
 		return "default"
 	}
@@ -59,7 +62,7 @@ func (p *AdminAuthProvider) DefaultUserID() string {
 }
 
 // AuthenticateRequest extracts the tenant user ID from the X-User-ID header or falls back to defaultUserID.
-func (p *AdminAuthProvider) AuthenticateRequest(r *http.Request) (*core.TokenInfo, error) {
+func (p *AdminProvider) AuthenticateRequest(r *http.Request) (*core.TokenInfo, error) {
 	uid := "default"
 	if p != nil && p.defaultUserID != "" {
 		uid = p.defaultUserID
@@ -77,7 +80,7 @@ func (p *AdminAuthProvider) AuthenticateRequest(r *http.Request) (*core.TokenInf
 }
 
 // VerifyIDToken decodes the provided token string as a user identifier or falls back to defaultUserID.
-func (p *AdminAuthProvider) VerifyIDToken(ctx context.Context, token string) (*core.TokenInfo, error) {
+func (p *AdminProvider) VerifyIDToken(_ context.Context, token string) (*core.TokenInfo, error) {
 	uid := strings.TrimSpace(token)
 	if uid == "" {
 		if p != nil && p.defaultUserID != "" {

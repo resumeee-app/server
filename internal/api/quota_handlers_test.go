@@ -209,7 +209,7 @@ type mockUsageResumeExtractor struct {
 // Compile-time assertion ensuring mockUsageResumeExtractor satisfies worker.ResumeExtractor.
 var _ worker.ResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
-func (m *mockUsageResumeExtractor) ExtractResume(ctx context.Context, text string, provider string, model string) (*core.JSONResume, core.TokenUsage, error) {
+func (m *mockUsageResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
 	return m.resume, m.usage, m.err
 }
 

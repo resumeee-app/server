@@ -78,6 +78,64 @@ type sessionIDHolder struct {
 	id string
 }
 
+// MCP HTTP transport limits and keep-alive defaults.
+const (
+	// maxMCPRequestBodyBytes caps incoming MCP HTTP POST and SSE request bodies at 10 MiB.
+	maxMCPRequestBodyBytes = 10 << 20
+
+	// sseKeepAliveInterval controls how often the SSE server emits keep-alive comments.
+	sseKeepAliveInterval = 15 * time.Second
+)
+
+// withSessionHolder attaches holder to ctx so the SSE session generator can record the generated ID.
+func withSessionHolder(ctx context.Context, holder *sessionIDHolder) context.Context {
+	return context.WithValue(ctx, sessionHolderKey, holder)
+}
+
+// sessionHolderFromContext returns the active sessionIDHolder attached to ctx, if present.
+func sessionHolderFromContext(ctx context.Context) *sessionIDHolder {
+	holder, ok := ctx.Value(sessionHolderKey).(*sessionIDHolder)
+	if !ok {
+		return nil
+	}
+	return holder
+}
+
+// sessionRegistry tracks the authenticated owner of each active MCP SSE session.
+type sessionRegistry struct {
+	mu     sync.RWMutex
+	owners map[string]string
+}
+
+// newSessionRegistry constructs an empty sessionRegistry.
+func newSessionRegistry() *sessionRegistry {
+	return &sessionRegistry{
+		owners: make(map[string]string),
+	}
+}
+
+// bind records userID as the owner of sessionID.
+func (sr *sessionRegistry) bind(sessionID, userID string) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	sr.owners[sessionID] = userID
+}
+
+// owner returns the owning userID for sessionID and whether the session is registered.
+func (sr *sessionRegistry) owner(sessionID string) (string, bool) {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+	userID, ok := sr.owners[sessionID]
+	return userID, ok
+}
+
+// delete removes sessionID from the registry once its SSE connection closes.
+func (sr *sessionRegistry) delete(sessionID string) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	delete(sr.owners, sessionID)
+}
+
 // authenticateRequest extracts and verifies the client identity from the request's Authorization header,
 // falling back to development headers or the configured default user ID.
 //
@@ -153,33 +211,11 @@ func authenticateRequest(r *http.Request, cfg ServerConfig) (string, error) {
 func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handler {
 	cfg.setDefaults()
 
-	var sessionOwners sync.Map
+	sessions := newSessionRegistry()
 	limiter := newConnectionLimiter(cfg.MaxConnectionsPerUser, cfg.MaxTotalConnections)
-
-	mcpSSE := serverSDK.NewSSEServer(
-		mcpServer,
-		serverSDK.WithStaticBasePath("/mcp"),
-		serverSDK.WithMessageEndpoint("/messages"),
-		serverSDK.WithSSEMaxRequestBodyBytes(10<<20),
-		serverSDK.WithKeepAlive(true),
-		serverSDK.WithKeepAliveInterval(15*time.Second),
-		serverSDK.WithSessionIDGenerator(func(ctx context.Context, r *http.Request) (string, error) {
-			sessionID := uuid.New().String()
-			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
-			sessionOwners.Store(sessionID, userID)
-			if h, ok := r.Context().Value(sessionHolderKey).(*sessionIDHolder); ok && h != nil {
-				h.id = sessionID
-			}
-			return sessionID, nil
-		}),
-		serverSDK.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
-			return WithUserID(ctx, userID)
-		}),
-	)
+	mcpSSE := newSSEServer(mcpServer, cfg, sessions)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. Authenticate Request
 		userID, err := authenticateRequest(r, cfg)
 		if err != nil {
 			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
@@ -191,52 +227,83 @@ func NewHTTPHandler(mcpServer *serverSDK.MCPServer, cfg ServerConfig) http.Handl
 		ctx := WithUserID(r.Context(), userID)
 		r = r.WithContext(ctx)
 
-		// 2. Handle SSE Stream: Connection Limiting & WriteDeadline Reset & Session Lifecycle Cleanup
 		if r.Method == http.MethodGet && (r.URL.Path == "/mcp/sse" || strings.HasSuffix(r.URL.Path, "/sse")) {
-			if !limiter.acquire(userID) {
-				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-				return
-			}
-			defer limiter.release(userID)
-
-			holder := &sessionIDHolder{}
-			r = r.WithContext(context.WithValue(r.Context(), sessionHolderKey, holder))
-			defer func() {
-				if holder.id != "" {
-					sessionOwners.Delete(holder.id)
-				}
-			}()
-
-			rc := http.NewResponseController(w)
-			_ = rc.SetWriteDeadline(time.Time{})
-
-			mcpSSE.ServeHTTP(w, r)
+			serveSSERequest(w, r, userID, limiter, sessions, mcpSSE)
 			return
 		}
 
-		// 3. Handle Messages: 10MB Payload Limit & Session Ownership Validation
 		if r.Method == http.MethodPost {
-			// Enforce 10MB body boundary
-			if r.ContentLength > 10<<20 {
-				http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+			if !validatePostMessage(w, r, userID, sessions) {
 				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-
-			// Session hijacking defense
-			sessionID := r.URL.Query().Get("sessionId")
-			if sessionID != "" {
-				ownerVal, loaded := sessionOwners.Load(sessionID)
-				if loaded {
-					if owner, ok := ownerVal.(string); ok && owner != userID {
-						http.Error(w, "Forbidden: session belongs to another user", http.StatusForbidden)
-						return
-					}
-				}
-				// If not loaded, do NOT store spurious sessions into sessionOwners
 			}
 		}
 
 		mcpSSE.ServeHTTP(w, r)
 	})
+}
+
+// newSSEServer constructs the underlying MCP SSEServer wired to session ownership tracking and tenant context.
+func newSSEServer(mcpServer *serverSDK.MCPServer, cfg ServerConfig, sessions *sessionRegistry) *serverSDK.SSEServer {
+	return serverSDK.NewSSEServer(
+		mcpServer,
+		serverSDK.WithStaticBasePath("/mcp"),
+		serverSDK.WithMessageEndpoint("/messages"),
+		serverSDK.WithSSEMaxRequestBodyBytes(maxMCPRequestBodyBytes),
+		serverSDK.WithKeepAlive(true),
+		serverSDK.WithKeepAliveInterval(sseKeepAliveInterval),
+		serverSDK.WithSessionIDGenerator(func(_ context.Context, r *http.Request) (string, error) {
+			sessionID := uuid.New().String()
+			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
+			sessions.bind(sessionID, userID)
+			if h := sessionHolderFromContext(r.Context()); h != nil {
+				h.id = sessionID
+			}
+			return sessionID, nil
+		}),
+		serverSDK.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			userID := UserIDFromContext(r.Context(), cfg.DefaultUserID)
+			return WithUserID(ctx, userID)
+		}),
+	)
+}
+
+// serveSSERequest enforces SSE connection limits, registers cleanup of the session owner, and streams SSE events.
+func serveSSERequest(w http.ResponseWriter, r *http.Request, userID string, limiter *connectionLimiter, sessions *sessionRegistry, mcpSSE *serverSDK.SSEServer) {
+	if !limiter.acquire(userID) {
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
+	defer limiter.release(userID)
+
+	holder := &sessionIDHolder{}
+	r = r.WithContext(withSessionHolder(r.Context(), holder))
+	defer func() {
+		if holder.id != "" {
+			sessions.delete(holder.id)
+		}
+	}()
+
+	// Clear write deadlines so long-lived SSE streams are not interrupted by server HTTP timeouts.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	mcpSSE.ServeHTTP(w, r)
+}
+
+// validatePostMessage enforces POST body size limits and verifies that any targeted session belongs to userID.
+func validatePostMessage(w http.ResponseWriter, r *http.Request, userID string, sessions *sessionRegistry) bool {
+	if r.ContentLength > maxMCPRequestBodyBytes {
+		http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBodyBytes)
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		return true
+	}
+	if owner, ok := sessions.owner(sessionID); ok && owner != userID {
+		http.Error(w, "Forbidden: session belongs to another user", http.StatusForbidden)
+		return false
+	}
+	return true
 }

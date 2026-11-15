@@ -7,12 +7,13 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 `resumeee-api` is a thin transport and dependency-injection layer built on top of `resumeee-core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
 
 - `server/` — Public Go package (`github.com/resumeee-app/resumeee-api/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
+- `auth/` — Public Go package (`github.com/resumeee-app/resumeee-api/auth`) providing request authentication providers and multi-scheme registry resolution.
 - `cmd/server/` — Default unified HTTP server binary serving REST `/api/v1/*` and MCP `/mcp/sse` + `/mcp/message` endpoints.
 - `cmd/mcp/` — Standalone MCP CLI binary supporting `stdio` transport for desktop AI assistants (Claude Desktop, Cursor, Antigravity).
+- `api/` — OpenAPI 3.1 contract (`api/openapi.yaml`) and repository-wide guardrail tests (`godoc_test.go`, `gofmt_test.go`, `import_boundary_test.go`, `interface_assertion_test.go`, `openapi_test.go`).
 - `internal/api/` — HTTP handlers, routers, and authentication/timeout middleware.
 - `internal/mcp/` — MCP tools (`get_main_profile`, `add_career_fact`, `list_branches`, `create_tailored_branch`, `trigger_tailoring`, `get_tailored_resume`, `extract_resume`, etc.) and SSE/stdio handlers.
 - `internal/config/` — Environment and CLI flag configuration.
-- `api/openapi.yaml` — Canonical OpenAPI 3.1 contract.
 
 ---
 
@@ -82,10 +83,13 @@ func main() {
 ## Quality Gates
 
 ```bash
+# Run all formatting, test (-race), guardrail, and golangci-lint checks
+make verify
+
 # Format check (gofmt)
 test -z "$(gofmt -l .)"
 
-# Unit & race detection tests (includes TestGoFmtCompliance)
+# Unit & race detection tests (includes TestGoFmtCompliance and AST guardrails)
 go test -race -v ./...
 
 # Static analysis & gofmt linter

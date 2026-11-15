@@ -202,7 +202,7 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 	}
 
 	verifier := &mockVerifierForPromptPreview{
-		verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+		verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 			switch token {
 			case "token-admin-user":
 				return &core.TokenInfo{UID: defaultUserID, Email: "admin@example.com", Admin: true}, nil

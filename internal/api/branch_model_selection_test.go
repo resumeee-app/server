@@ -49,7 +49,7 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 	var verifier core.TokenVerifier
 	if !admin {
 		verifier = &mockVerifierForBranchModel{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "token-regular-user" {
 					return &core.TokenInfo{UID: defaultUser, Email: "user@example.com", Role: "user", Admin: false}, nil
 				}

@@ -177,11 +177,23 @@ func WithStore(store core.Store) Option {
 	}
 }
 
-// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase).
+// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase),
+// wrapping it via auth.NewTokenVerifierProvider for HTTP bearer token extraction.
 func WithAuthProvider(provider core.AuthProvider) Option {
 	return func(s *Server) error {
 		if provider == nil {
 			return errors.New("server: AuthProvider cannot be nil")
+		}
+		s.authProvider = auth.NewTokenVerifierProvider(provider.Name(), provider)
+		return nil
+	}
+}
+
+// WithRequestAuthProvider injects an HTTP-aware auth.Provider implementation directly.
+func WithRequestAuthProvider(provider auth.Provider) Option {
+	return func(s *Server) error {
+		if provider == nil {
+			return errors.New("server: RequestAuthProvider cannot be nil")
 		}
 		s.authProvider = provider
 		return nil

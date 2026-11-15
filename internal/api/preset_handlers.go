@@ -9,6 +9,7 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 )
 
+// presetHandler serves tailoring strategy preset CRUD endpoints.
 type presetHandler struct {
 	cfg RouterConfig
 }
@@ -32,6 +33,7 @@ func registerPresetRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	}
 }
 
+// CreatePresetRequest defines the JSON payload for creating a custom tailoring strategy preset.
 type CreatePresetRequest struct {
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
@@ -41,6 +43,7 @@ type CreatePresetRequest struct {
 	Language           string  `json:"language,omitempty"`
 }
 
+// UpdatePresetRequest defines the partial JSON payload for updating a custom tailoring strategy preset.
 type UpdatePresetRequest struct {
 	Name               *string `json:"name"`
 	Description        *string `json:"description"`
@@ -74,7 +77,7 @@ func (h *presetHandler) validateTemplateAccess(ctx context.Context, templateID s
 // listPresets retrieves all user and built-in tailoring presets.
 func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	presets, err := h.cfg.PresetStore.ListPresets(ctx, userID)
 	if err != nil {
@@ -90,7 +93,7 @@ func (h *presetHandler) listPresets(w http.ResponseWriter, r *http.Request) {
 // createPreset validates and saves a new custom preset.
 func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 
 	var req CreatePresetRequest
 	if !decodeJSON(w, r, &req) {
@@ -154,7 +157,7 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 // getPreset retrieves a tailoring preset by its identifier.
 func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
@@ -169,7 +172,7 @@ func (h *presetHandler) getPreset(w http.ResponseWriter, r *http.Request) {
 // updatePreset updates mutable fields of an existing user-created preset.
 func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)
@@ -241,7 +244,7 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 // deletePreset removes a custom preset by its identifier.
 func (h *presetHandler) deletePreset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r, h.cfg.DefaultUserID)
+	userID := requestUserID(r, h.cfg.DefaultUserID)
 	id := r.PathValue("id")
 
 	preset, err := h.cfg.PresetStore.Preset(ctx, userID, id)

@@ -165,7 +165,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode with valid bearer token injects UID", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				if token == "valid-firebase-jwt" {
 					return &core.TokenInfo{UID: "firebase-uid-42", Email: "alex@example.com"}, nil
 				}
@@ -194,7 +194,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode injects admin status from token info", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
 				switch token {
 				case "admin-token-flag":
 					return &core.TokenInfo{UID: "admin-1", Email: "admin@example.com", Admin: true}, nil
@@ -255,7 +255,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode rejects missing authorization header with 401", func(t *testing.T) {
 		verifier := &mockTokenVerifier{}
-		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -270,11 +270,11 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("multi-tenant mode rejects invalid token with 401", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
-			verifyFunc: func(ctx context.Context, token string) (*core.TokenInfo, error) {
+			verifyFunc: func(_ context.Context, _ string) (*core.TokenInfo, error) {
 				return nil, core.ErrUnauthorized
 			},
 		}
-		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -290,7 +290,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("public routes bypass token verification in multi-tenant mode", func(t *testing.T) {
 		verifier := &mockTokenVerifier{}
-		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddleware(false, "default", verifier)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -306,7 +306,7 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("fails closed with 401 when admin is false and verifier is nil even with X-User-ID", func(t *testing.T) {
-		handler := AuthMiddleware(false, "default", nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddleware(false, "default", nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -320,8 +320,8 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("AuthMiddlewareWithProvider with AdminAuthProvider injects admin context", func(t *testing.T) {
-		provider := auth.NewAdminAuthProvider("test-default")
+	t.Run("AuthMiddlewareWithProvider with AdminProvider injects admin context", func(t *testing.T) {
+		provider := auth.NewAdminProvider("test-default")
 		var capturedUID string
 		var capturedAdmin bool
 
@@ -348,7 +348,7 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("AuthMiddlewareWithProvider fails closed when provider is nil", func(t *testing.T) {
-		handler := AuthMiddlewareWithProvider(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := AuthMiddlewareWithProvider(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 

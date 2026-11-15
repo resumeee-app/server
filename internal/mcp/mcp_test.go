@@ -40,7 +40,7 @@ func (d *dummyJobEnqueuer) Enqueue(job core.GenerationJob) error {
 
 type dummyLLMService struct{}
 
-func (d *dummyLLMService) GenerateTailoredResume(ctx context.Context, req core.GenerationRequest) (*core.GenerationResponse, error) {
+func (d *dummyLLMService) GenerateTailoredResume(_ context.Context, req core.GenerationRequest) (*core.GenerationResponse, error) {
 	return &core.GenerationResponse{
 		TailoredContent: core.TailoredContent{
 			Summary: "Tailored summary for " + req.BranchContext.TargetRole,
@@ -51,7 +51,7 @@ func (d *dummyLLMService) GenerateTailoredResume(ctx context.Context, req core.G
 	}, nil
 }
 
-func (d *dummyLLMService) GenerateGapAnalysis(ctx context.Context, req core.GenerationRequest) (*core.GapReport, error) {
+func (d *dummyLLMService) GenerateGapAnalysis(_ context.Context, req core.GenerationRequest) (*core.GapReport, error) {
 	return &core.GapReport{
 		OverallMatchSummary: "Decoupled gap analysis match for " + req.BranchContext.TargetRole,
 		MissingRequirements: []core.GapItem{
@@ -60,7 +60,7 @@ func (d *dummyLLMService) GenerateGapAnalysis(ctx context.Context, req core.Gene
 	}, nil
 }
 
-func (d *dummyLLMService) SimulateATS(ctx context.Context, req core.ATSSimulationRequest) (*core.ATSSimulationResponse, error) {
+func (d *dummyLLMService) SimulateATS(_ context.Context, _ core.ATSSimulationRequest) (*core.ATSSimulationResponse, error) {
 	return &core.ATSSimulationResponse{
 		Score: core.ATSScore{
 			ExtractionConfidenceScore: 92,

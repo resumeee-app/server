@@ -47,8 +47,8 @@ func TestExtractBearerToken(t *testing.T) {
 	}
 }
 
-func TestAdminAuthProvider(t *testing.T) {
-	p := auth.NewAdminAuthProvider("default", auth.WithDefaultUserID("admin-user"))
+func TestAdminProvider(t *testing.T) {
+	p := auth.NewAdminProvider("default", auth.WithDefaultUserID("admin-user"))
 	if p.DefaultUserID() != "admin-user" {
 		t.Fatalf("expected DefaultUserID 'admin-user', got %q", p.DefaultUserID())
 	}
@@ -106,7 +106,7 @@ func TestTokenVerifierProviderAndRegistry(t *testing.T) {
 		t.Fatalf("expected no default auth provider error, got %v", err)
 	}
 
-	adminProv := auth.NewAdminAuthProvider("default")
+	adminProv := auth.NewAdminProvider("default")
 	reg.Register(adminProv)
 	reg.Register(tvp)
 
@@ -183,12 +183,23 @@ func TestNewRegistryFromConfig(t *testing.T) {
 	})
 }
 
+type verifierOnlyProvider struct {
+	name string
+	uid  string
+}
+
+func (v *verifierOnlyProvider) Name() string { return v.name }
+func (v *verifierOnlyProvider) VerifyIDToken(_ context.Context, _ string) (*core.TokenInfo, error) {
+	return &core.TokenInfo{UID: v.uid}, nil
+}
+
 func TestDefensiveNilReceivers(t *testing.T) {
 	ctx := context.Background()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
 
 	var r *auth.Registry
 	r.Register(nil)
+	r.RegisterVerifier(nil)
 	r.ClearDefault()
 	if r.List() != nil {
 		t.Errorf("expected nil list from nil registry")
@@ -203,15 +214,15 @@ func TestDefensiveNilReceivers(t *testing.T) {
 		t.Error("expected error from nil registry SetDefault")
 	}
 
-	var p *auth.AdminAuthProvider
+	var p *auth.AdminProvider
 	if p.Name() != auth.ProviderAdmin || p.DefaultUserID() != "default" {
-		t.Errorf("unexpected nil AdminAuthProvider defaults")
+		t.Errorf("unexpected nil AdminProvider defaults")
 	}
 	if info, err := p.AuthenticateRequest(req); err != nil || info.UID != "default" {
-		t.Errorf("unexpected nil AdminAuthProvider AuthenticateRequest: %+v, %v", info, err)
+		t.Errorf("unexpected nil AdminProvider AuthenticateRequest: %+v, %v", info, err)
 	}
 	if info, err := p.VerifyIDToken(ctx, ""); err != nil || info.UID != "default" {
-		t.Errorf("unexpected nil AdminAuthProvider VerifyIDToken: %+v, %v", info, err)
+		t.Errorf("unexpected nil AdminProvider VerifyIDToken: %+v, %v", info, err)
 	}
 
 	var tvp *auth.TokenVerifierProvider
@@ -227,7 +238,20 @@ func TestDefensiveNilReceivers(t *testing.T) {
 
 	reg := auth.NewRegistry()
 	reg.Register(&mockEmptyNameProvider{})
+	reg.RegisterVerifier(&verifierOnlyProvider{name: "  ", uid: "ignored"})
 	if len(reg.List()) != 0 {
 		t.Errorf("expected empty registry")
+	}
+
+	reg.RegisterVerifier(&verifierOnlyProvider{name: "custom-jwt", uid: "jwt-user"})
+	prov, err := reg.Get("custom-jwt")
+	if err != nil {
+		t.Fatalf("expected custom-jwt to be registered via RegisterVerifier: %v", err)
+	}
+	bearerReq := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
+	bearerReq.Header.Set("Authorization", "Bearer valid")
+	info, err := prov.AuthenticateRequest(bearerReq)
+	if err != nil || info.UID != "jwt-user" {
+		t.Fatalf("expected jwt-user from adapted verifier, got %+v (err=%v)", info, err)
 	}
 }

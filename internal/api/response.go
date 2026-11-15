@@ -13,19 +13,32 @@ import (
 
 // Standard OpenAPI error codes.
 const (
-	CodeInvalidRequest          = "INVALID_REQUEST"
-	CodeUnauthorized            = "UNAUTHORIZED"
-	CodeForbidden               = "FORBIDDEN"
-	CodeNotFound                = "NOT_FOUND"
-	CodeConflict                = "CONFLICT"
-	CodeQuotaExceeded           = "QUOTA_EXCEEDED"
+	// CodeInvalidRequest indicates malformed input, missing required fields, or validation failure.
+	CodeInvalidRequest = "INVALID_REQUEST"
+	// CodeUnauthorized indicates missing, malformed, or expired authentication credentials.
+	CodeUnauthorized = "UNAUTHORIZED"
+	// CodeForbidden indicates the authenticated tenant lacks permission or tried to mutate an immutable resource.
+	CodeForbidden = "FORBIDDEN"
+	// CodeNotFound indicates the requested resource does not exist for the authenticated tenant.
+	CodeNotFound = "NOT_FOUND"
+	// CodeConflict indicates a state conflict such as duplicate creation or concurrent modification.
+	CodeConflict = "CONFLICT"
+	// CodeQuotaExceeded indicates the tenant exceeded its daily LLM request or monthly token quota.
+	CodeQuotaExceeded = "QUOTA_EXCEEDED"
+	// CodeTemplateValidationError indicates syntax or rendering validation failure in a template set.
 	CodeTemplateValidationError = "TEMPLATE_VALIDATION_ERROR"
-	CodeProvenanceError         = "PROVENANCE_ERROR"
-	CodeQueueFull               = "QUEUE_FULL"
-	CodeInternalError           = "INTERNAL_ERROR"
-	CodePayloadTooLarge         = "PAYLOAD_TOO_LARGE"
-	CodeUpstreamError           = "UPSTREAM_ERROR"
-	CodeServiceUnavailable      = "SERVICE_UNAVAILABLE"
+	// CodeProvenanceError indicates generated content failed provenance anchoring checks.
+	CodeProvenanceError = "PROVENANCE_ERROR"
+	// CodeQueueFull indicates the asynchronous worker queue cannot currently accept additional jobs.
+	CodeQueueFull = "QUEUE_FULL"
+	// CodeInternalError indicates an unexpected server-side failure.
+	CodeInternalError = "INTERNAL_ERROR"
+	// CodePayloadTooLarge indicates an uploaded body or file exceeds allowed size limits.
+	CodePayloadTooLarge = "PAYLOAD_TOO_LARGE"
+	// CodeUpstreamError indicates an upstream dependency such as an LLM provider failed.
+	CodeUpstreamError = "UPSTREAM_ERROR"
+	// CodeServiceUnavailable indicates a required service component is temporarily unavailable.
+	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
 )
 
 // ErrorDetail describes an error payload in the uniform JSON error envelope.

@@ -977,7 +977,7 @@ func TestCORSAndMiddleware(t *testing.T) {
 	t.Run("Panic in handler recovers with 500 INTERNAL_ERROR", func(t *testing.T) {
 		// Create a separate router with a panicking route wrapped by RecoveryMiddleware
 		panickingMux := http.NewServeMux()
-		panickingMux.HandleFunc("GET /panic", func(w http.ResponseWriter, r *http.Request) {
+		panickingMux.HandleFunc("GET /panic", func(_ http.ResponseWriter, _ *http.Request) {
 			panic("intentional test panic")
 		})
 		handler := api.RecoveryMiddleware(nil)(panickingMux)
@@ -1186,7 +1186,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 		},
 	}
 
-	mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+	mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 		data, _ := json.Marshal(mockResume)
 		return string(data), nil
 	}))
@@ -1305,7 +1305,7 @@ func TestProfilePDF_Parse(t *testing.T) {
 		var capturedDeadline time.Time
 		var hasDeadline bool
 
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, _, _, _, _ string) (string, error) {
 			capturedDeadline, hasDeadline = ctx.Deadline()
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 		}))
@@ -1351,7 +1351,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 
 	t.Run("Enqueue job, verify 202 Accepted, and poll status through completion", func(t *testing.T) {
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 		}))
 
@@ -1467,7 +1467,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 	})
 
 	t.Run("Queue full returns 503 SERVICE_UNAVAILABLE", func(t *testing.T) {
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return `{}`, nil
 		}))
 
@@ -1501,7 +1501,7 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 	})
 
 	t.Run("Non-existent job returns 404 NOT_FOUND", func(t *testing.T) {
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return `{}`, nil
 		}))
 		env := setupTestServerWithExtractor(t, mockExtractor)
@@ -1525,7 +1525,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 
 	t.Run("Oversized payload returns 413 Payload Too Large", func(t *testing.T) {
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return `{}`, nil
 		}))
 		env := setupTestServerWithExtractor(t, mockExtractor)
@@ -1626,7 +1626,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+			mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 				return "", tc.extractorErr
 			}))
 
@@ -1671,7 +1671,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		var logBuf bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return "", errors.New("unexpected catastrophic failure")
 		}))
 
@@ -1714,7 +1714,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		var logBuf bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
 			return "", llm.ErrProviderNotFound
 		}))
 
@@ -1757,7 +1757,7 @@ func TestProfilePDF_Parse_ErrorHandling(t *testing.T) {
 		pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
 		var capturedProvider, capturedModel string
 
-		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(ctx context.Context, sys, user, prov, model string) (string, error) {
+		mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, prov, model string) (string, error) {
 			capturedProvider = prov
 			capturedModel = model
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
@@ -2602,7 +2602,10 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 	env := setupTestServer(t, 10)
 	client := env.server.Client()
 	baseURL := env.server.URL
-	memStore := env.db.(*memory.Store)
+	memStore, ok := env.db.(*memory.Store)
+	if !ok {
+		t.Fatalf("expected *memory.Store, got %T", env.db)
+	}
 
 	t.Run("built-in template update rejected with 403 Forbidden", func(t *testing.T) {
 		updateBody := map[string]any{
@@ -2664,7 +2667,10 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 		pdfEnq := api.NewChannelPDFJobEnqueuer(10)
 		pdfEnv := setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, nil, nil, pdfEnq)
 		pdfClient := pdfEnv.server.Client()
-		pdfMem := pdfEnv.db.(*memory.Store)
+		pdfMem, ok := pdfEnv.db.(*memory.Store)
+		if !ok {
+			t.Fatalf("expected *memory.Store, got %T", pdfEnv.db)
+		}
 
 		// Exhaust user daily quota (50 requests limit)
 		for i := 0; i < 50; i++ {
@@ -2831,7 +2837,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type omitted defaults to all",
 			query:          "",
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
@@ -2844,7 +2850,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type=all returns union of custom and global skills",
 			query:          "?type=all",
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
@@ -2857,7 +2863,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type=ALL case-insensitive handling",
 			query:          "?type=ALL",
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":   "Go",
@@ -2870,7 +2876,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type=global returns only system-seeded global skills",
 			query:          "?type=global",
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"global-skill-rust": "Rust",
@@ -2889,7 +2895,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type=custom returns only tenant-owned custom skills",
 			query:          "?type=custom",
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				skills := decodeJSON[[]core.Skill](t, body)
 				assertSkillNamesAndIDs(t, skills, map[string]string{
 					"custom-skill-go":  "Go",
@@ -2909,7 +2915,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 			name:           "type=invalid returns 400 Bad Request",
 			query:          "?type=invalid",
 			expectedStatus: http.StatusBadRequest,
-			verify: func(t *testing.T, resp *http.Response, body []byte) {
+			verify: func(t *testing.T, _ *http.Response, body []byte) {
 				var errResp api.ErrorResponse
 				if err := json.Unmarshal(body, &errResp); err != nil {
 					t.Fatalf("failed to decode error response: %v", err)

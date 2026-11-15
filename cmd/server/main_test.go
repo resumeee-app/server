@@ -27,7 +27,12 @@ func freePort(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("failed to find free port: %v", err)
 	}
-	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	tcpAddr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = l.Close()
+		t.Fatalf("expected *net.TCPAddr listener address, got %T", l.Addr())
+	}
+	port := strconv.Itoa(tcpAddr.Port)
 	_ = l.Close()
 	return port
 }
@@ -139,19 +144,19 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 
 func TestBuildRootHandler(t *testing.T) {
 	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	apiMux.HandleFunc("GET /api/v1/profile", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("GET /api/v1/profile", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"full_name":"Test User"}`))
 	})
@@ -271,7 +276,7 @@ func TestRun_UnifiedServer_EndToEnd(t *testing.T) {
 	// Wait for server to come up
 	clientNoRedirect := &http.Client{
 		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
@@ -396,11 +401,11 @@ func TestBuildServer_Configuration(t *testing.T) {
 }
 
 func TestBuildRootHandler_MCPRouting(t *testing.T) {
-	apiMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiMux := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("api"))
 	})
-	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mcpMux := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("mcp"))
 	})

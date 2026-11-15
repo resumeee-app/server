@@ -13,11 +13,15 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 )
 
+// responseWriterRecorder wraps http.ResponseWriter to record the HTTP status code written by downstream handlers.
 type responseWriterRecorder struct {
 	http.ResponseWriter
 	statusCode int
 	written    bool
 }
+
+// Compile-time assertion ensuring responseWriterRecorder satisfies http.ResponseWriter.
+var _ http.ResponseWriter = (*responseWriterRecorder)(nil)
 
 // WriteHeader captures the HTTP response status code before delegating to the wrapped ResponseWriter.
 func (rw *responseWriterRecorder) WriteHeader(code int) {
@@ -217,6 +221,7 @@ func AuthMiddlewareWithProvider(provider auth.Provider, provisioners ...TenantPr
 }
 
 // AuthMiddleware inspects bearer tokens or admin mode bypass and injects the authenticated tenant ID into context.
+//
 // Deprecated: Prefer AuthMiddlewareWithProvider with an explicit auth.Provider.
 func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifier, provisioners ...TenantProvisioner) func(http.Handler) http.Handler {
 	if defaultUserID == "" {
@@ -225,13 +230,9 @@ func AuthMiddleware(admin bool, defaultUserID string, verifier core.TokenVerifie
 
 	var provider auth.Provider
 	if admin {
-		provider = auth.NewAdminAuthProvider(defaultUserID)
+		provider = auth.NewAdminProvider(defaultUserID)
 	} else if verifier != nil {
-		if p, ok := verifier.(auth.Provider); ok {
-			provider = p
-		} else {
-			provider = auth.NewTokenVerifierProvider("verifier", verifier)
-		}
+		provider = auth.NewTokenVerifierProvider("verifier", verifier)
 	}
 
 	return AuthMiddlewareWithProvider(provider, provisioners...)

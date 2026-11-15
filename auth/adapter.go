@@ -14,6 +14,9 @@ type TokenVerifierProvider struct {
 	verifier core.TokenVerifier
 }
 
+// Compile-time check verifies TokenVerifierProvider implements Provider.
+var _ Provider = (*TokenVerifierProvider)(nil)
+
 // NewTokenVerifierProvider wraps an existing core.TokenVerifier as an auth.Provider.
 func NewTokenVerifierProvider(name string, verifier core.TokenVerifier) *TokenVerifierProvider {
 	trimmed := strings.ToLower(strings.TrimSpace(name))

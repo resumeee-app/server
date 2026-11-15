@@ -152,7 +152,6 @@ type RouterConfig struct {
 	Admin             bool
 	AuthProvider      auth.Provider
 	TokenVerifier     core.TokenVerifier
-	FirebaseProjectID string
 	UserStore         core.UserStore
 	Store             core.Store
 	Provisioner       TenantProvisioner
@@ -193,8 +192,8 @@ func (p *defaultTenantProvisioner) EnsureTenantProvisioned(ctx context.Context, 
 	return err
 }
 
-// getUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
-func getUserID(r *http.Request, defaultID string) string {
+// requestUserID extracts the tenant user ID strictly from the request context, falling back to defaultID if not in context.
+func requestUserID(r *http.Request, defaultID string) string {
 	if uid, err := UserIDFromContext(r.Context()); err == nil && uid != "" {
 		return uid
 	}

@@ -15,7 +15,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	emptyLookup := func(key string) string {
+	emptyLookup := func(_ string) string {
 		return ""
 	}
 
@@ -367,7 +367,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadFrom_LLMDebugPrompts(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -532,7 +532,7 @@ func TestLoadFrom_LLMDebugPrompts(t *testing.T) {
 
 func TestConfig_ParseFlags(t *testing.T) {
 	t.Run("debug-llm-prompts flag", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -545,7 +545,7 @@ func TestConfig_ParseFlags(t *testing.T) {
 	})
 
 	t.Run("llm-debug-prompts alias flag", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -558,7 +558,7 @@ func TestConfig_ParseFlags(t *testing.T) {
 	})
 
 	t.Run("llm-debug-dir flag", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -571,7 +571,7 @@ func TestConfig_ParseFlags(t *testing.T) {
 	})
 
 	t.Run("debug-llm-dir alias flag", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -584,7 +584,7 @@ func TestConfig_ParseFlags(t *testing.T) {
 	})
 
 	t.Run("empty args does nothing", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -597,7 +597,7 @@ func TestConfig_ParseFlags(t *testing.T) {
 	})
 
 	t.Run("unknown flag returns error", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -946,7 +946,7 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 
 func TestConfig_ParseFlags_Admin(t *testing.T) {
 	t.Run("-admin flag sets Admin true", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -959,7 +959,7 @@ func TestConfig_ParseFlags_Admin(t *testing.T) {
 	})
 
 	t.Run("-admin-mode flag sets Admin true", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1016,7 +1016,7 @@ func TestConfig_ParseFlags_Admin(t *testing.T) {
 
 func TestConfig_ParseFlags_AuthProvider(t *testing.T) {
 	t.Run("-auth-provider flag sets AuthProvider", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1029,7 +1029,7 @@ func TestConfig_ParseFlags_AuthProvider(t *testing.T) {
 	})
 
 	t.Run("-auth-provider flag with equal sign", func(t *testing.T) {
-		cfg, err := config.LoadFrom(func(s string) string { return "" })
+		cfg, err := config.LoadFrom(func(_ string) string { return "" })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

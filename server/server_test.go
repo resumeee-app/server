@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
@@ -28,7 +29,12 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("failed to find free port: %v", err)
 	}
-	port := l.Addr().(*net.TCPAddr).Port
+	tcpAddr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = l.Close()
+		t.Fatalf("expected *net.TCPAddr listener address, got %T", l.Addr())
+	}
+	port := tcpAddr.Port
 	_ = l.Close()
 	return port
 }
@@ -385,6 +391,7 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"invalid llmTimeout", WithTimeouts(time.Second, 0)},
 		{"nil Store", WithStore(nil)},
 		{"nil AuthProvider", WithAuthProvider(nil)},
+		{"nil RequestAuthProvider", WithRequestAuthProvider(nil)},
 		{"nil TokenVerifier", WithTokenVerifier("custom", nil)},
 		{"nil LLMRegistry", WithLLMRegistry(nil)},
 		{"nil LLMClient", WithLLMClient(nil)},
@@ -401,5 +408,63 @@ func TestServer_OptionValidation(t *testing.T) {
 				t.Errorf("expected validation error for %s, got nil", tc.name)
 			}
 		})
+	}
+}
+
+func TestServer_WithRequestAuthProvider(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	memStore, err := memory.NewSeeded(ctx)
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
+
+	adminProv := auth.NewAdminProvider("request-tenant")
+	if err := memStore.UpsertProfile(ctx, &core.Profile{
+		UserID:   "request-tenant",
+		FullName: "Grace Hopper",
+	}); err != nil {
+		t.Fatalf("failed to seed profile: %v", err)
+	}
+
+	port := freePort(t)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx,
+			WithPort(port),
+			WithAdminMode(false),
+			WithStore(memStore),
+			WithRequestAuthProvider(adminProv),
+			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		)
+	}()
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForHealthy(t, baseURL)
+
+	resp, err := http.Get(baseURL + "/api/v1/profile")
+	if err != nil {
+		t.Fatalf("GET /api/v1/profile failed: %v", err)
+	}
+	var prof core.Profile
+	if err := json.NewDecoder(resp.Body).Decode(&prof); err != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("failed decoding profile: %v", err)
+	}
+	_ = resp.Body.Close()
+	if prof.UserID != "request-tenant" || prof.FullName != "Grace Hopper" {
+		t.Errorf("unexpected profile from WithRequestAuthProvider: %+v", prof)
+	}
+
+	http.DefaultClient.CloseIdleConnections()
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected shutdown error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
 	}
 }
