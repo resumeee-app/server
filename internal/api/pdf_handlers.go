@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core"
+	core "github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
 )
 
@@ -73,6 +73,32 @@ func (h *profileHandler) restTimeout() time.Duration {
 // withRESTTimeout derives a child context bounded by restTimeout for fast non-LLM PDF stages.
 func (h *profileHandler) withRESTTimeout(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, h.restTimeout())
+}
+
+// releasePDFQuota refunds a pending PDF parse reservation while recording any upstream call telemetry.
+// It is a no-op when quota accounting is disabled or no reservation was taken.
+func (h *profileHandler) releasePDFQuota(parent context.Context, reservationID, reason string, telemetry core.LLMTelemetry) {
+	if h.cfg.QuotaStore == nil || reservationID == "" {
+		return
+	}
+	releaseCtx, cancel := h.withRESTTimeout(parent)
+	defer cancel()
+	if err := h.cfg.QuotaStore.ReleaseQuota(releaseCtx, reservationID, reason, telemetry); err != nil && h.cfg.Logger != nil {
+		h.cfg.Logger.ErrorContext(parent, "failed to release pdf parse quota", "reservation_id", reservationID, "error", err)
+	}
+}
+
+// pdfExtractionReleaseReason maps an extraction failure to a sanitized reason persisted on the usage record,
+// so raw upstream or validation error text never reaches quota storage.
+func pdfExtractionReleaseReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "resume extraction timed out"
+	case errors.Is(err, core.ErrValidation):
+		return "document validation failed during extraction"
+	default:
+		return "resume extraction failed"
+	}
 }
 
 // parsePDFResume parses an uploaded candidate resume PDF. By default, it operates asynchronously,
@@ -235,20 +261,20 @@ func (h *profileHandler) extractPDFResumeSync(reqCtx context.Context, w http.Res
 	syncCtx, cancel := context.WithTimeout(reqCtx, parseTimeout)
 	defer cancel()
 
-	extracted, usage, err := llm.ExtractResumeWithTokenUsage(syncCtx, h.cfg.ResumeExtractor, text, upload.provider, upload.model, estimatedPDFParseTokens)
+	extracted, telemetry, err := llm.ExtractResumeWithTelemetry(syncCtx, h.cfg.ResumeExtractor, text, upload.provider, upload.model, estimatedPDFParseTokens)
+	if err == nil && extracted == nil {
+		// Guard against extractors returning (nil, nil) so quota is never committed for an empty result.
+		err = fmt.Errorf("%w: resume extractor returned no result", llm.ErrInvalidResponse)
+	}
 	if err != nil {
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			releaseCtx, cancelRelease := h.withRESTTimeout(reqCtx)
-			_ = h.cfg.QuotaStore.ReleaseQuota(releaseCtx, reservationID, err.Error())
-			cancelRelease()
-		}
+		h.releasePDFQuota(reqCtx, reservationID, pdfExtractionReleaseReason(err), telemetry)
 		h.writePDFExtractionError(reqCtx, w, upload.provider, parseTimeout, err)
 		return
 	}
 
 	if h.cfg.QuotaStore != nil && reservationID != "" {
 		commitCtx, cancelCommit := h.withRESTTimeout(reqCtx)
-		_ = h.cfg.QuotaStore.CommitUsage(commitCtx, reservationID, usage)
+		_ = h.cfg.QuotaStore.CommitUsage(commitCtx, reservationID, telemetry)
 		cancelCommit()
 	}
 
@@ -361,7 +387,7 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 
 	if err := h.cfg.PDFJobStore.CreateJob(ctx, job); err != nil {
 		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job")
+			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job", core.LLMTelemetry{})
 		}
 		writeDomainError(w, h.cfg.Logger, err)
 		return
@@ -378,7 +404,7 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 
 	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
 		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job")
+			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job", core.LLMTelemetry{})
 		}
 		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
