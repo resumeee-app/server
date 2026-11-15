@@ -87,8 +87,8 @@ github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261114223836-f1c8866fbe4
 github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261114223836-f1c8866fbe49/go.mod h1:9d5NWpXxVQOij68uEs5YNEKnMpZX5gVcBcNXhgHit/I=
 github.com/resumeee-app/resumeee-core v0.0.0-20261115080025-7139b8e0fd33 h1:oIvCkR/LRBTlsS0URD6ZTBx/Bz75DhzHbzBD2ZhAZ1s=
 github.com/resumeee-app/resumeee-core v0.0.0-20261115080025-7139b8e0fd33/go.mod h1:0IKQXgzjvUHcQ6Pti0VmRa6Ee0bzZnmIPELUs8NzSUw=
-github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261115081506-3d50076efd54 h1:phwWDXL7eFsB25c03su2SYG+dA24VcVPp1NHptYWkVQ=
-github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261115081506-3d50076efd54/go.mod h1:lIs/+isGv4W9FJ1rPGBPj/p9jiO0IdQFwMxCocq6bAQ=
+github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261115082041-bef7925775f4 h1:FALAVIu+e94o9l9W20bNpyxWPYRIuMHFv7ygmPnA5qk=
+github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261115082041-bef7925775f4/go.mod h1:lIs/+isGv4W9FJ1rPGBPj/p9jiO0IdQFwMxCocq6bAQ=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=
