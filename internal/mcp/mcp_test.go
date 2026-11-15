@@ -51,11 +51,13 @@ func (d *dummyLLMService) GenerateTailoredResume(_ context.Context, req core.Gen
 	}, nil
 }
 
-func (d *dummyLLMService) GenerateGapAnalysis(_ context.Context, req core.GenerationRequest) (*core.GapReport, error) {
-	return &core.GapReport{
-		OverallMatchSummary: "Decoupled gap analysis match for " + req.BranchContext.TargetRole,
-		MissingRequirements: []core.GapItem{
-			{Requirement: "Kubernetes experience", Importance: core.GapImportanceCritical},
+func (d *dummyLLMService) GenerateGapAnalysis(_ context.Context, req core.GenerationRequest) (*core.GapAnalysisResponse, error) {
+	return &core.GapAnalysisResponse{
+		GapReport: core.GapReport{
+			OverallMatchSummary: "Decoupled gap analysis match for " + req.BranchContext.TargetRole,
+			MissingRequirements: []core.GapItem{
+				{Requirement: "Kubernetes experience", Importance: core.GapImportanceCritical},
+			},
 		},
 	}, nil
 }

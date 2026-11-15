@@ -202,18 +202,31 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 }
 
 type mockUsageResumeExtractor struct {
-	resume *core.JSONResume
-	usage  core.TokenUsage
-	err    error
-	calls  atomic.Int32
+	resume    *core.JSONResume
+	telemetry core.LLMTelemetry
+	err       error
+	calls     atomic.Int32
 }
 
 // Compile-time assertion ensuring mockUsageResumeExtractor satisfies worker.ResumeExtractor.
 var _ worker.ResumeExtractor = (*mockUsageResumeExtractor)(nil)
 
-func (m *mockUsageResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
+func (m *mockUsageResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.LLMTelemetry, error) {
 	m.calls.Add(1)
-	return m.resume, m.usage, m.err
+	return m.resume, m.telemetry, m.err
+}
+
+// singleUsageRecord returns the only LLM usage record for userID, failing the test when the count differs.
+func singleUsageRecord(t *testing.T, store core.QuotaStore, userID string) core.LLMUsageRecord {
+	t.Helper()
+	records, err := store.ListUsageRecords(context.Background(), userID, 10)
+	if err != nil {
+		t.Fatalf("failed to list usage records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected exactly 1 usage record, got %d: %+v", len(records), records)
+	}
+	return records[0]
 }
 
 func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
@@ -231,10 +244,16 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 				Email: "test@example.com",
 			},
 		},
-		usage: core.TokenUsage{
-			PromptTokens:     120,
-			CompletionTokens: 380,
-			TotalTokens:      500,
+		telemetry: core.LLMTelemetry{
+			Provider:   "openai",
+			Model:      "gpt-4o-mini",
+			StatusCode: http.StatusOK,
+			Latency:    750 * time.Millisecond,
+			Usage: core.TokenUsage{
+				PromptTokens:     120,
+				CompletionTokens: 380,
+				TotalTokens:      500,
+			},
 		},
 	}
 
@@ -289,6 +308,18 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	if quota.MonthlyTokensUsed != 500 {
 		t.Errorf("expected monthly_tokens_used 500 (committed actual usage), got %d", quota.MonthlyTokensUsed)
 	}
+
+	// Verify provider call telemetry was persisted on the committed usage record.
+	rec := singleUsageRecord(t, store, defaultUserID)
+	if rec.Status != core.ReservationStatusCommitted {
+		t.Errorf("expected committed usage record, got status %q", rec.Status)
+	}
+	if rec.Provider != "openai" || rec.Model != "gpt-4o-mini" || rec.StatusCode != http.StatusOK || rec.Latency != 750*time.Millisecond {
+		t.Errorf("expected committed telemetry openai/gpt-4o-mini/200/750ms, got %q/%q/%d/%v", rec.Provider, rec.Model, rec.StatusCode, rec.Latency)
+	}
+	if rec.PromptTokens != 120 || rec.CompletionTokens != 380 || rec.TotalTokens != 500 {
+		t.Errorf("expected committed tokens 120/380/500, got %d/%d/%d", rec.PromptTokens, rec.CompletionTokens, rec.TotalTokens)
+	}
 }
 
 func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
@@ -300,7 +331,14 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	extractor := &mockUsageResumeExtractor{
-		err: errors.New("upstream extraction failed"),
+		err: errors.New("upstream extraction failed: secret-upstream-detail"),
+		telemetry: core.LLMTelemetry{
+			Provider:   "anthropic",
+			Model:      "claude-haiku",
+			StatusCode: http.StatusBadGateway,
+			Latency:    2 * time.Second,
+			Usage:      core.TokenUsage{PromptTokens: 90},
+		},
 	}
 
 	router := api.NewRouter(api.RouterConfig{
@@ -353,6 +391,84 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 	if quota.MonthlyTokensUsed != 0 {
 		t.Errorf("expected monthly_tokens_used 0 after release, got %d", quota.MonthlyTokensUsed)
+	}
+
+	// Verify the release recorded upstream telemetry with a sanitized reason rather than raw error text.
+	rec := singleUsageRecord(t, store, defaultUserID)
+	if rec.Status != core.ReservationStatusReleased {
+		t.Errorf("expected released usage record, got status %q", rec.Status)
+	}
+	if rec.Provider != "anthropic" || rec.Model != "claude-haiku" || rec.StatusCode != http.StatusBadGateway || rec.Latency != 2*time.Second {
+		t.Errorf("expected released telemetry anthropic/claude-haiku/502/2s, got %q/%q/%d/%v", rec.Provider, rec.Model, rec.StatusCode, rec.Latency)
+	}
+	if rec.PromptTokens != 90 || rec.TotalTokens != 90 {
+		t.Errorf("expected released prompt/total tokens 90/90, got %d/%d", rec.PromptTokens, rec.TotalTokens)
+	}
+	if rec.ErrorMessage != "resume extraction failed" {
+		t.Errorf("expected sanitized release reason %q, got %q", "resume extraction failed", rec.ErrorMessage)
+	}
+}
+
+func TestSyncPDFParse_NilExtractionResultReleasesQuota(t *testing.T) {
+	ctx := context.Background()
+	defaultUserID := "tenant-sync-nil-result"
+	store, err := memory.NewSeeded(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	extractor := &mockUsageResumeExtractor{
+		telemetry: core.LLMTelemetry{Provider: "openai", Model: "gpt-4o-mini", StatusCode: http.StatusOK, Usage: core.TokenUsage{TotalTokens: 42}},
+	}
+	router := api.NewRouter(api.RouterConfig{
+		QuotaStore:        store,
+		DefaultUserID:     defaultUserID,
+		Admin:             true,
+		ResumeExtractor:   extractor,
+		DailyRequestLimit: 50,
+		MonthlyTokenLimit: 1000000,
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	_, _ = part.Write(buildTestPDF("Valid resume text that yields no structured result"))
+	_ = mw.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/v1/profile/pdf/parse?sync=true", &buf)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502 Bad Gateway for empty extraction result, got %d", resp.StatusCode)
+	}
+
+	quota, err := store.Quota(ctx, defaultUserID)
+	if err != nil {
+		t.Fatalf("failed to get quota: %v", err)
+	}
+	if quota.DailyRequestsUsed != 0 || quota.MonthlyTokensUsed != 0 {
+		t.Errorf("expected quota fully released for empty result, got daily=%d monthly=%d", quota.DailyRequestsUsed, quota.MonthlyTokensUsed)
+	}
+	rec := singleUsageRecord(t, store, defaultUserID)
+	if rec.Status != core.ReservationStatusReleased {
+		t.Errorf("expected released usage record for empty result, got status %q", rec.Status)
+	}
+	if rec.Provider != "openai" || rec.TotalTokens != 42 {
+		t.Errorf("expected released record to keep call telemetry openai/42 tokens, got %q/%d", rec.Provider, rec.TotalTokens)
 	}
 }
 

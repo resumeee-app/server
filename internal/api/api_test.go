@@ -3310,9 +3310,9 @@ func (s *staticPDFTextExtractor) ExtractText(_ context.Context, _ io.ReaderAt, _
 
 type contextDeadlineResumeExtractor struct{}
 
-func (c *contextDeadlineResumeExtractor) ExtractResume(ctx context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
+func (c *contextDeadlineResumeExtractor) ExtractResume(ctx context.Context, _, _, _ string) (*core.JSONResume, core.LLMTelemetry, error) {
 	<-ctx.Done()
-	return nil, core.TokenUsage{}, ctx.Err()
+	return nil, core.LLMTelemetry{}, ctx.Err()
 }
 
 func TestRenderPreview_RejectsUnauthorizedOrMissingTemplateID(t *testing.T) {
@@ -3570,8 +3570,8 @@ func (d *deadlineRecordingWriter) SetWriteDeadline(deadline time.Time) error {
 
 type staticResumeExtractor struct{}
 
-func (s *staticResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.TokenUsage, error) {
-	return &core.JSONResume{}, core.TokenUsage{}, nil
+func (s *staticResumeExtractor) ExtractResume(_ context.Context, _, _, _ string) (*core.JSONResume, core.LLMTelemetry, error) {
+	return &core.JSONResume{}, core.LLMTelemetry{}, nil
 }
 
 func TestPDFParseSync_ExtendsResponseWriteDeadline(t *testing.T) {
