@@ -70,7 +70,7 @@ func main() {
 		server.WithLLMClient(geminiClient),
 		server.WithPort(8080),
 		server.WithQuotaLimits(100, 2_000_000),
-		server.WithWorkerPoolConfig(4, 200, 3),
+		server.WithWorkerPoolConfig(4, 3),
 		server.WithTimeouts(30*time.Second, 10*time.Minute),
 	)
 	if err != nil {
