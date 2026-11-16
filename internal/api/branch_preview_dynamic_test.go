@@ -32,14 +32,14 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	var branchStore api.BranchStore = store.Branches()
 	rend := renderer.New()
 
-	branchSvc := branch.New(branch.Config{
-		Branches:  branchStore,
-		Profiles:  profileStore,
-		Presets:   presetStore,
-		Templates: templateStore,
-		Validator: provenance.New(),
-		Renderer:  rend,
-	})
+	branchSvc := branch.New(
+		branch.WithBranches(branchStore),
+		branch.WithProfiles(profileStore),
+		branch.WithPresets(presetStore),
+		branch.WithTemplates(templateStore),
+		branch.WithValidator(provenance.New()),
+		branch.WithRenderer(rend),
+	)
 
 	router := api.NewRouter(api.RouterConfig{
 		ProfileStore:  profileStore,

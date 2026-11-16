@@ -451,13 +451,13 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 		}
 
 		profileSvc := profile.New(store.Profiles(), store.Career(), store.Branches())
-		branchSvc := branch.New(branch.Config{
-			Branches:  store.Branches(),
-			Jobs:      store.Jobs(),
-			Profiles:  store.Profiles(),
-			Presets:   store.Presets(),
-			Templates: store.Templates(),
-		})
+		branchSvc := branch.New(
+			branch.WithBranches(store.Branches()),
+			branch.WithJobs(store.Jobs()),
+			branch.WithProfiles(store.Profiles()),
+			branch.WithPresets(store.Presets()),
+			branch.WithTemplates(store.Templates()),
+		)
 
 		cases := []struct {
 			name   string
@@ -555,13 +555,13 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 			t.Fatalf("failed to seed store: %v", err)
 		}
 
-		branchSvc := branch.New(branch.Config{
-			Branches:  store.Branches(),
-			Jobs:      store.Jobs(),
-			Profiles:  store.Profiles(),
-			Presets:   store.Presets(),
-			Templates: store.Templates(),
-		})
+		branchSvc := branch.New(
+			branch.WithBranches(store.Branches()),
+			branch.WithJobs(store.Jobs()),
+			branch.WithProfiles(store.Profiles()),
+			branch.WithPresets(store.Presets()),
+			branch.WithTemplates(store.Templates()),
+		)
 
 		nonAdminVerifier := &mockTokenVerifier{
 			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {

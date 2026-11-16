@@ -123,18 +123,18 @@ func setupTestEnv(t *testing.T) *testEnv {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	profileSvc := profile.New(st.Profiles(), st.Career(), st.Branches())
-	branchSvc := branch.New(branch.Config{
-		Branches:    st.Branches(),
-		Jobs:        st.Jobs(),
-		Profiles:    st.Profiles(),
-		Presets:     st.Presets(),
-		Templates:   st.Templates(),
-		JobNotifier: jobNotifier,
-		Validator:   provValidator,
-		Renderer:    templateRenderer,
-		Generator:   llmSvc,
-		Logger:      logger,
-	})
+	branchSvc := branch.New(
+		branch.WithBranches(st.Branches()),
+		branch.WithJobs(st.Jobs()),
+		branch.WithProfiles(st.Profiles()),
+		branch.WithPresets(st.Presets()),
+		branch.WithTemplates(st.Templates()),
+		branch.WithJobNotifier(jobNotifier),
+		branch.WithValidator(provValidator),
+		branch.WithRenderer(templateRenderer),
+		branch.WithGenerator(llmSvc),
+		branch.WithLogger(logger),
+	)
 
 	cfg := resumeeeMCP.ServerConfig{
 		ProfileService:        profileSvc,

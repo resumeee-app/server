@@ -784,18 +784,18 @@ func TestMCP_DependencyGuardsAndFailClosed(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	newBranchSvc := func(branches branch.Store, jobs branch.JobStore, profiles branch.ProfileReader, presets branch.PresetReader, templates branch.TemplateReader) *branch.Service {
-		return branch.New(branch.Config{
-			Branches:    branches,
-			Jobs:        jobs,
-			Profiles:    profiles,
-			Presets:     presets,
-			Templates:   templates,
-			JobNotifier: &dummyJobNotifier{},
-			Validator:   provenance.New(),
-			Renderer:    renderer.New(),
-			Generator:   &dummyLLMService{},
-			Logger:      logger,
-		})
+		return branch.New(
+			branch.WithBranches(branches),
+			branch.WithJobs(jobs),
+			branch.WithProfiles(profiles),
+			branch.WithPresets(presets),
+			branch.WithTemplates(templates),
+			branch.WithJobNotifier(&dummyJobNotifier{}),
+			branch.WithValidator(provenance.New()),
+			branch.WithRenderer(renderer.New()),
+			branch.WithGenerator(&dummyLLMService{}),
+			branch.WithLogger(logger),
+		)
 	}
 
 	assertToolError := func(t *testing.T, server interface {

@@ -78,14 +78,14 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 	})
 
 	// Create a non-default branch for testing
-	branchService := branch.New(branch.Config{
-		Branches:  store.Branches(),
-		Jobs:      store.Jobs(),
-		Profiles:  store.Profiles(),
-		Presets:   store.Presets(),
-		Templates: store.Templates(),
-		Quotas:    store.Quotas(),
-	})
+	branchService := branch.New(
+		branch.WithBranches(store.Branches()),
+		branch.WithJobs(store.Jobs()),
+		branch.WithProfiles(store.Profiles()),
+		branch.WithPresets(store.Presets()),
+		branch.WithTemplates(store.Templates()),
+		branch.WithQuotas(store.Quotas()),
+	)
 
 	testBranch := &core.Branch{
 		UserID:             defaultUser,

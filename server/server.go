@@ -267,22 +267,22 @@ func (s *Server) initServices(ctx context.Context, logger *slog.Logger) (*server
 	workerPool := s.startWorkerPool(ctx, logger, resumeExtractor, llmService, provValidator, templateRenderer)
 	branchStore := s.store.Branches()
 	profileSvc := profile.New(s.store.Profiles(), s.store.Career(), branchStore)
-	branchSvc := branch.New(branch.Config{
-		Branches:          branchStore,
-		Jobs:              s.store.Jobs(),
-		Profiles:          s.store.Profiles(),
-		Presets:           s.store.Presets(),
-		Templates:         s.store.Templates(),
-		Quotas:            s.store.Quotas(),
-		JobNotifier:       workerPool,
-		Validator:         provValidator,
-		Renderer:          templateRenderer,
-		Generator:         llmService,
-		PromptCompiler:    promptCompiler,
-		DailyRequestLimit: s.cfg.LLMDailyRequestLimit,
-		MonthlyTokenLimit: s.cfg.LLMMonthlyTokenLimit,
-		Logger:            logger,
-	})
+	branchSvc := branch.New(
+		branch.WithBranches(branchStore),
+		branch.WithJobs(s.store.Jobs()),
+		branch.WithProfiles(s.store.Profiles()),
+		branch.WithPresets(s.store.Presets()),
+		branch.WithTemplates(s.store.Templates()),
+		branch.WithQuotas(s.store.Quotas()),
+		branch.WithJobNotifier(workerPool),
+		branch.WithValidator(provValidator),
+		branch.WithRenderer(templateRenderer),
+		branch.WithGenerator(llmService),
+		branch.WithPromptCompiler(promptCompiler),
+		branch.WithDailyRequestLimit(s.cfg.LLMDailyRequestLimit),
+		branch.WithMonthlyTokenLimit(s.cfg.LLMMonthlyTokenLimit),
+		branch.WithLogger(logger),
+	)
 
 	return &serverDeps{
 		authProvider:     authProvider,
@@ -337,22 +337,22 @@ func (s *Server) startWorkerPool(
 	provValidator ProvenanceValidator,
 	templateRenderer TemplateRenderer,
 ) *worker.Pool {
-	workerPool := worker.New(worker.Config{
-		Concurrency:            s.cfg.WorkerConcurrency,
-		MaxConcurrentPerTenant: s.cfg.MaxConcurrentJobsPerTenant,
-		Jobs:                   s.store.Jobs(),
-		Branches:               s.store.Branches(),
-		Profiles:               s.store.Profiles(),
-		Presets:                s.store.Presets(),
-		Templates:              s.store.Templates(),
-		Quotas:                 s.store.Quotas(),
-		ResumeExtractor:        resumeExtractor,
-		LLMTimeout:             s.cfg.LLMTimeout,
-		Generator:              llmService,
-		Validator:              provValidator,
-		Renderer:               templateRenderer,
-		Logger:                 logger,
-	})
+	workerPool := worker.New(
+		worker.WithConcurrency(s.cfg.WorkerConcurrency),
+		worker.WithMaxConcurrentPerTenant(s.cfg.MaxConcurrentJobsPerTenant),
+		worker.WithJobs(s.store.Jobs()),
+		worker.WithBranches(s.store.Branches()),
+		worker.WithProfiles(s.store.Profiles()),
+		worker.WithPresets(s.store.Presets()),
+		worker.WithTemplates(s.store.Templates()),
+		worker.WithQuotas(s.store.Quotas()),
+		worker.WithResumeExtractor(resumeExtractor),
+		worker.WithLLMTimeout(s.cfg.LLMTimeout),
+		worker.WithGenerator(llmService),
+		worker.WithValidator(provValidator),
+		worker.WithRenderer(templateRenderer),
+		worker.WithLogger(logger),
+	)
 	if err := workerPool.RecoverStaleJobs(ctx, "server restarted while generation job was in flight"); err != nil {
 		logger.Warn("failed to recover stale jobs", "err", err)
 	}

@@ -184,39 +184,39 @@ func buildMCPServerConfig(cfg *config.Config, st *store.Store, logger *slog.Logg
 		maxPerTenant = config.DefaultMaxConcurrentJobsPerTenant
 	}
 
-	workerPool := worker.New(worker.Config{
-		Concurrency:            concurrency,
-		MaxConcurrentPerTenant: maxPerTenant,
-		Jobs:                   jobStore,
-		Branches:               branchStore,
-		Profiles:               profileStore,
-		Presets:                presetStore,
-		Templates:              templateStore,
-		Quotas:                 quotaStore,
-		ResumeExtractor:        resumeExtractor,
-		LLMTimeout:             cfg.LLMTimeout,
-		Generator:              llmService,
-		Validator:              provValidator,
-		Renderer:               templateRenderer,
-		Logger:                 logger,
-	})
+	workerPool := worker.New(
+		worker.WithConcurrency(concurrency),
+		worker.WithMaxConcurrentPerTenant(maxPerTenant),
+		worker.WithJobs(jobStore),
+		worker.WithBranches(branchStore),
+		worker.WithProfiles(profileStore),
+		worker.WithPresets(presetStore),
+		worker.WithTemplates(templateStore),
+		worker.WithQuotas(quotaStore),
+		worker.WithResumeExtractor(resumeExtractor),
+		worker.WithLLMTimeout(cfg.LLMTimeout),
+		worker.WithGenerator(llmService),
+		worker.WithValidator(provValidator),
+		worker.WithRenderer(templateRenderer),
+		worker.WithLogger(logger),
+	)
 
-	branchSvc := branch.New(branch.Config{
-		Branches:          branchStore,
-		Jobs:              jobStore,
-		Profiles:          profileStore,
-		Presets:           presetStore,
-		Templates:         templateStore,
-		Quotas:            quotaStore,
-		JobNotifier:       workerPool,
-		Validator:         provValidator,
-		Renderer:          templateRenderer,
-		Generator:         llmService,
-		PromptCompiler:    llm.NewPromptCompiler(llm.WithPromptRegistry(llmRegistry)),
-		DailyRequestLimit: cfg.LLMDailyRequestLimit,
-		MonthlyTokenLimit: cfg.LLMMonthlyTokenLimit,
-		Logger:            logger,
-	})
+	branchSvc := branch.New(
+		branch.WithBranches(branchStore),
+		branch.WithJobs(jobStore),
+		branch.WithProfiles(profileStore),
+		branch.WithPresets(presetStore),
+		branch.WithTemplates(templateStore),
+		branch.WithQuotas(quotaStore),
+		branch.WithJobNotifier(workerPool),
+		branch.WithValidator(provValidator),
+		branch.WithRenderer(templateRenderer),
+		branch.WithGenerator(llmService),
+		branch.WithPromptCompiler(llm.NewPromptCompiler(llm.WithPromptRegistry(llmRegistry))),
+		branch.WithDailyRequestLimit(cfg.LLMDailyRequestLimit),
+		branch.WithMonthlyTokenLimit(cfg.LLMMonthlyTokenLimit),
+		branch.WithLogger(logger),
+	)
 
 	mcpCfg := resumeeeMCP.ServerConfig{
 		ProfileService:       profileSvc,
