@@ -3,20 +3,71 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/resumeee-app/core"
-	firebase "github.com/resumeee-app/resumeee-auth-firebase"
 )
 
 // Config provides configuration parameters required to initialize an auth.Registry.
 type Config struct {
-	DefaultUserID     string
-	FirebaseProjectID string
-	AuthProvider      string
-	Admin             bool
+	DefaultUserID string
+	AuthProvider  string
+	Admin         bool
+}
+
+// RegistryOption configures an auth.Registry during initialization in NewRegistryFromConfig.
+type RegistryOption func(*Registry) error
+
+// WithProvider injects an HTTP-aware auth.Provider into the registry.
+func WithProvider(provider Provider) RegistryOption {
+	return func(r *Registry) error {
+		if provider == nil {
+			return errors.New("auth: provider cannot be nil")
+		}
+		if strings.TrimSpace(provider.Name()) == "" {
+			return errors.New("auth: provider name cannot be empty")
+		}
+		r.Register(provider)
+		return nil
+	}
+}
+
+// WithAuthProvider injects a core.AuthProvider into the registry, adapting it for HTTP Bearer token extraction.
+func WithAuthProvider(provider core.AuthProvider) RegistryOption {
+	return func(r *Registry) error {
+		if provider == nil {
+			return errors.New("auth: AuthProvider cannot be nil")
+		}
+		name := strings.TrimSpace(provider.Name())
+		if name == "" {
+			return errors.New("auth: AuthProvider name cannot be empty")
+		}
+		if strings.EqualFold(name, ProviderAdmin) {
+			return errors.New("auth: admin AuthProvider requires Admin mode or WithProvider")
+		}
+		r.RegisterVerifier(provider)
+		return nil
+	}
+}
+
+// WithTokenVerifier injects a core.TokenVerifier into the registry under the specified provider name.
+func WithTokenVerifier(name string, verifier core.TokenVerifier) RegistryOption {
+	return func(r *Registry) error {
+		if verifier == nil {
+			return errors.New("auth: TokenVerifier cannot be nil")
+		}
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return errors.New("auth: TokenVerifier name cannot be empty")
+		}
+		if strings.EqualFold(trimmed, ProviderAdmin) {
+			return errors.New("auth: provider name \"admin\" is reserved for AdminProvider")
+		}
+		r.Register(NewTokenVerifierProvider(trimmed, verifier))
+		return nil
+	}
 }
 
 // Registry manages registered authentication providers and resolves active selection.
@@ -33,8 +84,8 @@ func NewRegistry() *Registry {
 	}
 }
 
-// NewRegistryFromConfig initializes an auth.Registry from runtime configuration.
-func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOption) (*Registry, error) {
+// NewRegistryFromConfig initializes an auth.Registry from runtime configuration and injected provider options.
+func NewRegistryFromConfig(cfg Config, opts ...RegistryOption) (*Registry, error) {
 	r := NewRegistry()
 
 	defaultUserID := cfg.DefaultUserID
@@ -42,20 +93,25 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 		defaultUserID = fallbackUserID
 	}
 
-	// Always register Admin provider
+	// Always register Admin provider so explicit selection remains available.
 	adminProvider := NewAdminProvider(defaultUserID)
 	r.Register(adminProvider)
 
-	// Register Firebase provider if project ID is provided
-	if cfg.FirebaseProjectID != "" {
-		firebaseProvider := firebase.NewFirebaseTokenVerifier(cfg.FirebaseProjectID, opts...)
-		r.RegisterVerifier(firebaseProvider)
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(r); err != nil {
+			return nil, err
+		}
 	}
 
-	// Reset defaultProvider under mutex so explicit selection hierarchy determines the active default
+	// Reset defaultProvider under mutex so explicit selection hierarchy determines the active default.
 	r.ClearDefault()
 
-	// Resolve default provider hierarchy
+	injected := r.nonAdminNames()
+
+	// Resolve default provider hierarchy.
 	selected := strings.ToLower(strings.TrimSpace(cfg.AuthProvider))
 	switch {
 	case selected != "":
@@ -64,10 +120,10 @@ func NewRegistryFromConfig(cfg Config, opts ...firebase.FirebaseTokenVerifierOpt
 		}
 	case cfg.Admin:
 		_ = r.SetDefault(ProviderAdmin)
-	case cfg.FirebaseProjectID != "":
-		_ = r.SetDefault(ProviderFirebase)
+	case len(injected) == 1:
+		_ = r.SetDefault(injected[0])
 	default:
-		// When neither explicit AuthProvider, Admin, nor FirebaseProjectID is configured,
+		// When neither explicit AuthProvider, Admin, nor a single injected vendor provider is configured,
 		// leave defaultProvider empty so callers fail closed in multi-tenant mode.
 	}
 
@@ -190,6 +246,24 @@ func (r *Registry) List() []string {
 	for name := range r.providers {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
+	return names
+}
+
+// nonAdminNames returns sorted registered provider names excluding the built-in admin provider.
+func (r *Registry) nonAdminNames() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var names []string
+	for name := range r.providers {
+		if name != ProviderAdmin {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
 	return names
 }

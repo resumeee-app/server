@@ -12,9 +12,6 @@ import (
 
 // Provider identifier constants.
 const (
-	// ProviderFirebase identifies the Firebase JWT authentication provider.
-	ProviderFirebase = "firebase"
-
 	// ProviderAdmin identifies the local single-user admin authentication provider.
 	ProviderAdmin = "admin"
 )

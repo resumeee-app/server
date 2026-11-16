@@ -26,10 +26,19 @@ import (
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
 	"github.com/resumeee-app/server"
+	"github.com/resumeee-app/server/auth"
 	"github.com/resumeee-app/server/internal/api"
 	"github.com/resumeee-app/server/internal/config"
 	storage "github.com/resumeee-app/sql"
 )
+
+type stubTokenVerifier struct {
+	uid string
+}
+
+func (s *stubTokenVerifier) VerifyIDToken(_ context.Context, _ string) (*core.TokenInfo, error) {
+	return &core.TokenInfo{UID: s.uid}, nil
+}
 
 func freePort(t *testing.T) string {
 	t.Helper()
@@ -517,13 +526,12 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 
 	t.Setenv("PORT", freePort(t))
 	t.Setenv("ADMIN_MODE", "false")
-	t.Setenv("FIREBASE_PROJECT_ID", "")
 
 	err = runWithStore(context.Background(), storeInit)
 	if err == nil {
-		t.Fatal("expected error when booting multi-tenant server without FIREBASE_PROJECT_ID or ADMIN_MODE=true")
+		t.Fatal("expected error when booting multi-tenant server without injected auth provider or ADMIN_MODE=true")
 	}
-	expectedMsg := "multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode"
+	expectedMsg := "multi-tenant mode requires an injected auth provider or explicit ADMIN_MODE=true / -admin-mode for local admin mode"
 	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Fatalf("expected error containing %q, got: %v", expectedMsg, err)
 	}
@@ -542,7 +550,6 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 		t.Setenv("PORT", freePort(t))
 		t.Setenv("ADMIN_MODE", "false")
 		t.Setenv("AUTH_PROVIDER", "admin")
-		t.Setenv("FIREBASE_PROJECT_ID", "")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		errCh := make(chan error, 1)
@@ -567,7 +574,6 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 		t.Setenv("PORT", freePort(t))
 		t.Setenv("ADMIN_MODE", "false")
 		t.Setenv("AUTH_PROVIDER", "")
-		t.Setenv("FIREBASE_PROJECT_ID", "")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		errCh := make(chan error, 1)
@@ -588,16 +594,19 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 		}
 	})
 
-	t.Run("boot with FIREBASE_PROJECT_ID initializes firebase provider", func(t *testing.T) {
+	t.Run("boot with injected auth provider initializes custom provider", func(t *testing.T) {
 		t.Setenv("PORT", freePort(t))
 		t.Setenv("ADMIN_MODE", "false")
 		t.Setenv("AUTH_PROVIDER", "")
-		t.Setenv("FIREBASE_PROJECT_ID", "test-firebase-proj")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- runWithStore(ctx, storeInit)
+			errCh <- runWithDeps(
+				ctx,
+				storeInit,
+				[]auth.RegistryOption{auth.WithTokenVerifier("custom", &stubTokenVerifier{uid: "tenant-1"})},
+			)
 		}()
 
 		time.Sleep(100 * time.Millisecond)
@@ -606,7 +615,7 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 		select {
 		case err := <-errCh:
 			if err != nil {
-				t.Fatalf("expected clean shutdown with firebase provider, got: %v", err)
+				t.Fatalf("expected clean shutdown with injected auth provider, got: %v", err)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for shutdown")

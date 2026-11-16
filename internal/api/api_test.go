@@ -3036,8 +3036,8 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 
 	verifier := &testMockTokenVerifier{
 		tokens: map[string]*core.TokenInfo{
-			"token-firebase-new-123": {
-				UID:   "firebase-new-user-123",
+			"token-tenant-new-123": {
+				UID:   "tenant-new-user-123",
 				Email: "newuser@example.com",
 				Role:  "user",
 			},
@@ -3056,7 +3056,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	client := server.Client()
 
 	headers := map[string]string{
-		"Authorization": "Bearer token-firebase-new-123",
+		"Authorization": "Bearer token-tenant-new-123",
 	}
 
 	// 1. GET /api/v1/profile for the new user should return 200 OK (lazy provisioned)
@@ -3068,8 +3068,8 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	if err := json.Unmarshal(body, &prof); err != nil {
 		t.Fatalf("decode profile: %v", err)
 	}
-	if prof.UserID != "firebase-new-user-123" {
-		t.Errorf("expected UserID 'firebase-new-user-123', got %q", prof.UserID)
+	if prof.UserID != "tenant-new-user-123" {
+		t.Errorf("expected UserID 'tenant-new-user-123', got %q", prof.UserID)
 	}
 
 	// 2. GET /api/v1/profile/full should return 200 OK
@@ -3092,7 +3092,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	}
 
 	// 4. Verify user record in UserStore
-	user, err := store.Users().User(ctx, "firebase-new-user-123")
+	user, err := store.Users().User(ctx, "tenant-new-user-123")
 	if err != nil {
 		t.Fatalf("failed to retrieve provisioned user: %v", err)
 	}

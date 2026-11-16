@@ -244,10 +244,9 @@ func buildMCPServerConfig(cfg *config.Config, st *store.Store, logger *slog.Logg
 // resolveMCPAuthProvider initializes auth from config and fails fast on explicit misconfiguration while allowing local stdio operation when unconfigured.
 func resolveMCPAuthProvider(cfg *config.Config, logger *slog.Logger) (auth.Provider, error) {
 	authReg, err := auth.NewRegistryFromConfig(auth.Config{
-		DefaultUserID:     cfg.DefaultUserID,
-		FirebaseProjectID: cfg.FirebaseProjectID,
-		AuthProvider:      cfg.AuthProvider,
-		Admin:             cfg.Admin,
+		DefaultUserID: cfg.DefaultUserID,
+		AuthProvider:  cfg.AuthProvider,
+		Admin:         cfg.Admin,
 	})
 	if err != nil {
 		if logger != nil {

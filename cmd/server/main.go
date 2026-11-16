@@ -53,6 +53,11 @@ func run(parent context.Context, args ...string) error {
 
 // runWithStore orchestrates configuration loading, store initialization, auth setup, and delegation to server.Run.
 func runWithStore(parent context.Context, storeInit StoreInitializer, args ...string) error {
+	return runWithDeps(parent, storeInit, nil, args...)
+}
+
+// runWithDeps orchestrates configuration loading, store initialization, injected auth provider options, and delegation to server.Run.
+func runWithDeps(parent context.Context, storeInit StoreInitializer, authOpts []auth.RegistryOption, args ...string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
@@ -73,7 +78,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	}
 	defer closeStore(st, logger)
 
-	authProvider, err := resolveCLIAuthProvider(cfg, logger)
+	authProvider, err := resolveCLIAuthProvider(cfg, logger, authOpts...)
 	if err != nil {
 		return err
 	}
@@ -98,13 +103,12 @@ func closeStore(st *store.Store, logger *slog.Logger) {
 }
 
 // resolveCLIAuthProvider builds the auth registry from CLI/env settings and validates active selection.
-func resolveCLIAuthProvider(cfg *config.Config, logger *slog.Logger) (auth.Provider, error) {
+func resolveCLIAuthProvider(cfg *config.Config, logger *slog.Logger, opts ...auth.RegistryOption) (auth.Provider, error) {
 	authRegistry, err := auth.NewRegistryFromConfig(auth.Config{
-		DefaultUserID:     cfg.DefaultUserID,
-		FirebaseProjectID: cfg.FirebaseProjectID,
-		AuthProvider:      cfg.AuthProvider,
-		Admin:             cfg.Admin,
-	})
+		DefaultUserID: cfg.DefaultUserID,
+		AuthProvider:  cfg.AuthProvider,
+		Admin:         cfg.Admin,
+	}, opts...)
 	if err != nil {
 		logger.Error("failed to initialize auth registry", "err", err)
 		return nil, fmt.Errorf("initializing auth registry: %w", err)
@@ -112,17 +116,14 @@ func resolveCLIAuthProvider(cfg *config.Config, logger *slog.Logger) (auth.Provi
 
 	authProvider, err := authRegistry.Default()
 	if err != nil {
-		const msg = "multi-tenant mode requires FIREBASE_PROJECT_ID or explicit ADMIN_MODE=true / -admin-mode for local admin mode"
+		const msg = "multi-tenant mode requires an injected auth provider or explicit ADMIN_MODE=true / -admin-mode for local admin mode"
 		logger.Error(msg)
 		return nil, errors.New(msg)
 	}
 
-	switch authProvider.Name() {
-	case auth.ProviderAdmin:
+	if authProvider.Name() == auth.ProviderAdmin {
 		logger.Info("running in local admin mode: token verification bypassed, default user id applied", "user_id", cfg.DefaultUserID)
-	case auth.ProviderFirebase:
-		logger.Info("initialized firebase token verifier", "project_id", cfg.FirebaseProjectID)
-	default:
+	} else {
 		logger.Info("initialized authentication provider", "provider", authProvider.Name())
 	}
 

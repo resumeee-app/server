@@ -294,25 +294,22 @@ func TestCLI_Run_ConfigFlag(t *testing.T) {
 
 func TestCLI_Run_InvalidAuthProvider(t *testing.T) {
 	tests := []struct {
-		name              string
-		authProvider      string
-		firebaseProjectID string
+		name         string
+		authProvider string
 	}{
 		{
 			name:         "unknown AUTH_PROVIDER fails fast",
 			authProvider: "nonexistent-provider",
 		},
 		{
-			name:              "firebase AUTH_PROVIDER without FIREBASE_PROJECT_ID fails fast",
-			authProvider:      "firebase",
-			firebaseProjectID: "",
+			name:         "unregistered custom AUTH_PROVIDER fails fast",
+			authProvider: "custom",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("AUTH_PROVIDER", tc.authProvider)
-			t.Setenv("FIREBASE_PROJECT_ID", tc.firebaseProjectID)
 			storeInit := func(ctx context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 				return memory.NewSeeded(ctx)
 			}

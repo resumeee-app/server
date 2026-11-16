@@ -22,16 +22,6 @@ var nonStoragePackageDirs = []string{
 	"internal/config",
 }
 
-// nonFirebasePackageDirs enumerates packages that must remain decoupled from resumeee-auth-firebase directly.
-var nonFirebasePackageDirs = []string{
-	"openapi",
-	".",
-	"internal/access",
-	"internal/api",
-	"internal/mcp",
-	"internal/config",
-}
-
 // nonMCPPackageDirs enumerates packages that must remain decoupled from mark3labs/mcp-go directly.
 var nonMCPPackageDirs = []string{
 	"openapi",
@@ -57,7 +47,6 @@ var forbiddenStoragePrefixes = []string{
 
 // TestImportBoundaries enforces architectural dependency separation across all Go files (including tests):
 // - Only cmd/* binaries wire concrete SQL storage libraries.
-// - Only auth (and cmd/*) may depend on resumeee-auth-firebase.
 // - Only internal/mcp and cmd/mcp may depend directly on github.com/mark3labs/mcp-go.
 func TestImportBoundaries(t *testing.T) {
 	repoRoot := findRepoRoot(t)
@@ -93,7 +82,6 @@ func TestImportBoundaries(t *testing.T) {
 	}
 
 	checkGroup(nonStoragePackageDirs, "storage/ORM", forbiddenStoragePrefixes)
-	checkGroup(nonFirebasePackageDirs, "firebase auth", []string{"github.com/resumeee-app/resumeee-auth-firebase"})
 	checkGroup(nonMCPPackageDirs, "MCP SDK", []string{"github.com/mark3labs/mcp-go"})
 
 	if len(violations) > 0 {
@@ -102,7 +90,7 @@ func TestImportBoundaries(t *testing.T) {
 }
 
 // TestCheckImportBoundaryViolations proves the import boundary guard is falsifiable against
-// forbidden database, ORM, Firebase, and MCP SDK imports while allowing clean domain imports.
+// forbidden database, ORM, and MCP SDK imports while allowing clean domain imports.
 func TestCheckImportBoundaryViolations(t *testing.T) {
 	fset := token.NewFileSet()
 
@@ -137,14 +125,6 @@ func TestCheckImportBoundaryViolations(t *testing.T) {
 			forbidden:    forbiddenStoragePrefixes,
 			wantCount:    1,
 			wantContains: "database/sql",
-		},
-		{
-			name:         "flags direct firebase auth import in internal/api",
-			src:          "package api\nimport _ \"github.com/resumeee-app/resumeee-auth-firebase\"\n",
-			rule:         "firebase auth",
-			forbidden:    []string{"github.com/resumeee-app/resumeee-auth-firebase"},
-			wantCount:    1,
-			wantContains: "resumeee-auth-firebase",
 		},
 		{
 			name:         "flags direct mcp-go import in server",

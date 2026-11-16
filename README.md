@@ -4,7 +4,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 ## Overview
 
-`server` is a thin transport and dependency-injection layer built on top of `core`, `sql`, and `resumeee-auth-firebase`:
+`server` is a thin transport and dependency-injection layer built on top of `core` and `sql`:
 
 - `./` (`package server`) — Public Go package (`github.com/resumeee-app/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
 - `auth/` — Public Go package (`github.com/resumeee-app/server/auth`) providing request authentication providers and multi-scheme registry resolution.
@@ -33,9 +33,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/resumeee-app/server"
-	auth "github.com/resumeee-app/resumeee-auth-firebase"
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/llm/gemini"
+	"github.com/resumeee-app/server"
 	"github.com/resumeee-app/sql"
 )
 
@@ -54,8 +54,8 @@ func main() {
 	}
 	defer store.Close()
 
-	// 2. Configure authentication in resumeee-auth-firebase
-	authProvider := auth.NewFirebaseTokenVerifier("my-firebase-project")
+	// 2. Configure an external authentication vendor implementing core.AuthProvider (or core.TokenVerifier)
+	var authProvider core.AuthProvider = newCustomAuthProvider()
 
 	// 3. Configure LLM provider(s) in core/llm
 	geminiClient := gemini.New(
@@ -113,7 +113,7 @@ go run ./cmd/server
 go run ./cmd/mcp
 ```
 
-See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PATH`, `ADMIN_MODE`, `FIREBASE_PROJECT_ID`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_COMPAT_BASE_URL`).
+See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PATH`, `ADMIN_MODE`, `AUTH_PROVIDER`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_COMPAT_BASE_URL`).
 
 `Dockerfile` expects sibling build contexts when building from the umbrella workspace:
 
@@ -121,7 +121,6 @@ See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PA
 docker build \
   --build-context core=../core \
   --build-context sql=../sql \
-  --build-context resumeee-auth-firebase=../resumeee-auth-firebase \
   -t server .
 ```
 

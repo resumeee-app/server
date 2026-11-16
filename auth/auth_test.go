@@ -141,11 +141,12 @@ func TestNewRegistryFromConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("firebase project id initializes firebase provider as default", func(t *testing.T) {
-		cfg := auth.Config{
-			FirebaseProjectID: "demo-project",
-		}
-		r, err := auth.NewRegistryFromConfig(cfg)
+	t.Run("single injected verifier initializes as default when admin mode is disabled", func(t *testing.T) {
+		cfg := auth.Config{}
+		r, err := auth.NewRegistryFromConfig(cfg, auth.WithAuthProvider(&verifierOnlyProvider{
+			name: "custom-vendor",
+			uid:  "vendor-user",
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -153,23 +154,22 @@ func TestNewRegistryFromConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if def.Name() != auth.ProviderFirebase {
-			t.Errorf("expected default %q, got %q", auth.ProviderFirebase, def.Name())
+		if def.Name() != "custom-vendor" {
+			t.Errorf("expected default %q, got %q", "custom-vendor", def.Name())
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/profile", nil)
 		if _, err := def.AuthenticateRequest(req); !errors.Is(err, auth.ErrMissingBearerHeader) {
-			t.Errorf("expected ErrMissingBearerHeader from wrapped firebase provider, got %v", err)
+			t.Errorf("expected ErrMissingBearerHeader from wrapped verifier provider, got %v", err)
 		}
 	})
 
 	t.Run("explicit auth provider selects default", func(t *testing.T) {
 		cfg := auth.Config{
-			AuthProvider:      auth.ProviderAdmin,
-			FirebaseProjectID: "demo-project",
-			DefaultUserID:     "admin-user",
+			AuthProvider:  auth.ProviderAdmin,
+			DefaultUserID: "admin-user",
 		}
-		r, err := auth.NewRegistryFromConfig(cfg)
+		r, err := auth.NewRegistryFromConfig(cfg, auth.WithTokenVerifier("oidc", &stubVerifier{uid: "u-1"}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -179,6 +179,70 @@ func TestNewRegistryFromConfig(t *testing.T) {
 		}
 		if def.Name() != auth.ProviderAdmin {
 			t.Errorf("expected default %q, got %q", auth.ProviderAdmin, def.Name())
+		}
+	})
+
+	t.Run("explicit auth provider selects injected vendor from multiple vendors", func(t *testing.T) {
+		cfg := auth.Config{
+			AuthProvider: "oidc",
+		}
+		r, err := auth.NewRegistryFromConfig(
+			cfg,
+			auth.WithTokenVerifier("oidc", &stubVerifier{uid: "oidc-user"}),
+			auth.WithProvider(auth.NewTokenVerifierProvider("jwt", &stubVerifier{uid: "jwt-user"})),
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		def, err := r.Default()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Name() != "oidc" {
+			t.Errorf("expected default %q, got %q", "oidc", def.Name())
+		}
+	})
+
+	t.Run("multiple injected vendors without explicit selection fails closed", func(t *testing.T) {
+		cfg := auth.Config{}
+		r, err := auth.NewRegistryFromConfig(
+			cfg,
+			auth.WithTokenVerifier("oidc", &stubVerifier{uid: "oidc-user"}),
+			auth.WithTokenVerifier("jwt", &stubVerifier{uid: "jwt-user"}),
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := r.Default(); err == nil {
+			t.Fatal("expected error when multiple vendors are injected without explicit AuthProvider")
+		}
+	})
+
+	t.Run("unconfigured multi-tenant registry fails closed", func(t *testing.T) {
+		r, err := auth.NewRegistryFromConfig(auth.Config{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := r.Default(); err == nil {
+			t.Fatal("expected error when no default provider is configured")
+		}
+	})
+
+	t.Run("invalid registry options return errors", func(t *testing.T) {
+		badOpts := []auth.RegistryOption{
+			auth.WithProvider(nil),
+			auth.WithProvider(&mockEmptyNameProvider{}),
+			auth.WithAuthProvider(nil),
+			auth.WithAuthProvider(&verifierOnlyProvider{name: "  "}),
+			auth.WithAuthProvider(auth.NewAdminProvider("default")),
+			auth.WithTokenVerifier("custom", nil),
+			auth.WithTokenVerifier("   ", &stubVerifier{uid: "u"}),
+			auth.WithTokenVerifier("admin", &stubVerifier{uid: "u"}),
+		}
+		for i, opt := range badOpts {
+			if _, err := auth.NewRegistryFromConfig(auth.Config{}, opt); err == nil {
+				t.Errorf("option %d: expected error, got nil", i)
+			}
 		}
 	})
 }

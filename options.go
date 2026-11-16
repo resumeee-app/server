@@ -301,7 +301,7 @@ func WithStore(st *store.Store) Option {
 	}
 }
 
-// WithAuthProvider injects a configured core.AuthProvider implementation (e.g., from resumeee-auth-firebase),
+// WithAuthProvider injects a configured core.AuthProvider implementation,
 // wrapping it via auth.NewTokenVerifierProvider for HTTP Bearer token extraction. Callers supplying
 // an HTTP-aware auth.Provider (such as auth.AdminProvider or a non-Bearer request authenticator) must
 // use WithRequestAuthProvider instead; passing an "admin" provider is rejected so local admin auth is
