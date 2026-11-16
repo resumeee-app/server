@@ -16,11 +16,11 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/branch"
+	"github.com/resumeee-app/core/memory"
+	"github.com/resumeee-app/core/profile"
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/profile"
 )
 
 type mockTokenVerifier struct {

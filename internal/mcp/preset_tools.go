@@ -9,8 +9,8 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/internal/access"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 // registerPresetTools registers tailoring strategy preset and language discovery tools onto s.

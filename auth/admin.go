@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // fallbackUserID is the default local tenant identifier when none is explicitly configured.

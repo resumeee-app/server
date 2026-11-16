@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // CreateFactRequest defines the JSON payload for creating a verifiable achievement fact linked to an owner entity.

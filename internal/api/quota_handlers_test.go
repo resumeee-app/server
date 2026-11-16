@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/memory"
+	"github.com/resumeee-app/core/worker"
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 func TestGetQuota_DefaultsAndRemaining(t *testing.T) {

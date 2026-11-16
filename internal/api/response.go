@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/internal/access"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 // Standard OpenAPI error codes.
@@ -120,7 +120,7 @@ func writeDomainError(w http.ResponseWriter, logger *slog.Logger, err error) {
 		return
 	}
 
-	// Domain sentinels carry client-safe diagnostics constructed by resumeee-core;
+	// Domain sentinels carry client-safe diagnostics constructed by core;
 	// storage adapters must never wrap raw SQL or DSN strings inside core.Err* sentinels.
 	if errors.Is(err, core.ErrNotFound) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "resource not found", err.Error())

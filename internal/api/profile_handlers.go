@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // profileHandler serves main profile, JSON Resume import/export, PDF parsing, and career graph entity endpoints.

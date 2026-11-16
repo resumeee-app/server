@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // CreateCertificationRequest defines the JSON payload for creating a professional certification entry.

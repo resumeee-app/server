@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 func TestTimeoutMiddleware(t *testing.T) {

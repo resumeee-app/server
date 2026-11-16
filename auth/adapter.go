@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // TokenVerifierProvider adapts any core.TokenVerifier into a full auth.Provider.

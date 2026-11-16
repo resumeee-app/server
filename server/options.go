@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/branch"
+	"github.com/resumeee-app/core/llm"
+	"github.com/resumeee-app/core/renderer"
+	"github.com/resumeee-app/core/store"
+	"github.com/resumeee-app/core/worker"
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/renderer"
-	"github.com/resumeee-app/resumeee-core/store"
-	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // TemplateRenderer defines the template rendering and validation contract required by Server.
@@ -290,7 +290,7 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithStore injects a configured *store.Store (e.g., from resumeee-storage-sql or resumeee-core/memory).
+// WithStore injects a configured *store.Store (e.g., from resumeee-storage-sql or core/memory).
 func WithStore(st *store.Store) Option {
 	return func(s *Server) error {
 		if st == nil {

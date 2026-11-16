@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	core "github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/llm"
+	"github.com/resumeee-app/core/worker"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	core "github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // PDF ingestion size, token quota, and retry defaults.

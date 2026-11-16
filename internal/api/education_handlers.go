@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // CreateEducationRequest defines the JSON payload for creating an academic education entry.
