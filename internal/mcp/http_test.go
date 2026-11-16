@@ -198,7 +198,7 @@ func TestAuthenticateRequest(t *testing.T) {
 }
 
 type failingProfileStore struct {
-	core.ProfileStore
+	ProfileStore
 	err error
 }
 
@@ -360,10 +360,10 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 
 		handler := NewHTTPHandler(mcpSrv, ServerConfig{
 			AuthProvider:         auth.NewTokenVerifierProvider("jwt", verifier),
-			ProfileStore:         store,
-			BranchStore:          store,
-			TemplateStore:        store,
-			UserStore:            store,
+			ProfileStore:         store.Profiles(),
+			BranchStore:          store.Branches(),
+			TemplateStore:        store.Templates(),
+			UserStore:            store.Users(),
 			RESTTimeout:          2 * time.Second,
 			SSEKeepAliveInterval: 5 * time.Second,
 		})
@@ -434,7 +434,7 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 		if gotAdmin.uid != "jwt-admin-1" || !gotAdmin.admin {
 			t.Errorf("expected admin token context (uid=jwt-admin-1, admin=true), got %+v", gotAdmin)
 		}
-		if prof, err := store.Profile(ctx, "jwt-admin-1"); err != nil || prof == nil {
+		if prof, err := store.Profiles().Profile(ctx, "jwt-admin-1"); err != nil || prof == nil {
 			t.Errorf("expected non-admin auth provider request to provision tenant jwt-admin-1, err=%v", err)
 		}
 
@@ -450,12 +450,13 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 			t.Fatalf("failed to seed store: %v", err)
 		}
 
-		profileSvc := profile.New(store, store, store)
+		profileSvc := profile.New(store.Profiles(), store.Career(), store.Branches())
 		branchSvc := branch.New(branch.Config{
-			Branches:  store,
-			Profiles:  store,
-			Presets:   store,
-			Templates: store,
+			Branches:  store.Branches(),
+			Jobs:      store.Jobs(),
+			Profiles:  store.Profiles(),
+			Presets:   store.Presets(),
+			Templates: store.Templates(),
 		})
 
 		cases := []struct {
@@ -469,12 +470,12 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 					AuthProvider:         auth.NewAdminProvider("default-user"),
 					ProfileService:       profileSvc,
 					BranchService:        branchSvc,
-					ProfileStore:         store,
-					CareerStore:          store,
-					BranchStore:          store,
-					TemplateStore:        store,
-					PresetStore:          store,
-					UserStore:            store,
+					ProfileStore:         store.Profiles(),
+					CareerStore:          store.Career(),
+					BranchStore:          store.Branches(),
+					TemplateStore:        store.Templates(),
+					PresetStore:          store.Presets(),
+					UserStore:            store.Users(),
 					RESTTimeout:          2 * time.Second,
 					SSEKeepAliveInterval: 5 * time.Second,
 				},
@@ -487,12 +488,12 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 					DefaultUserID:        "default-user",
 					ProfileService:       profileSvc,
 					BranchService:        branchSvc,
-					ProfileStore:         store,
-					CareerStore:          store,
-					BranchStore:          store,
-					TemplateStore:        store,
-					PresetStore:          store,
-					UserStore:            store,
+					ProfileStore:         store.Profiles(),
+					CareerStore:          store.Career(),
+					BranchStore:          store.Branches(),
+					TemplateStore:        store.Templates(),
+					PresetStore:          store.Presets(),
+					UserStore:            store.Users(),
 					RESTTimeout:          2 * time.Second,
 					SSEKeepAliveInterval: 5 * time.Second,
 				},
@@ -511,7 +512,7 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 					t.Fatalf("expected valid SSE tool result for list_branches, got: %s", rpcLine)
 				}
 
-				if prof, _ := store.Profile(ctx, tc.userID); prof != nil {
+				if prof, _ := store.Profiles().Profile(ctx, tc.userID); prof != nil {
 					t.Errorf("expected %s to skip lazy tenant provisioning for %q even during live tool execution, but profile was created", tc.name, tc.userID)
 				}
 			})
@@ -529,10 +530,10 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 			AuthTokens: map[string]string{
 				"tenant-tok": "tenant-failing-prov",
 			},
-			ProfileStore:  &failingProfileStore{ProfileStore: store, err: errors.New("database unavailable")},
-			BranchStore:   store,
-			TemplateStore: store,
-			UserStore:     store,
+			ProfileStore:  &failingProfileStore{ProfileStore: store.Profiles(), err: errors.New("database unavailable")},
+			BranchStore:   store.Branches(),
+			TemplateStore: store.Templates(),
+			UserStore:     store.Users(),
 		})
 
 		req := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil)
@@ -555,10 +556,11 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 		}
 
 		branchSvc := branch.New(branch.Config{
-			Branches:  store,
-			Profiles:  store,
-			Presets:   store,
-			Templates: store,
+			Branches:  store.Branches(),
+			Jobs:      store.Jobs(),
+			Profiles:  store.Profiles(),
+			Presets:   store.Presets(),
+			Templates: store.Templates(),
 		})
 
 		nonAdminVerifier := &mockTokenVerifier{
@@ -581,10 +583,10 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 					Admin:                true,
 					AuthTokens:           map[string]string{"static-tok": "user-token-1"},
 					BranchService:        branchSvc,
-					ProfileStore:         store,
-					BranchStore:          store,
-					TemplateStore:        store,
-					UserStore:            store,
+					ProfileStore:         store.Profiles(),
+					BranchStore:          store.Branches(),
+					TemplateStore:        store.Templates(),
+					UserStore:            store.Users(),
 					RESTTimeout:          2 * time.Second,
 					SSEKeepAliveInterval: 5 * time.Second,
 				},
@@ -596,10 +598,10 @@ func TestNewHTTPHandler_JWTAdminAndProvisioning(t *testing.T) {
 					Admin:                true,
 					AuthProvider:         auth.NewTokenVerifierProvider("jwt", nonAdminVerifier),
 					BranchService:        branchSvc,
-					ProfileStore:         store,
-					BranchStore:          store,
-					TemplateStore:        store,
-					UserStore:            store,
+					ProfileStore:         store.Profiles(),
+					BranchStore:          store.Branches(),
+					TemplateStore:        store.Templates(),
+					UserStore:            store.Users(),
 					RESTTimeout:          2 * time.Second,
 					SSEKeepAliveInterval: 5 * time.Second,
 				},

@@ -11,7 +11,7 @@ import (
 )
 
 type stubTemplateStore struct {
-	core.TemplateStore
+	access.TemplateReader
 	tmpl *core.TemplateSet
 	err  error
 }
@@ -21,7 +21,7 @@ func (s *stubTemplateStore) Template(_ context.Context, _, _ string) (*core.Temp
 }
 
 type stubPresetStore struct {
-	core.PresetStore
+	access.PresetReader
 	preset *core.Preset
 	byUser map[string]*core.Preset
 	err    error

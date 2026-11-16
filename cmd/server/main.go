@@ -16,16 +16,16 @@ import (
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-api/server"
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/store"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
-// StoreInitializer initializes a storage backend and provides a core.Store implementation.
-type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
+// StoreInitializer initializes a storage backend and returns a configured *store.Store.
+type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*store.Store, error)
 
 // defaultSQLiteInitializer establishes the default SQLite persistence backend, executing migrations and default seeding.
-func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error) {
-	store, err := storage.Open(ctx, storage.Config{
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*store.Store, error) {
+	st, err := storage.Open(ctx, storage.Config{
 		Driver:        storage.DriverSQLite,
 		DSN:           cfg.DBPath,
 		AutoMigrate:   true,
@@ -35,7 +35,7 @@ func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, logger *s
 		return nil, err
 	}
 	logger.Info("database seeded with default profile, built-in templates, and presets")
-	return store, nil
+	return st, nil
 }
 
 // main initializes runtime context and executes the primary resumeee server process.
@@ -67,11 +67,11 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, err := storeInit(ctx, cfg, logger)
+	st, err := storeInit(ctx, cfg, logger)
 	if err != nil {
 		return fmt.Errorf("initializing store: %w", err)
 	}
-	defer closeStore(store, logger)
+	defer closeStore(st, logger)
 
 	authProvider, err := resolveCLIAuthProvider(cfg, logger)
 	if err != nil {
@@ -80,7 +80,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 
 	return server.Run(ctx,
 		server.WithConfig(toServerConfig(cfg)),
-		server.WithStore(store),
+		server.WithStore(st),
 		server.WithRequestAuthProvider(authProvider),
 		server.WithLLMRegistry(cfg.NewLLMRegistry(logger)),
 		server.WithLogger(logger),
@@ -88,8 +88,11 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 }
 
 // closeStore releases persistence resources on process exit and logs any cleanup error.
-func closeStore(store core.Store, logger *slog.Logger) {
-	if err := store.Close(); err != nil {
+func closeStore(st *store.Store, logger *slog.Logger) {
+	if st == nil {
+		return
+	}
+	if err := st.Close(); err != nil {
 		logger.Warn("failed to close store", "err", err)
 	}
 }
@@ -135,7 +138,6 @@ func toServerConfig(cfg *config.Config) *server.Config {
 		LLMDailyRequestLimit:       cfg.LLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       cfg.LLMMonthlyTokenLimit,
 		WorkerConcurrency:          cfg.WorkerConcurrency,
-		WorkerQueueSize:            cfg.WorkerQueueSize,
 		MaxConcurrentJobsPerTenant: cfg.MaxConcurrentJobsPerTenant,
 		Environment:                cfg.Environment,
 		LogLevel:                   cfg.LogLevel,

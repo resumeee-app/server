@@ -135,7 +135,7 @@ func TestServer_RunWithInjectedDependencies(t *testing.T) {
 	}
 
 	customUser := "custom-tenant"
-	if err := memStore.UpsertProfile(ctx, &core.Profile{
+	if err := memStore.Profiles().UpsertProfile(ctx, &core.Profile{
 		UserID:   customUser,
 		FullName: "Ada Lovelace",
 		Headline: "Analytical Engine Architect",
@@ -157,7 +157,7 @@ func TestServer_RunWithInjectedDependencies(t *testing.T) {
 		WithStore(memStore),
 		WithLLMClient(customClient),
 		WithQuotaLimits(100, 500000),
-		WithWorkerPoolConfig(4, 200, 3),
+		WithWorkerPoolConfig(4, 3),
 		WithTimeouts(15*time.Second, 5*time.Minute),
 		WithEnvironment("development"),
 		WithLogLevel(slog.LevelDebug),
@@ -400,9 +400,8 @@ func TestServer_OptionValidation(t *testing.T) {
 		{"empty DefaultUserID", WithDefaultUserID("")},
 		{"invalid daily quota", WithQuotaLimits(0, 100)},
 		{"invalid monthly quota", WithQuotaLimits(10, 0)},
-		{"invalid worker concurrency", WithWorkerPoolConfig(0, 100, 2)},
-		{"invalid worker queueSize", WithWorkerPoolConfig(2, 0, 2)},
-		{"invalid worker maxPerTenant", WithWorkerPoolConfig(2, 100, 0)},
+		{"invalid worker concurrency", WithWorkerPoolConfig(0, 2)},
+		{"invalid worker maxPerTenant", WithWorkerPoolConfig(2, 0)},
 		{"invalid restTimeout", WithTimeouts(0, time.Minute)},
 		{"invalid llmTimeout", WithTimeouts(time.Second, 0)},
 		{"nil Store", WithStore(nil)},
@@ -440,7 +439,7 @@ func TestServer_WithRequestAuthProvider(t *testing.T) {
 	}
 
 	adminProv := auth.NewAdminProvider("request-tenant")
-	if err := memStore.UpsertProfile(ctx, &core.Profile{
+	if err := memStore.Profiles().UpsertProfile(ctx, &core.Profile{
 		UserID:   "request-tenant",
 		FullName: "Grace Hopper",
 	}); err != nil {

@@ -58,13 +58,20 @@ func handleListSkills(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		case "global":
 			skills, err = cfg.CareerStore.ListGlobalSkills(ctx)
 		case "custom":
-			all, lErr := cfg.CareerStore.ListSkills(ctx, userID)
-			if lErr == nil {
+			var all []core.Skill
+			all, err = cfg.CareerStore.ListSkills(ctx, userID)
+			if err == nil {
 				skills = access.FilterCustomSkills(all, userID)
 			}
-			err = lErr
 		default:
-			skills, err = cfg.CareerStore.ListSkills(ctx, userID)
+			var customSkills, globalSkills []core.Skill
+			customSkills, err = cfg.CareerStore.ListSkills(ctx, userID)
+			if err == nil {
+				globalSkills, err = cfg.CareerStore.ListGlobalSkills(ctx)
+			}
+			if err == nil {
+				skills = core.MergeUniqueSkills(customSkills, globalSkills)
+			}
 		}
 
 		if err != nil {

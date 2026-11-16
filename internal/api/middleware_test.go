@@ -428,7 +428,7 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 }
 
-type noopProfileStore struct{ core.ProfileStore }
+type noopProfileStore struct{ ProfileStore }
 
 func TestDefaultTenantProvisioner_PartialStoresDoNotCache(t *testing.T) {
 	p := &defaultTenantProvisioner{

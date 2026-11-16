@@ -8,7 +8,6 @@ import (
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/renderer"
 	"github.com/resumeee-app/resumeee-core/seed"
 	"github.com/resumeee-app/resumeee-core/worker"
@@ -36,21 +35,19 @@ type ServerConfig struct {
 	// TemplateRenderer handles multi-format (HTML, Markdown, PlainText) resume rendering.
 	TemplateRenderer renderer.TemplateRenderer
 	// ProfileStore provides persistence access for base profiles and career snapshots.
-	ProfileStore core.ProfileStore
+	ProfileStore ProfileStore
 	// CareerStore provides persistence access for career entities, bullet facts, and skills.
-	CareerStore core.CareerStore
+	CareerStore CareerStore
 	// BranchStore provides persistence access for resume branches and branch versions.
-	BranchStore core.BranchStore
+	BranchStore BranchStore
 	// TemplateStore provides persistence access for built-in and custom template sets.
-	TemplateStore core.TemplateStore
+	TemplateStore TemplateStore
 	// PresetStore provides access to tailoring presets and strategy instructions.
-	PresetStore core.PresetStore
+	PresetStore PresetStore
 	// UserStore provides persistence access for multi-tenant user accounts.
-	UserStore core.UserStore
+	UserStore UserStore
 	// ResumeExtractor provides PDF resume text parsing and structured fact extraction.
 	ResumeExtractor worker.ResumeExtractor
-	// JobEnqueuer coordinates asynchronous resume tailoring job processing.
-	JobEnqueuer branch.JobEnqueuer
 	// DefaultUserID specifies the fallback user identifier when no auth header or token is provided.
 	DefaultUserID string
 	// Admin indicates local single-user mode bypassing external token verification.

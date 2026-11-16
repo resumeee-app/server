@@ -55,40 +55,36 @@ func registerBranchRoutes(mux *http.ServeMux, cfg RouterConfig) {
 
 // CreateBranchRequest defines the JSON payload for creating a targeted resume branch.
 type CreateBranchRequest struct {
-	Name                string   `json:"name"`
-	IsDefault           *bool    `json:"is_default,omitempty"`
-	TargetRole          string   `json:"target_role"`
-	TargetCompany       string   `json:"target_company"`
-	TargetRequirements  string   `json:"target_requirements"`
-	BranchInstructions  string   `json:"branch_instructions"`
-	CustomDirectives    string   `json:"custom_directives"`
-	PresetID            *string  `json:"preset_id"`
-	TailoringStrategyID *string  `json:"tailoring_strategy_id"`
-	TemplateSetID       string   `json:"template_set_id"`
-	ProviderOverride    string   `json:"provider_override"`
-	ModelOverride       string   `json:"model_override"`
-	ReasoningLevel      string   `json:"reasoning_level,omitempty"`
-	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
-	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
+	Name               string   `json:"name"`
+	IsDefault          *bool    `json:"is_default,omitempty"`
+	TargetRole         string   `json:"target_role"`
+	TargetCompany      string   `json:"target_company"`
+	TargetRequirements string   `json:"target_requirements"`
+	BranchInstructions string   `json:"branch_instructions"`
+	PresetID           *string  `json:"preset_id"`
+	TemplateSetID      string   `json:"template_set_id"`
+	ProviderOverride   string   `json:"provider_override"`
+	ModelOverride      string   `json:"model_override"`
+	ReasoningLevel     string   `json:"reasoning_level,omitempty"`
+	PinnedEntityIDs    []string `json:"pinned_entity_ids"`
+	ExcludedEntityIDs  []string `json:"excluded_entity_ids"`
 }
 
 // UpdateBranchRequest defines the partial JSON payload for updating an existing resume branch.
 type UpdateBranchRequest struct {
-	Name                *string  `json:"name"`
-	TargetRole          *string  `json:"target_role"`
-	TargetCompany       *string  `json:"target_company"`
-	TargetRequirements  *string  `json:"target_requirements"`
-	BranchInstructions  *string  `json:"branch_instructions"`
-	CustomDirectives    *string  `json:"custom_directives"`
-	PresetID            *string  `json:"preset_id"`
-	TailoringStrategyID *string  `json:"tailoring_strategy_id"`
-	TemplateSetID       *string  `json:"template_set_id"`
-	ProviderOverride    *string  `json:"provider_override"`
-	ModelOverride       *string  `json:"model_override"`
-	ReasoningLevel      *string  `json:"reasoning_level,omitempty"`
-	PinnedEntityIDs     []string `json:"pinned_entity_ids"`
-	ExcludedEntityIDs   []string `json:"excluded_entity_ids"`
-	ActiveVersionID     *string  `json:"active_version_id"`
+	Name               *string  `json:"name"`
+	TargetRole         *string  `json:"target_role"`
+	TargetCompany      *string  `json:"target_company"`
+	TargetRequirements *string  `json:"target_requirements"`
+	BranchInstructions *string  `json:"branch_instructions"`
+	PresetID           *string  `json:"preset_id"`
+	TemplateSetID      *string  `json:"template_set_id"`
+	ProviderOverride   *string  `json:"provider_override"`
+	ModelOverride      *string  `json:"model_override"`
+	ReasoningLevel     *string  `json:"reasoning_level,omitempty"`
+	PinnedEntityIDs    []string `json:"pinned_entity_ids"`
+	ExcludedEntityIDs  []string `json:"excluded_entity_ids"`
+	ActiveVersionID    *string  `json:"active_version_id"`
 }
 
 // SyncBranchesRequest defines an optional subset of branch IDs to synchronize.
@@ -151,8 +147,7 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	strategyID := firstNonNilStringPtr(req.TailoringStrategyID, req.PresetID)
-	if !h.validateBranchReferences(ctx, w, userID, req.TemplateSetID, strategyID) {
+	if !h.validateBranchReferences(ctx, w, userID, req.TemplateSetID, req.PresetID) {
 		return
 	}
 
@@ -165,27 +160,20 @@ func (h *branchHandler) createBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	directives := req.CustomDirectives
-	if directives == "" && req.BranchInstructions != "" {
-		directives = req.BranchInstructions
-	}
-
 	b := &core.Branch{
-		UserID:              userID,
-		Name:                req.Name,
-		TargetRole:          req.TargetRole,
-		TargetCompany:       req.TargetCompany,
-		TargetRequirements:  req.TargetRequirements,
-		CustomDirectives:    directives,
-		BranchInstructions:  directives,
-		TailoringStrategyID: strategyID,
-		PresetID:            strategyID,
-		TemplateSetID:       req.TemplateSetID,
-		ProviderOverride:    req.ProviderOverride,
-		ModelOverride:       req.ModelOverride,
-		ReasoningLevel:      req.ReasoningLevel,
-		PinnedEntityIDs:     req.PinnedEntityIDs,
-		ExcludedEntityIDs:   req.ExcludedEntityIDs,
+		UserID:             userID,
+		Name:               req.Name,
+		TargetRole:         req.TargetRole,
+		TargetCompany:      req.TargetCompany,
+		TargetRequirements: req.TargetRequirements,
+		BranchInstructions: req.BranchInstructions,
+		PresetID:           req.PresetID,
+		TemplateSetID:      req.TemplateSetID,
+		ProviderOverride:   req.ProviderOverride,
+		ModelOverride:      req.ModelOverride,
+		ReasoningLevel:     req.ReasoningLevel,
+		PinnedEntityIDs:    req.PinnedEntityIDs,
+		ExcludedEntityIDs:  req.ExcludedEntityIDs,
 	}
 
 	created, err := h.svc.CreateBranch(ctx, b)
@@ -229,12 +217,11 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	strategyToValidate := firstNonNilStringPtr(req.TailoringStrategyID, req.PresetID)
 	var templateToValidate string
 	if req.TemplateSetID != nil {
 		templateToValidate = *req.TemplateSetID
 	}
-	if !h.validateBranchReferences(ctx, w, userID, templateToValidate, strategyToValidate) {
+	if !h.validateBranchReferences(ctx, w, userID, templateToValidate, req.PresetID) {
 		return
 	}
 
@@ -271,25 +258,17 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// firstNonNilStringPtr returns primary when non-nil and otherwise fallback.
-func firstNonNilStringPtr(primary, fallback *string) *string {
-	if primary != nil {
-		return primary
-	}
-	return fallback
-}
-
-// validateBranchReferences verifies multi-tenant authorization for optional template set and tailoring strategy IDs.
-func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.ResponseWriter, userID, templateSetID string, strategyID *string) bool {
+// validateBranchReferences verifies multi-tenant authorization for optional template set and tailoring preset IDs.
+func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.ResponseWriter, userID, templateSetID string, presetID *string) bool {
 	if templateSetID != "" {
 		if _, err := access.Template(ctx, h.cfg.TemplateStore, userID, templateSetID); err != nil {
 			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return false
 		}
 	}
-	if strategyID != nil && *strategyID != "" {
-		if _, err := access.Preset(ctx, h.cfg.PresetStore, userID, h.cfg.DefaultUserID, *strategyID); err != nil {
-			writeAccessError(w, err, "cannot access foreign or nonexistent tailoring strategy")
+	if presetID != nil && *presetID != "" {
+		if _, err := access.Preset(ctx, h.cfg.PresetStore, userID, h.cfg.DefaultUserID, *presetID); err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent preset")
 			return false
 		}
 	}
@@ -327,23 +306,15 @@ func applyBranchTextUpdates(b *core.Branch, req UpdateBranchRequest) {
 	if req.TargetRequirements != nil {
 		b.TargetRequirements = *req.TargetRequirements
 	}
-	if req.CustomDirectives != nil {
-		b.CustomDirectives = *req.CustomDirectives
-		b.BranchInstructions = *req.CustomDirectives
-	} else if req.BranchInstructions != nil {
+	if req.BranchInstructions != nil {
 		b.BranchInstructions = *req.BranchInstructions
-		b.CustomDirectives = *req.BranchInstructions
 	}
 }
 
-// applyBranchConfigUpdates copies non-nil strategy, template, model, entity pin/exclusion, and active version fields onto b.
+// applyBranchConfigUpdates copies non-nil preset, template, model, entity pin/exclusion, and active version fields onto b.
 func applyBranchConfigUpdates(b *core.Branch, req UpdateBranchRequest) {
-	if req.TailoringStrategyID != nil {
-		b.TailoringStrategyID = req.TailoringStrategyID
-		b.PresetID = req.TailoringStrategyID
-	} else if req.PresetID != nil {
+	if req.PresetID != nil {
 		b.PresetID = req.PresetID
-		b.TailoringStrategyID = req.PresetID
 	}
 	if req.TemplateSetID != nil {
 		b.TemplateSetID = *req.TemplateSetID

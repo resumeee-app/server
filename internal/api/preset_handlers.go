@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -39,7 +40,6 @@ type CreatePresetRequest struct {
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
 	SystemInstructions string  `json:"system_instructions"`
-	TemplateSetID      string  `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
 	Language           string  `json:"language,omitempty"`
 }
@@ -49,7 +49,6 @@ type UpdatePresetRequest struct {
 	Name               *string `json:"name"`
 	Description        *string `json:"description"`
 	SystemInstructions *string `json:"system_instructions"`
-	TemplateSetID      *string `json:"template_set_id"`
 	SuggestedThemeID   *string `json:"suggested_theme_id"`
 	Language           *string `json:"language,omitempty"`
 }
@@ -94,18 +93,9 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	themeID := req.SuggestedThemeID
-	if themeID == nil && req.TemplateSetID != "" {
-		themeID = &req.TemplateSetID
-	}
-
-	if themeID != nil && !h.validateOptionalTemplateAccess(ctx, w, userID, *themeID, "cannot access foreign or nonexistent template") {
+	suggestedThemeID, ok := h.resolveSuggestedThemeID(ctx, w, userID, req.SuggestedThemeID, "cannot access foreign or nonexistent template")
+	if !ok {
 		return
-	}
-	if themeID == nil || *themeID != req.TemplateSetID {
-		if !h.validateOptionalTemplateAccess(ctx, w, userID, req.TemplateSetID, "cannot access foreign or nonexistent template") {
-			return
-		}
 	}
 
 	lang, err := core.ValidateLanguage(req.Language)
@@ -120,15 +110,8 @@ func (h *presetHandler) createPreset(w http.ResponseWriter, r *http.Request) {
 		Name:               req.Name,
 		Description:        req.Description,
 		SystemInstructions: req.SystemInstructions,
-		SuggestedThemeID:   themeID,
-		TemplateSetID:      req.TemplateSetID,
+		SuggestedThemeID:   suggestedThemeID,
 		Language:           lang,
-	}
-	if preset.TemplateSetID == "" && themeID != nil {
-		preset.TemplateSetID = *themeID
-	}
-	if preset.SuggestedThemeID == nil && preset.TemplateSetID != "" {
-		preset.SuggestedThemeID = &preset.TemplateSetID
 	}
 
 	if err := h.cfg.PresetStore.CreatePreset(ctx, &preset); err != nil {
@@ -180,16 +163,20 @@ func (h *presetHandler) loadMutablePreset(ctx context.Context, w http.ResponseWr
 	return preset, true
 }
 
-// validateOptionalTemplateAccess verifies userID may reference templateID when non-empty.
-func (h *presetHandler) validateOptionalTemplateAccess(ctx context.Context, w http.ResponseWriter, userID, templateID, forbiddenMsg string) bool {
-	if templateID == "" {
-		return true
+// resolveSuggestedThemeID normalizes an optional suggested theme pointer and verifies template access when non-empty.
+func (h *presetHandler) resolveSuggestedThemeID(ctx context.Context, w http.ResponseWriter, userID string, raw *string, forbiddenMsg string) (*string, bool) {
+	if raw == nil {
+		return nil, true
 	}
-	if err := h.validateTemplateAccess(ctx, templateID, userID); err != nil {
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return nil, true
+	}
+	if err := h.validateTemplateAccess(ctx, trimmed, userID); err != nil {
 		writeAccessError(w, err, forbiddenMsg)
-		return false
+		return nil, false
 	}
-	return true
+	return &trimmed, true
 }
 
 // updatePreset updates mutable fields of an existing user-created preset.
@@ -218,22 +205,11 @@ func (h *presetHandler) updatePreset(w http.ResponseWriter, r *http.Request) {
 		preset.SystemInstructions = *req.SystemInstructions
 	}
 	if req.SuggestedThemeID != nil {
-		if !h.validateOptionalTemplateAccess(ctx, w, userID, *req.SuggestedThemeID, "cannot access foreign template") {
+		suggestedThemeID, ok := h.resolveSuggestedThemeID(ctx, w, userID, req.SuggestedThemeID, "cannot access foreign template")
+		if !ok {
 			return
 		}
-		preset.SuggestedThemeID = req.SuggestedThemeID
-		if *req.SuggestedThemeID != "" {
-			preset.TemplateSetID = *req.SuggestedThemeID
-		}
-	}
-	if req.TemplateSetID != nil {
-		if !h.validateOptionalTemplateAccess(ctx, w, userID, *req.TemplateSetID, "cannot access foreign template") {
-			return
-		}
-		preset.TemplateSetID = *req.TemplateSetID
-		if preset.SuggestedThemeID == nil && *req.TemplateSetID != "" {
-			preset.SuggestedThemeID = req.TemplateSetID
-		}
+		preset.SuggestedThemeID = suggestedThemeID
 	}
 	if req.Language != nil {
 		lang, err := core.ValidateLanguage(*req.Language)

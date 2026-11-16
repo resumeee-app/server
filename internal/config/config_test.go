@@ -36,9 +36,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerConcurrency != 2 {
 		t.Errorf("expected default WorkerConcurrency 2, got %d", cfg.WorkerConcurrency)
 	}
-	if cfg.WorkerQueueSize != 100 {
-		t.Errorf("expected default WorkerQueueSize 100, got %d", cfg.WorkerQueueSize)
-	}
 	if cfg.MaxConcurrentJobsPerTenant != 2 {
 		t.Errorf("expected default MaxConcurrentJobsPerTenant 2, got %d", cfg.MaxConcurrentJobsPerTenant)
 	}
@@ -86,7 +83,6 @@ func TestLoadOverrides(t *testing.T) {
 		"DB_PATH":                        "/var/lib/resumeee/custom.db",
 		"DEFAULT_USER_ID":                "user-123",
 		"WORKER_CONCURRENCY":             "8",
-		"WORKER_QUEUE_SIZE":              "500",
 		"MAX_CONCURRENT_JOBS_PER_TENANT": "4",
 		"GEMINI_API_KEY":                 "gem-secret",
 		"OPENAI_API_KEY":                 "sk-openai-secret",
@@ -121,9 +117,6 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.WorkerConcurrency != 8 {
 		t.Errorf("expected WorkerConcurrency 8, got %d", cfg.WorkerConcurrency)
-	}
-	if cfg.WorkerQueueSize != 500 {
-		t.Errorf("expected WorkerQueueSize 500, got %d", cfg.WorkerQueueSize)
 	}
 	if cfg.MaxConcurrentJobsPerTenant != 4 {
 		t.Errorf("expected MaxConcurrentJobsPerTenant 4, got %d", cfg.MaxConcurrentJobsPerTenant)
@@ -195,20 +188,6 @@ func TestLoadValidationAndFallbacks(t *testing.T) {
 			name: "non-positive WORKER_CONCURRENCY returns error",
 			env: map[string]string{
 				"WORKER_CONCURRENCY": "0",
-			},
-			expectError: true,
-		},
-		{
-			name: "invalid non-numeric WORKER_QUEUE_SIZE returns error",
-			env: map[string]string{
-				"WORKER_QUEUE_SIZE": "xyz",
-			},
-			expectError: true,
-		},
-		{
-			name: "non-positive WORKER_QUEUE_SIZE returns error",
-			env: map[string]string{
-				"WORKER_QUEUE_SIZE": "-10",
 			},
 			expectError: true,
 		},

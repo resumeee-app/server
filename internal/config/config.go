@@ -25,7 +25,6 @@ type Config struct {
 	LLMDailyRequestLimit       int
 	LLMMonthlyTokenLimit       int
 	WorkerConcurrency          int
-	WorkerQueueSize            int
 	MaxConcurrentJobsPerTenant int
 	GeminiAPIKey               string
 	OpenAIAPIKey               string
@@ -71,9 +70,6 @@ const (
 
 	// DefaultWorkerConcurrency sets the default number of concurrent background tailoring workers.
 	DefaultWorkerConcurrency = 2
-
-	// DefaultWorkerQueueSize sets the bounded in-memory task queue capacity across workers.
-	DefaultWorkerQueueSize = 100
 
 	// DefaultMaxConcurrentJobsPerTenant caps simultaneous in-flight LLM jobs for a single tenant.
 	DefaultMaxConcurrentJobsPerTenant = 2
@@ -165,7 +161,6 @@ func defaultConfig() *Config {
 		LLMDailyRequestLimit:       DefaultLLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       DefaultLLMMonthlyTokenLimit,
 		WorkerConcurrency:          DefaultWorkerConcurrency,
-		WorkerQueueSize:            DefaultWorkerQueueSize,
 		MaxConcurrentJobsPerTenant: DefaultMaxConcurrentJobsPerTenant,
 		Environment:                DefaultEnvironment,
 		LogLevel:                   slog.LevelInfo,
@@ -239,7 +234,6 @@ func loadQuotaAndWorkerConfig(cfg *Config, lookup func(string) string) error {
 		{key: "LLM_DAILY_REQUEST_LIMIT", dst: &cfg.LLMDailyRequestLimit},
 		{key: "LLM_MONTHLY_TOKEN_LIMIT", dst: &cfg.LLMMonthlyTokenLimit},
 		{key: "WORKER_CONCURRENCY", dst: &cfg.WorkerConcurrency},
-		{key: "WORKER_QUEUE_SIZE", dst: &cfg.WorkerQueueSize},
 		{key: "MAX_CONCURRENT_JOBS_PER_TENANT", dst: &cfg.MaxConcurrentJobsPerTenant},
 	}
 	for _, target := range intTargets {

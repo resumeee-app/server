@@ -24,20 +24,19 @@ import (
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 type testEnv struct {
 	server        *httptest.Server
-	db            any
-	profileStore  core.ProfileStore
-	presetStore   core.PresetStore
-	templateStore core.TemplateStore
-	branchStore   core.BranchStore
+	db            *store.Store
+	profileStore  api.ProfileStore
+	presetStore   api.PresetStore
+	templateStore api.TemplateStore
+	branchStore   api.BranchStore
+	jobStore      api.JobStore
 	profileSvc    *profile.Service
-	enqueuer      *api.ChannelJobEnqueuer
-	pdfJobStore   core.PDFJobStore
-	pdfEnqueuer   *api.ChannelPDFJobEnqueuer
 }
 
 func setupTestServer(t *testing.T, queueCap int) *testEnv {
@@ -45,16 +44,17 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 
 	ctx := context.Background()
 	defaultUserID := "default"
-	store, err := memory.NewSeeded(ctx, defaultUserID)
+	st, err := memory.NewSeeded(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var profileStore core.ProfileStore = store
-	var careerStore core.CareerStore = store
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
-	var branchStore core.BranchStore = store
+	var profileStore api.ProfileStore = st.Profiles()
+	var careerStore api.CareerStore = st.Career()
+	var presetStore api.PresetStore = st.Presets()
+	var templateStore api.TemplateStore = st.Templates()
+	var branchStore api.BranchStore = st.Branches()
+	var jobStore api.JobStore = st.Jobs()
 	profileSvc := profile.New(profileStore, careerStore, branchStore)
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
@@ -62,22 +62,21 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 	if queueCap <= 0 {
 		queueCap = 100
 	}
-	enqueuer := api.NewChannelJobEnqueuer(queueCap)
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:   profileStore,
-		CareerStore:    careerStore,
-		PresetStore:    presetStore,
-		TemplateStore:  templateStore,
-		BranchStore:    branchStore,
-		PDFJobStore:    store,
-		QuotaStore:     store,
-		ProfileService: profileSvc,
-		Renderer:       templateRenderer,
-		Validator:      provValidator,
-		JobEnqueuer:    enqueuer,
-		DefaultUserID:  defaultUserID,
-		Admin:          true,
+		ProfileStore:        profileStore,
+		CareerStore:         careerStore,
+		PresetStore:         presetStore,
+		TemplateStore:       templateStore,
+		BranchStore:         branchStore,
+		JobStore:            jobStore,
+		QuotaStore:          st.Quotas(),
+		ProfileService:      profileSvc,
+		Renderer:            templateRenderer,
+		Validator:           provValidator,
+		MaxPendingPerTenant: queueCap,
+		DefaultUserID:       defaultUserID,
+		Admin:               true,
 	})
 
 	server := httptest.NewServer(router)
@@ -87,13 +86,13 @@ func setupTestServer(t *testing.T, queueCap int) *testEnv {
 
 	return &testEnv{
 		server:        server,
-		db:            store,
+		db:            st,
 		profileStore:  profileStore,
 		presetStore:   presetStore,
 		templateStore: templateStore,
 		branchStore:   branchStore,
+		jobStore:      jobStore,
 		profileSvc:    profileSvc,
-		enqueuer:      enqueuer,
 	}
 }
 
@@ -394,14 +393,22 @@ func TestFullUserJourney(t *testing.T) {
 	}
 
 	// 21. POST /api/v1/presets
+	presetThemeID := core.TemplateStandardCleanID
 	presetReq := api.CreatePresetRequest{
 		Name:               "Custom SWE",
 		SystemInstructions: "Focus on distributed systems and backend engineering.",
-		TemplateSetID:      core.TemplateStandardCleanID,
+		SuggestedThemeID:   &presetThemeID,
 	}
 	resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/presets", presetReq, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /presets failed: %d, body: %s", resp.StatusCode, string(body))
+	}
+	presetMap := decodeJSON[map[string]any](t, body)
+	if _, hasLegacyTemplateSet := presetMap["template_set_id"]; hasLegacyTemplateSet {
+		t.Fatalf("POST /presets response must omit template_set_id, got: %s", string(body))
+	}
+	if gotTheme, _ := presetMap["suggested_theme_id"].(string); gotTheme != core.TemplateStandardCleanID {
+		t.Fatalf("POST /presets expected suggested_theme_id %q, got %v", core.TemplateStandardCleanID, presetMap["suggested_theme_id"])
 	}
 	preset := decodeJSON[core.Preset](t, body)
 
@@ -410,9 +417,27 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /presets failed: %d", resp.StatusCode)
 	}
-	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/presets/"+preset.ID, nil, nil)
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/presets/"+preset.ID, nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /presets/{id} failed: %d", resp.StatusCode)
+	}
+	presetGetMap := decodeJSON[map[string]any](t, body)
+	if _, hasLegacyTemplateSet := presetGetMap["template_set_id"]; hasLegacyTemplateSet {
+		t.Fatalf("GET /presets/{id} response must omit template_set_id, got: %s", string(body))
+	}
+	if gotTheme, _ := presetGetMap["suggested_theme_id"].(string); gotTheme != core.TemplateStandardCleanID {
+		t.Fatalf("GET /presets/{id} expected suggested_theme_id %q, got %v", core.TemplateStandardCleanID, presetGetMap["suggested_theme_id"])
+	}
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/tailoring-strategies/"+preset.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /tailoring-strategies/{id} failed: %d", resp.StatusCode)
+	}
+	strategyGetMap := decodeJSON[map[string]any](t, body)
+	if _, hasLegacyTemplateSet := strategyGetMap["template_set_id"]; hasLegacyTemplateSet {
+		t.Fatalf("GET /tailoring-strategies/{id} response must omit template_set_id, got: %s", string(body))
+	}
+	if gotTheme, _ := strategyGetMap["suggested_theme_id"].(string); gotTheme != core.TemplateStandardCleanID {
+		t.Fatalf("GET /tailoring-strategies/{id} expected suggested_theme_id %q, got %v", core.TemplateStandardCleanID, strategyGetMap["suggested_theme_id"])
 	}
 	updatedDesc := "Updated preset description"
 	resp, _ = doRequest(t, client, http.MethodPut, baseURL+"/api/v1/presets/"+preset.ID, api.UpdatePresetRequest{Description: &updatedDesc}, nil)
@@ -460,6 +485,16 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /branches failed: %d, body: %s", resp.StatusCode, string(body))
 	}
+	branchMap := decodeJSON[map[string]any](t, body)
+	if gotEpoch, ok := branchMap["epoch"].(float64); !ok || gotEpoch < 1 {
+		t.Fatalf("POST /branches expected positive epoch, got %v (raw: %s)", branchMap["epoch"], string(body))
+	}
+	if _, hasCustomDirectives := branchMap["custom_directives"]; hasCustomDirectives {
+		t.Fatalf("POST /branches response must omit custom_directives, got: %s", string(body))
+	}
+	if _, hasLegacyStrategy := branchMap["tailoring_strategy_id"]; hasLegacyStrategy {
+		t.Fatalf("POST /branches response must omit tailoring_strategy_id, got: %s", string(body))
+	}
 	branch := decodeJSON[core.Branch](t, body)
 	if branch.IsStale {
 		t.Fatalf("expected new branch to have is_stale=false, got true")
@@ -470,9 +505,19 @@ func TestFullUserJourney(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /branches failed: %d", resp.StatusCode)
 	}
-	resp, _ = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID, nil, nil)
+	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID, nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /branches/{id} failed: %d", resp.StatusCode)
+	}
+	branchGetMap := decodeJSON[map[string]any](t, body)
+	if gotEpoch, ok := branchGetMap["epoch"].(float64); !ok || gotEpoch < 1 {
+		t.Fatalf("GET /branches/{id} expected positive epoch, got %v (raw: %s)", branchGetMap["epoch"], string(body))
+	}
+	if _, hasCustomDirectives := branchGetMap["custom_directives"]; hasCustomDirectives {
+		t.Fatalf("GET /branches/{id} response must omit custom_directives, got: %s", string(body))
+	}
+	if _, hasLegacyStrategy := branchGetMap["tailoring_strategy_id"]; hasLegacyStrategy {
+		t.Fatalf("GET /branches/{id} response must omit tailoring_strategy_id, got: %s", string(body))
 	}
 
 	// 27. PUT /api/v1/profile -> Update profile summary. Verify GET /api/v1/branches?stale=true returns branch as stale
@@ -539,7 +584,7 @@ func TestFullUserJourney(t *testing.T) {
 	v1.MarkdownOutput = "# Default User\n" + newSummary
 	v1.PlainTextOutput = "Default User\n" + newSummary
 	v1.Status = core.VersionStatusCompleted
-	if err := env.branchStore.CompleteVersion(context.Background(), v1); err != nil {
+	if err := env.branchStore.SaveCompletedVersion(context.Background(), v1); err != nil {
 		t.Fatalf("failed to complete version 1: %v", err)
 	}
 
@@ -557,6 +602,13 @@ func TestFullUserJourney(t *testing.T) {
 	resp, body = doRequest(t, client, http.MethodGet, baseURL+"/api/v1/branches/"+branch.ID+"/versions/1", nil, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /versions/1 failed: %d", resp.StatusCode)
+	}
+	verMap := decodeJSON[map[string]any](t, body)
+	if gotBranchEpoch, ok := verMap["branch_epoch"].(float64); !ok || gotBranchEpoch < 1 {
+		t.Fatalf("GET /versions/1 expected positive branch_epoch, got %v (raw: %s)", verMap["branch_epoch"], string(body))
+	}
+	if gotJobID, ok := verMap["job_id"].(string); !ok || gotJobID == "" {
+		t.Fatalf("GET /versions/1 expected non-empty job_id, got %v (raw: %s)", verMap["job_id"], string(body))
 	}
 	verNum := decodeJSON[core.BranchVersion](t, body)
 	if verNum.VersionNumber != 1 {
@@ -878,7 +930,7 @@ func TestErrorEnvelopes(t *testing.T) {
 			TemplateSetIDUsed: core.TemplateStandardCleanID,
 			SourceType:        core.SourceTypeLLMGeneration,
 		}
-		if err := env.branchStore.CreateVersion(context.Background(), v1); err != nil {
+		if err := env.branchStore.SaveCompletedVersion(context.Background(), v1); err != nil {
 			t.Fatalf("failed to create v1: %v", err)
 		}
 
@@ -911,26 +963,36 @@ func TestErrorEnvelopes(t *testing.T) {
 		}
 	})
 
-	t.Run("503 QUEUE_FULL when worker pool channel is saturated", func(t *testing.T) {
-		// Setup branch
-		branchReq := api.CreateBranchRequest{
-			Name:          "Branch Queue Full",
+	t.Run("503 QUEUE_FULL when pending job limit is saturated", func(t *testing.T) {
+		// Setup two distinct branches so the second generate does not supersede the first branch's pending job.
+		branchReq1 := api.CreateBranchRequest{
+			Name:          "Branch Queue Full 1",
 			TemplateSetID: core.TemplateStandardCleanID,
 		}
-		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq, nil)
+		resp, body := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq1, nil)
 		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("create branch failed: %d", resp.StatusCode)
+			t.Fatalf("create branch 1 failed: %d", resp.StatusCode)
 		}
-		branch := decodeJSON[core.Branch](t, body)
+		branch1 := decodeJSON[core.Branch](t, body)
 
-		// First generate should succeed (queue capacity 1)
-		resp, _ = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch.ID+"/generate", nil, nil)
+		branchReq2 := api.CreateBranchRequest{
+			Name:          "Branch Queue Full 2",
+			TemplateSetID: core.TemplateStandardCleanID,
+		}
+		resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches", branchReq2, nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create branch 2 failed: %d", resp.StatusCode)
+		}
+		branch2 := decodeJSON[core.Branch](t, body)
+
+		// First generate should succeed (MaxPendingPerTenant capacity 1)
+		resp, _ = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch1.ID+"/generate", nil, nil)
 		if resp.StatusCode != http.StatusAccepted {
 			t.Fatalf("expected 202 on first enqueue, got: %d", resp.StatusCode)
 		}
 
-		// Second generate should saturate queue and return 503 QUEUE_FULL
-		resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch.ID+"/generate", nil, nil)
+		// Second generate across another branch should saturate tenant pending limit and return 503 QUEUE_FULL
+		resp, body = doRequest(t, client, http.MethodPost, baseURL+"/api/v1/branches/"+branch2.ID+"/generate", nil, nil)
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("expected 503 on saturated queue, got: %d, body: %s", resp.StatusCode, string(body))
 		}
@@ -1094,57 +1156,51 @@ func setupTestServerWithExtractor(t *testing.T, resumeExtractor worker.ResumeExt
 }
 
 func setupTestServerWithExtractorAndLogger(t *testing.T, resumeExtractor worker.ResumeExtractor, logger *slog.Logger) *testEnv {
-	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, logger, nil)
+	return setupTestServerWithExtractorLoggerAndPDFNotifier(t, resumeExtractor, logger, nil, 0)
 }
 
-func setupTestServerWithPDFEnqueuer(t *testing.T, resumeExtractor worker.ResumeExtractor, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
-	return setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, resumeExtractor, nil, pdfEnqueuer)
+func setupTestServerWithPDFNotifier(t *testing.T, resumeExtractor worker.ResumeExtractor, pdfNotifier core.JobNotifier, maxPending int) *testEnv {
+	return setupTestServerWithExtractorLoggerAndPDFNotifier(t, resumeExtractor, nil, pdfNotifier, maxPending)
 }
 
-func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtractor worker.ResumeExtractor, logger *slog.Logger, pdfEnqueuer *api.ChannelPDFJobEnqueuer) *testEnv {
+func setupTestServerWithExtractorLoggerAndPDFNotifier(t *testing.T, resumeExtractor worker.ResumeExtractor, logger *slog.Logger, pdfNotifier core.JobNotifier, maxPending int) *testEnv {
 	t.Helper()
 
 	ctx := context.Background()
 	defaultUserID := "default"
-	store, err := memory.NewSeeded(ctx, defaultUserID)
+	st, err := memory.NewSeeded(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var profileStore core.ProfileStore = store
-	var careerStore core.CareerStore = store
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
-	var branchStore core.BranchStore = store
-	var pdfJobStore core.PDFJobStore = store
+	var profileStore api.ProfileStore = st.Profiles()
+	var careerStore api.CareerStore = st.Career()
+	var presetStore api.PresetStore = st.Presets()
+	var templateStore api.TemplateStore = st.Templates()
+	var branchStore api.BranchStore = st.Branches()
+	var jobStore api.JobStore = st.Jobs()
 	profileSvc := profile.New(profileStore, careerStore, branchStore)
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
-	enqueuer := api.NewChannelJobEnqueuer(100)
-
-	var enq core.PDFJobEnqueuer
-	if pdfEnqueuer != nil {
-		enq = pdfEnqueuer
-	}
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:    profileStore,
-		CareerStore:     careerStore,
-		PresetStore:     presetStore,
-		TemplateStore:   templateStore,
-		BranchStore:     branchStore,
-		ProfileService:  profileSvc,
-		PDFJobStore:     pdfJobStore,
-		PDFJobEnqueuer:  enq,
-		PDFExtractor:    pdf.NewExtractor(),
-		ResumeExtractor: resumeExtractor,
-		Renderer:        templateRenderer,
-		Validator:       provValidator,
-		JobEnqueuer:     enqueuer,
-		DefaultUserID:   defaultUserID,
-		Admin:           true,
-		QuotaStore:      store,
-		Logger:          logger,
+		ProfileStore:        profileStore,
+		CareerStore:         careerStore,
+		PresetStore:         presetStore,
+		TemplateStore:       templateStore,
+		BranchStore:         branchStore,
+		ProfileService:      profileSvc,
+		JobStore:            jobStore,
+		JobNotifier:         pdfNotifier,
+		MaxPendingPerTenant: maxPending,
+		PDFExtractor:        pdf.NewExtractor(),
+		ResumeExtractor:     resumeExtractor,
+		Renderer:            templateRenderer,
+		Validator:           provValidator,
+		DefaultUserID:       defaultUserID,
+		Admin:               true,
+		QuotaStore:          st.Quotas(),
+		Logger:              logger,
 	})
 
 	server := httptest.NewServer(router)
@@ -1154,15 +1210,13 @@ func setupTestServerWithExtractorLoggerAndPDFEnqueuer(t *testing.T, resumeExtrac
 
 	return &testEnv{
 		server:        server,
-		db:            store,
+		db:            st,
 		profileStore:  profileStore,
 		presetStore:   presetStore,
 		templateStore: templateStore,
 		branchStore:   branchStore,
+		jobStore:      jobStore,
 		profileSvc:    profileSvc,
-		enqueuer:      enqueuer,
-		pdfJobStore:   pdfJobStore,
-		pdfEnqueuer:   pdfEnqueuer,
 	}
 }
 
@@ -1357,8 +1411,14 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 			return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 		}))
 
-		enqueuer := api.NewChannelPDFJobEnqueuer(10)
-		env := setupTestServerWithPDFEnqueuer(t, mockExtractor, enqueuer)
+		notified := make(chan struct{}, 1)
+		notifier := core.JobNotifierFunc(func() {
+			select {
+			case notified <- struct{}{}:
+			default:
+			}
+		})
+		env := setupTestServerWithPDFNotifier(t, mockExtractor, notifier, 10)
 		client := env.server.Client()
 		baseURL := env.server.URL
 
@@ -1385,29 +1445,26 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 			t.Fatalf("expected 202 Accepted, got %d (body: %s)", resp.StatusCode, string(body))
 		}
 
-		var accepted api.AsyncPDFJobResponse
+		var accepted api.PDFParseJobResponse
 		if err := json.NewDecoder(resp.Body).Decode(&accepted); err != nil {
 			t.Fatalf("failed to decode accepted response: %v", err)
 		}
-		if accepted.JobID == "" {
+		if accepted.ID == "" {
 			t.Fatalf("expected non-empty job ID")
 		}
-		if accepted.Status != core.PDFParseJobStatusPending {
+		if accepted.Status != core.JobStatusPending {
 			t.Errorf("expected pending status, got %s", accepted.Status)
 		}
 
-		// Verify task was queued into enqueuer
+		// Verify job notifier fired on submission
 		select {
-		case task := <-enqueuer.Channel():
-			if task.JobID != accepted.JobID {
-				t.Errorf("expected queued job ID %s, got %s", accepted.JobID, task.JobID)
-			}
+		case <-notified:
 		default:
-			t.Fatalf("expected task in enqueuer channel")
+			t.Fatalf("expected JobNotifier to be invoked")
 		}
 
 		// Query job status via GET /api/v1/profile/pdf/jobs/{id}
-		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.ID, nil)
 		getResp, err := client.Do(getReq)
 		if err != nil {
 			t.Fatalf("get job failed: %v", err)
@@ -1417,16 +1474,16 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
 		}
-		var job core.PDFParseJob
+		var job api.PDFParseJobResponse
 		if err := json.NewDecoder(getResp.Body).Decode(&job); err != nil {
 			t.Fatalf("failed to decode job: %v", err)
 		}
-		if job.ID != accepted.JobID || job.Status != core.PDFParseJobStatusPending {
-			t.Errorf("expected pending job %s, got %+v", accepted.JobID, job)
+		if job.ID != accepted.ID || job.Status != core.JobStatusPending {
+			t.Errorf("expected pending job %s, got %+v", accepted.ID, job)
 		}
 
 		// Cross-user isolation: user B should receive 404
-		isoReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		isoReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.ID, nil)
 		isoReq.Header.Set("X-User-ID", "other-user")
 		isoResp, err := client.Do(isoReq)
 		if err != nil {
@@ -1437,27 +1494,37 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 			t.Errorf("expected 404 for cross-user job access, got %d", isoResp.StatusCode)
 		}
 
-		// Simulate worker completing the job
+		// Simulate worker claiming and completing the job
+		claimed, err := env.jobStore.ClaimNext(context.Background(), core.ClaimJobRequest{
+			WorkerID:      "test-pdf-worker",
+			PreferredKind: core.JobKindPDFParse,
+		})
+		if err != nil {
+			t.Fatalf("failed to claim pdf job: %v", err)
+		}
+		if claimed.ID != accepted.ID {
+			t.Fatalf("expected claimed job ID %s, got %s", accepted.ID, claimed.ID)
+		}
 		extractedResume := &core.JSONResume{
 			Basics: core.JSONResumeBasics{Name: "Morgan BrandNew"},
 		}
-		if err := env.pdfJobStore.UpdateJobStatus(context.Background(), accepted.JobID, core.PDFParseJobStatusCompleted, extractedResume, ""); err != nil {
-			t.Fatalf("failed to update job status: %v", err)
+		if err := env.jobStore.CompletePDFParse(context.Background(), claimed.ID, "test-pdf-worker", extractedResume); err != nil {
+			t.Fatalf("failed to complete pdf job: %v", err)
 		}
 
 		// Poll again and verify completion with structured result
-		pollReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.JobID, nil)
+		pollReq, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/profile/pdf/jobs/"+accepted.ID, nil)
 		pollResp, err := client.Do(pollReq)
 		if err != nil {
 			t.Fatalf("poll job failed: %v", err)
 		}
 		defer func() { _ = pollResp.Body.Close() }()
 
-		var completedJob core.PDFParseJob
+		var completedJob api.PDFParseJobResponse
 		if err := json.NewDecoder(pollResp.Body).Decode(&completedJob); err != nil {
 			t.Fatalf("failed to decode completed job: %v", err)
 		}
-		if completedJob.Status != core.PDFParseJobStatusCompleted {
+		if completedJob.Status != core.JobStatusCompleted {
 			t.Errorf("expected completed status, got %s", completedJob.Status)
 		}
 		if completedJob.Result == nil {
@@ -1473,12 +1540,20 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 			return `{}`, nil
 		}))
 
-		// Zero capacity enqueuer to instantly trigger ErrQueueFull
-		enqueuer := api.NewChannelPDFJobEnqueuer(1)
-		// Pre-fill buffer
-		_ = enqueuer.EnqueuePDFJob(core.PDFParseJobTask{JobID: "fill"})
+		notifier := core.JobNotifierFunc(func() {})
+		env := setupTestServerWithPDFNotifier(t, mockExtractor, notifier, 1)
+		if _, err := worker.SubmitPDFJob(context.Background(), worker.PDFSubmitConfig{
+			Jobs:                env.jobStore,
+			Notifier:            notifier,
+			MaxPendingPerTenant: 1,
+		}, worker.PDFJobSubmission{
+			UserID:   "default",
+			Filename: "prior.pdf",
+			RawText:  "prior resume content",
+		}); err != nil {
+			t.Fatalf("failed to pre-fill pending job quota: %v", err)
+		}
 
-		env := setupTestServerWithPDFEnqueuer(t, mockExtractor, enqueuer)
 		client := env.server.Client()
 		baseURL := env.server.URL
 
@@ -1499,6 +1574,13 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("expected 503 Service Unavailable, got %d", resp.StatusCode)
+		}
+		var errResp api.ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+		if errResp.Error.Code != api.CodeQueueFull {
+			t.Errorf("expected code %s, got %s", api.CodeQueueFull, errResp.Error.Code)
 		}
 	})
 
@@ -1818,8 +1900,8 @@ func TestProfilePDF_Commit(t *testing.T) {
 			}
 		},
 		"skills": [
-			{"name": "Go", "level": "Expert"},
-			{"name": "PostgreSQL", "level": "Senior"}
+			{"name": "Elixir", "level": "Expert"},
+			{"name": "Kafka", "level": "Senior"}
 		],
 		"work": [
 			{
@@ -2604,10 +2686,7 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 	env := setupTestServer(t, 10)
 	client := env.server.Client()
 	baseURL := env.server.URL
-	memStore, ok := env.db.(*memory.Store)
-	if !ok {
-		t.Fatalf("expected *memory.Store, got %T", env.db)
-	}
+	memStore := env.db
 
 	t.Run("built-in template update rejected with 403 Forbidden", func(t *testing.T) {
 		updateBody := map[string]any{
@@ -2648,7 +2727,7 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 			Slug:     "rust",
 			IsGlobal: true,
 		}
-		if err := memStore.CreateSkill(ctx, globalSkill); err != nil {
+		if err := memStore.Career().CreateSkill(ctx, globalSkill); err != nil {
 			t.Fatalf("failed to create global skill: %v", err)
 		}
 
@@ -2666,17 +2745,12 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 	})
 
 	t.Run("quota exceeded returns 429 Too Many Requests with QUOTA_EXCEEDED code", func(t *testing.T) {
-		pdfEnq := api.NewChannelPDFJobEnqueuer(10)
-		pdfEnv := setupTestServerWithExtractorLoggerAndPDFEnqueuer(t, nil, nil, pdfEnq)
+		pdfEnv := setupTestServerWithExtractorLoggerAndPDFNotifier(t, nil, nil, core.JobNotifierFunc(func() {}), 10)
 		pdfClient := pdfEnv.server.Client()
-		pdfMem, ok := pdfEnv.db.(*memory.Store)
-		if !ok {
-			t.Fatalf("expected *memory.Store, got %T", pdfEnv.db)
-		}
 
 		// Exhaust user daily quota (50 requests limit)
 		for i := 0; i < 50; i++ {
-			_, err := pdfMem.ReserveQuota(ctx, "default", core.OperationResumeTailoring, 100, 50, 1000000)
+			_, err := pdfEnv.db.Quotas().ReserveQuota(ctx, "default", core.OperationResumeTailoring, 100, 50, 1000000)
 			if err != nil {
 				t.Fatalf("failed to seed reservations: %v", err)
 			}
@@ -2724,7 +2798,7 @@ func TestAPI_MultiTenancyAndErrorSentinels(t *testing.T) {
 
 	t.Run("unauthenticated request returns 401 Unauthorized in production mode", func(t *testing.T) {
 		prodRouter := api.NewRouter(api.RouterConfig{
-			ProfileStore: memStore,
+			ProfileStore: memStore.Profiles(),
 			Admin:        false, // production mode with verifier == nil
 		})
 		prodServer := httptest.NewServer(prodRouter)
@@ -2755,8 +2829,8 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 	ctx := context.Background()
 	memStore := memory.New()
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:  memStore,
-		CareerStore:   memStore,
+		ProfileStore:  memStore.Profiles(),
+		CareerStore:   memStore.Career(),
 		Admin:         true,
 		DefaultUserID: "default",
 	})
@@ -2778,10 +2852,10 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 		Name:     "Kubernetes",
 		IsGlobal: false,
 	}
-	if err := memStore.CreateSkill(ctx, customSkill1); err != nil {
+	if err := memStore.Career().CreateSkill(ctx, customSkill1); err != nil {
 		t.Fatalf("failed to create custom skill 1: %v", err)
 	}
-	if err := memStore.CreateSkill(ctx, customSkill2); err != nil {
+	if err := memStore.Career().CreateSkill(ctx, customSkill2); err != nil {
 		t.Fatalf("failed to create custom skill 2: %v", err)
 	}
 
@@ -2792,7 +2866,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 		Name:     "Rust",
 		IsGlobal: true,
 	}
-	if err := memStore.CreateSkill(ctx, globalSkill); err != nil {
+	if err := memStore.Career().CreateSkill(ctx, globalSkill); err != nil {
 		t.Fatalf("failed to create global skill: %v", err)
 	}
 
@@ -2803,7 +2877,7 @@ func TestAPI_ListSkills_TypeFilter(t *testing.T) {
 		Name:     "Python",
 		IsGlobal: false,
 	}
-	if err := memStore.CreateSkill(ctx, otherTenantSkill); err != nil {
+	if err := memStore.Career().CreateSkill(ctx, otherTenantSkill); err != nil {
 		t.Fatalf("failed to create other tenant skill: %v", err)
 	}
 
@@ -2971,23 +3045,12 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 		},
 	}
 
-	profileSvc := profile.New(store, store, store)
-	enqueuer := api.NewChannelJobEnqueuer(10)
-	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:   store,
-		CareerStore:    store,
-		PresetStore:    store,
-		TemplateStore:  store,
-		BranchStore:    store,
-		QuotaStore:     store,
-		UserStore:      store,
-		ProfileService: profileSvc,
-		Renderer:       renderer.New(),
-		Validator:      provenance.New(),
-		JobEnqueuer:    enqueuer,
-		Admin:          false,
-		AuthProvider:   auth.NewTokenVerifierProvider("test", verifier),
-	})
+	cfg := api.NewRouterConfigFromStore(store)
+	cfg.Renderer = renderer.New()
+	cfg.Validator = provenance.New()
+	cfg.Admin = false
+	cfg.AuthProvider = auth.NewTokenVerifierProvider("test", verifier)
+	router := api.NewRouter(cfg)
 
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -3030,7 +3093,7 @@ func TestMultiTenant_FirstLoginLazyProvisioning(t *testing.T) {
 	}
 
 	// 4. Verify user record in UserStore
-	user, err := store.User(ctx, "firebase-new-user-123")
+	user, err := store.Users().User(ctx, "firebase-new-user-123")
 	if err != nil {
 		t.Fatalf("failed to retrieve provisioned user: %v", err)
 	}
@@ -3049,7 +3112,7 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		}
 
 		router := api.NewRouter(api.RouterConfig{
-			ProfileStore:  memStore,
+			ProfileStore:  memStore.Profiles(),
 			Admin:         true,
 			DefaultUserID: "user-1",
 		})
@@ -3113,7 +3176,7 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		}
 
 		profileOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
-			ProfileStore:  memStore,
+			ProfileStore:  memStore.Profiles(),
 			Admin:         true,
 			DefaultUserID: "user-1",
 		}))
@@ -3161,7 +3224,7 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		}
 
 		careerOnlySrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
-			CareerStore:   memStore,
+			CareerStore:   memStore.Career(),
 			Admin:         true,
 			DefaultUserID: "user-1",
 		}))
@@ -3176,16 +3239,17 @@ func TestAPI_CareerStoreGuardAndDefaults(t *testing.T) {
 		assertInternalErr(t, http.MethodPost, careerOnlySrv.URL+"/api/v1/templates/preview", map[string]string{}, "renderer unavailable")
 
 		presetNoTemplateSrv := httptest.NewServer(api.NewRouter(api.RouterConfig{
-			PresetStore:   memStore,
+			PresetStore:   memStore.Presets(),
 			Admin:         true,
 			DefaultUserID: "user-1",
 		}))
 		defer presetNoTemplateSrv.Close()
 
+		blockedTheme := core.TemplateStandardCleanID
 		assertInternalErr(t, http.MethodPost, presetNoTemplateSrv.URL+"/api/v1/presets", api.CreatePresetRequest{
 			Name:               "Blocked Preset",
 			SystemInstructions: "Keep concise",
-			TemplateSetID:      core.TemplateStandardCleanID,
+			SuggestedThemeID:   &blockedTheme,
 		}, "template store unavailable")
 	})
 
@@ -3228,7 +3292,7 @@ func TestJSONResumeImport_PayloadTooLargeReturns413(t *testing.T) {
 	}
 	cfg := api.NewRouterConfigFromStore(memStore)
 	cfg.Admin = true
-	cfg.ProfileService = profile.New(memStore, memStore, memStore)
+	cfg.ProfileService = profile.New(memStore.Profiles(), memStore.Career(), memStore.Branches())
 
 	srv := httptest.NewServer(api.NewRouter(cfg))
 	defer srv.Close()
@@ -3292,7 +3356,7 @@ func TestHTMLRenderResponse_SetsNoSniffHeader(t *testing.T) {
 }
 
 type failingCareerStore struct {
-	core.CareerStore
+	api.CareerStore
 	expErr error
 }
 
@@ -3321,7 +3385,7 @@ func TestRenderPreview_RejectsUnauthorizedOrMissingTemplateID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to seed store: %v", err)
 	}
-	if err := memStore.CreateTemplate(ctx, &core.TemplateSet{
+	if err := memStore.Templates().CreateTemplate(ctx, &core.TemplateSet{
 		ID:           "priv-tmpl-b",
 		UserID:       "user-b",
 		Name:         "Private Template B",
@@ -3390,7 +3454,7 @@ func TestCreateFact_ResolveOwnerErrorsSanitized(t *testing.T) {
 		var logBuf bytes.Buffer
 		cfg := api.NewRouterConfigFromStore(memStore)
 		cfg.CareerStore = &failingCareerStore{
-			CareerStore: memStore,
+			CareerStore: memStore.Career(),
 			expErr:      errors.New("secret sqlite internal failure"),
 		}
 		cfg.Admin = true
@@ -3478,7 +3542,6 @@ func TestSyncBranches_DecodesChunkedRequestBody(t *testing.T) {
 	cfg := api.NewRouterConfigFromStore(memStore)
 	cfg.Admin = true
 	cfg.DefaultUserID = "user-1"
-	cfg.JobEnqueuer = api.NewChannelJobEnqueuer(10)
 	cfg.Renderer = renderer.New()
 	cfg.Validator = provenance.New()
 	router := api.NewRouter(cfg)
@@ -3650,12 +3713,11 @@ func TestNewRouter_RenderPreviewExceedsRESTTimeout(t *testing.T) {
 		Name:          "Slow Preview Branch",
 		TemplateSetID: core.TemplateStandardCleanID,
 	}
-	if err := memStore.CreateBranch(ctx, b); err != nil {
+	if err := memStore.Branches().CreateBranch(ctx, b); err != nil {
 		t.Fatalf("create branch: %v", err)
 	}
 	v := &core.BranchVersion{
 		ID:                "ver-render-preview-timeout",
-		ResumeID:          b.ID,
 		BranchID:          b.ID,
 		VersionNumber:     1,
 		Status:            core.VersionStatusCompleted,
@@ -3664,7 +3726,7 @@ func TestNewRouter_RenderPreviewExceedsRESTTimeout(t *testing.T) {
 		TailoredContent:   &core.TailoredContent{Summary: "Built distributed systems"},
 		CreatedAt:         time.Now().UTC(),
 	}
-	if err := memStore.CreateVersion(ctx, v); err != nil {
+	if err := memStore.Branches().SaveCompletedVersion(ctx, v); err != nil {
 		t.Fatalf("create version: %v", err)
 	}
 
@@ -3712,7 +3774,7 @@ func TestNewRouter_RenderPreviewExceedsRESTTimeout(t *testing.T) {
 }
 
 type nilTemplateLookupStore struct {
-	core.TemplateStore
+	api.TemplateStore
 }
 
 func (n *nilTemplateLookupStore) Template(_ context.Context, _, _ string) (*core.TemplateSet, error) {
@@ -3720,7 +3782,7 @@ func (n *nilTemplateLookupStore) Template(_ context.Context, _, _ string) (*core
 }
 
 type nilPresetLookupStore struct {
-	core.PresetStore
+	api.PresetStore
 }
 
 func (n *nilPresetLookupStore) Preset(_ context.Context, _, _ string) (*core.Preset, error) {
@@ -3735,8 +3797,8 @@ func TestTemplateHandlers_NilStoreResultReturns404(t *testing.T) {
 	}
 
 	cfg := api.NewRouterConfigFromStore(memStore)
-	cfg.TemplateStore = &nilTemplateLookupStore{TemplateStore: memStore}
-	cfg.PresetStore = &nilPresetLookupStore{PresetStore: memStore}
+	cfg.TemplateStore = &nilTemplateLookupStore{TemplateStore: memStore.Templates()}
+	cfg.PresetStore = &nilPresetLookupStore{PresetStore: memStore.Presets()}
 	cfg.Renderer = renderer.New()
 	cfg.Admin = true
 	cfg.DefaultUserID = "user-1"
@@ -3798,14 +3860,14 @@ func (d *deadlineSpyPDFExtractor) ExtractText(ctx context.Context, _ io.ReaderAt
 }
 
 type deadlineSpyPDFJobStore struct {
-	core.PDFJobStore
+	api.JobStore
 	hasDeadline bool
 	deadline    time.Time
 }
 
-func (d *deadlineSpyPDFJobStore) CreateJob(ctx context.Context, job *core.PDFParseJob) error {
+func (d *deadlineSpyPDFJobStore) SubmitPDFParse(ctx context.Context, job *core.Job, opts core.PendingJobOptions) error {
 	d.deadline, d.hasDeadline = ctx.Deadline()
-	return d.PDFJobStore.CreateJob(ctx, job)
+	return d.JobStore.SubmitPDFParse(ctx, job, opts)
 }
 
 func TestPDFParseAsync_BoundsContextWithRESTTimeout(t *testing.T) {
@@ -3816,7 +3878,7 @@ func TestPDFParseAsync_BoundsContextWithRESTTimeout(t *testing.T) {
 	}
 
 	spyExtractor := &deadlineSpyPDFExtractor{text: "Senior Backend Engineer"}
-	spyJobStore := &deadlineSpyPDFJobStore{PDFJobStore: memStore}
+	spyJobStore := &deadlineSpyPDFJobStore{JobStore: memStore.Jobs()}
 	restTimeout := 250 * time.Millisecond
 
 	cfg := api.NewRouterConfigFromStore(memStore)
@@ -3825,8 +3887,8 @@ func TestPDFParseAsync_BoundsContextWithRESTTimeout(t *testing.T) {
 	cfg.RESTTimeout = restTimeout
 	cfg.PDFParseTimeout = 5 * time.Minute
 	cfg.PDFExtractor = spyExtractor
-	cfg.PDFJobStore = spyJobStore
-	cfg.PDFJobEnqueuer = api.NewChannelPDFJobEnqueuer(4)
+	cfg.JobStore = spyJobStore
+	cfg.JobNotifier = core.JobNotifierFunc(func() {})
 	cfg.ResumeExtractor = &staticResumeExtractor{}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -3860,9 +3922,275 @@ func TestPDFParseAsync_BoundsContextWithRESTTimeout(t *testing.T) {
 		t.Errorf("expected PDFExtractor deadline within %v, got %v", restTimeout, remaining)
 	}
 	if !spyJobStore.hasDeadline {
-		t.Fatal("expected PDFJobStore.CreateJob context to be bounded by RESTTimeout")
+		t.Fatal("expected JobStore.SubmitPDFParse context to be bounded by RESTTimeout")
 	}
 	if remaining := time.Until(spyJobStore.deadline); remaining <= 0 || remaining > restTimeout {
-		t.Errorf("expected PDFJobStore deadline within %v, got %v", restTimeout, remaining)
+		t.Errorf("expected JobStore deadline within %v, got %v", restTimeout, remaining)
 	}
+}
+
+// TestGetPDFParseJob_NonPDFJobReturns404 ensures non-PDF background jobs (such as branch_tailor)
+// are never exposed through the PDF job lookup endpoints and return 404 without leaking job internals.
+func TestGetPDFParseJob_NonPDFJobReturns404(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx, "default")
+	if err != nil {
+		t.Fatalf("failed to seed store: %v", err)
+	}
+
+	br := &core.Branch{
+		ID:            "branch-non-pdf-job",
+		UserID:        "default",
+		Name:          "Backend Role",
+		TemplateSetID: core.TemplateStandardCleanID,
+	}
+	if err := memStore.Branches().CreateBranch(ctx, br); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	const tailorJobID = "job-branch-tailor-secret"
+	tailorJob := &core.Job{
+		ID:            tailorJobID,
+		Kind:          core.JobKindBranchTailor,
+		UserID:        "default",
+		Status:        core.JobStatusPending,
+		ReservationID: "res-secret-tailor-123",
+		Tailor: &core.BranchTailorSpec{
+			BranchID:    br.ID,
+			VersionID:   "ver-secret-tailor-123",
+			BranchEpoch: 1,
+		},
+	}
+	tailorVer := &core.BranchVersion{
+		ID:                "ver-secret-tailor-123",
+		UserID:            "default",
+		BranchID:          br.ID,
+		JobID:             tailorJobID,
+		Status:            core.VersionStatusPending,
+		TemplateSetIDUsed: core.TemplateStandardCleanID,
+	}
+	if _, err := memStore.Jobs().SubmitBranchTailor(ctx, tailorJob, tailorVer, core.PendingJobOptions{}); err != nil {
+		t.Fatalf("SubmitBranchTailor failed: %v", err)
+	}
+
+	cfg := api.NewRouterConfigFromStore(memStore)
+	cfg.DefaultUserID = "default"
+	cfg.Admin = true
+	server := httptest.NewServer(api.NewRouter(cfg))
+	t.Cleanup(server.Close)
+	client := server.Client()
+
+	for _, path := range []string{"/profile/pdf/jobs/" + tailorJobID, "/api/v1/profile/pdf/jobs/" + tailorJobID} {
+		resp, body := doRequest(t, client, http.MethodGet, server.URL+path, nil, nil)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("GET %s expected 404 Not Found, got %d (body: %s)", path, resp.StatusCode, string(body))
+		}
+
+		errResp := decodeJSON[api.ErrorResponse](t, body)
+		if errResp.Error.Code != api.CodeNotFound {
+			t.Errorf("GET %s expected error code %s, got %s", path, api.CodeNotFound, errResp.Error.Code)
+		}
+		if errResp.Error.Message != "pdf parse job not found" {
+			t.Errorf("GET %s expected generic not found message, got %q", path, errResp.Error.Message)
+		}
+
+		raw := string(body)
+		for _, leaked := range []string{
+			"branch_tailor",
+			"branch-non-pdf-job",
+			"ver-secret-tailor-123",
+			"res-secret-tailor-123",
+			"reservation_id",
+			"claimed_by",
+			"raw_text",
+		} {
+			if strings.Contains(raw, leaked) {
+				t.Errorf("GET %s leaked %q in 404 body: %s", path, leaked, raw)
+			}
+		}
+	}
+}
+
+// postMultipartPDFParse posts pdfBytes as a multipart/form-data file upload with provider "mock" to url.
+func postMultipartPDFParse(t *testing.T, client *http.Client, url string, pdfBytes []byte) (*http.Response, []byte) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(pdfBytes); err != nil {
+		t.Fatalf("write pdf bytes: %v", err)
+	}
+	if err := mw.WriteField("provider", "mock"); err != nil {
+		t.Fatalf("write provider field: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	if err != nil {
+		t.Fatalf("NewRequest POST %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s failed: %v", url, err)
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read response body: %v", readErr)
+	}
+	return resp, body
+}
+
+// TestProfilePDF_Parse_ResponseOmitsInternalJobFields verifies that POST /profile/pdf/parse and
+// GET /profile/pdf/jobs/{id} project public PDFParseJobResponse fields without exposing internal
+// job fields (raw_text, reservation_id, claimed_by) across pending, claimed, and completed states.
+func TestProfilePDF_Parse_ResponseOmitsInternalJobFields(t *testing.T) {
+	pdfBytes := buildTestPDF("Confidential Raw Resume Text Token 98765")
+	mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
+		return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+	}))
+	notifier := core.JobNotifierFunc(func() {})
+	env := setupTestServerWithPDFNotifier(t, mockExtractor, notifier, 10)
+	client := env.server.Client()
+
+	assertOmitsInternalFields := func(t *testing.T, label string, body []byte) map[string]any {
+		t.Helper()
+		raw := string(body)
+		payload := decodeJSON[map[string]any](t, body)
+		for _, forbidden := range []string{"raw_text", "reservation_id", "claimed_by"} {
+			if _, exists := payload[forbidden]; exists {
+				t.Errorf("%s response must omit JSON key %q (body: %s)", label, forbidden, raw)
+			}
+			if strings.Contains(raw, `"`+forbidden+`"`) {
+				t.Errorf("%s raw JSON must not contain %q (body: %s)", label, forbidden, raw)
+			}
+		}
+		return payload
+	}
+
+	postResp, postBody := postMultipartPDFParse(t, client, env.server.URL+"/api/v1/profile/pdf/parse", pdfBytes)
+	if postResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d (body: %s)", postResp.StatusCode, string(postBody))
+	}
+
+	postMap := assertOmitsInternalFields(t, "POST /api/v1/profile/pdf/parse", postBody)
+	jobID, _ := postMap["id"].(string)
+	if jobID == "" {
+		t.Fatalf("expected non-empty job id in POST response: %s", string(postBody))
+	}
+
+	// Confirm the stored core.Job actually holds raw_text and reservation_id so omission is non-tautological.
+	storedJob, err := env.jobStore.Job(context.Background(), "default", jobID)
+	if err != nil {
+		t.Fatalf("Job lookup failed: %v", err)
+	}
+	if storedJob.ReservationID == "" || storedJob.PDF == nil || storedJob.PDF.RawText == "" {
+		t.Fatalf("expected stored job to retain internal reservation_id and pdf raw_text, got %+v", storedJob)
+	}
+
+	for _, path := range []string{"/api/v1/profile/pdf/jobs/" + jobID, "/profile/pdf/jobs/" + jobID} {
+		resp, body := doRequest(t, client, http.MethodGet, env.server.URL+path, nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s (pending) expected 200, got %d (body: %s)", path, resp.StatusCode, string(body))
+		}
+		assertOmitsInternalFields(t, "GET "+path+" (pending)", body)
+	}
+
+	// Claim the job to populate ClaimedBy on the stored record, then re-verify wire omission.
+	const workerID = "internal-worker-node-42"
+	if _, err := env.jobStore.ClaimNext(context.Background(), core.ClaimJobRequest{
+		WorkerID:      workerID,
+		PreferredKind: core.JobKindPDFParse,
+	}); err != nil {
+		t.Fatalf("ClaimNext failed: %v", err)
+	}
+	resp, processingBody := doRequest(t, client, http.MethodGet, env.server.URL+"/api/v1/profile/pdf/jobs/"+jobID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET job (processing) expected 200, got %d", resp.StatusCode)
+	}
+	assertOmitsInternalFields(t, "GET /api/v1/profile/pdf/jobs/{id} (processing)", processingBody)
+	if strings.Contains(string(processingBody), workerID) {
+		t.Errorf("GET job (processing) leaked worker ID %q: %s", workerID, string(processingBody))
+	}
+
+	// Complete the job and re-verify wire omission on completed payload.
+	if err := env.jobStore.CompletePDFParse(context.Background(), jobID, workerID, &core.JSONResume{
+		Basics: core.JSONResumeBasics{Name: "Morgan BrandNew"},
+	}); err != nil {
+		t.Fatalf("CompletePDFParse failed: %v", err)
+	}
+	resp, completedBody := doRequest(t, client, http.MethodGet, env.server.URL+"/api/v1/profile/pdf/jobs/"+jobID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET job (completed) expected 200, got %d", resp.StatusCode)
+	}
+	completedMap := assertOmitsInternalFields(t, "GET /api/v1/profile/pdf/jobs/{id} (completed)", completedBody)
+	if gotStatus, _ := completedMap["status"].(string); gotStatus != string(core.JobStatusCompleted) {
+		t.Errorf("expected completed status, got %v", completedMap["status"])
+	}
+}
+
+// TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503 verifies sync execution when
+// JobNotifier is nil, 503 when ?async=true without JobNotifier, and 500 when ?async=true without JobStore.
+func TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503(t *testing.T) {
+	pdfBytes := buildTestPDF("Morgan BrandNew Full-Stack Engineer")
+	mockExtractor := llm.NewExtractor(llm.CompleterFunc(func(_ context.Context, _, _, _, _ string) (string, error) {
+		return `{"basics":{"name":"Morgan BrandNew"}}`, nil
+	}))
+
+	t.Run("JobNotifier nil executes sync by default and returns 200", func(t *testing.T) {
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		resp, body := postMultipartPDFParse(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse", pdfBytes)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+		parsed := decodeJSON[core.JSONResume](t, body)
+		if parsed.Basics.Name != "Morgan BrandNew" {
+			t.Errorf("expected parsed name Morgan BrandNew, got %q", parsed.Basics.Name)
+		}
+	})
+
+	t.Run("async=true with JobNotifier nil returns 503", func(t *testing.T) {
+		env := setupTestServerWithExtractor(t, mockExtractor)
+		resp, body := postMultipartPDFParse(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse?async=true", pdfBytes)
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 Service Unavailable, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+		errResp := decodeJSON[api.ErrorResponse](t, body)
+		if errResp.Error.Code != api.CodeServiceUnavailable {
+			t.Errorf("expected error code %s, got %s", api.CodeServiceUnavailable, errResp.Error.Code)
+		}
+	})
+
+	t.Run("async=true with JobStore nil returns 500", func(t *testing.T) {
+		memStore, err := memory.NewSeeded(context.Background(), "default")
+		if err != nil {
+			t.Fatalf("failed to seed store: %v", err)
+		}
+		cfg := api.NewRouterConfigFromStore(memStore)
+		cfg.JobStore = nil
+		cfg.JobNotifier = core.JobNotifierFunc(func() {})
+		cfg.PDFExtractor = pdf.NewExtractor()
+		cfg.ResumeExtractor = mockExtractor
+		cfg.DefaultUserID = "default"
+		cfg.Admin = true
+
+		server := httptest.NewServer(api.NewRouter(cfg))
+		t.Cleanup(server.Close)
+
+		resp, body := postMultipartPDFParse(t, server.Client(), server.URL+"/api/v1/profile/pdf/parse?async=true", pdfBytes)
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("expected 500 Internal Server Error, got %d (body: %s)", resp.StatusCode, string(body))
+		}
+		errResp := decodeJSON[api.ErrorResponse](t, body)
+		if errResp.Error.Code != api.CodeInternalError {
+			t.Errorf("expected error code %s, got %s", api.CodeInternalError, errResp.Error.Code)
+		}
+	})
 }

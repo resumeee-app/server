@@ -43,7 +43,14 @@ func (h *profileHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 	skillType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
 	switch skillType {
 	case "", "all":
-		skills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
+		var customSkills, globalSkills []core.Skill
+		customSkills, err = h.cfg.CareerStore.ListSkills(ctx, userID)
+		if err == nil {
+			globalSkills, err = h.cfg.CareerStore.ListGlobalSkills(ctx)
+		}
+		if err == nil {
+			skills = core.MergeUniqueSkills(customSkills, globalSkills)
+		}
 	case "global":
 		skills, err = h.cfg.CareerStore.ListGlobalSkills(ctx)
 	case "custom":

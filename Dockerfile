@@ -89,7 +89,6 @@ ENV PORT=8080 \
     DB_PATH=/data/resumeee.db \
     DEFAULT_USER_ID=default \
     WORKER_CONCURRENCY=2 \
-    WORKER_QUEUE_SIZE=100 \
     ENV=production \
     LOG_LEVEL=INFO
 
