@@ -59,8 +59,9 @@ func waitForHealthy(t *testing.T, baseURL string) {
 }
 
 type mockLLMClient struct {
-	name         string
-	defaultModel string
+	name             string
+	defaultModel     string
+	structuredOutput bool
 }
 
 func (m *mockLLMClient) Name() string {
@@ -83,7 +84,7 @@ func (m *mockLLMClient) Models() []core.ModelOption {
 }
 
 func (m *mockLLMClient) SupportsStructuredOutput(_ string) bool {
-	return false
+	return m.structuredOutput
 }
 
 func (m *mockLLMClient) Complete(_ context.Context, _ llm.Request) (*llm.Response, error) {
@@ -516,5 +517,106 @@ func TestServer_TimeoutAndConfigOptions(t *testing.T) {
 	if srv.cfg.HTTPReadHeaderTimeout != 6*time.Second || srv.cfg.HTTPReadTimeout != 70*time.Second || srv.cfg.HTTPMinWriteTimeout != 40*time.Second ||
 		srv.cfg.HTTPWriteTimeoutBuffer != 15*time.Second || srv.cfg.HTTPIdleTimeout != 150*time.Second || srv.cfg.HTTPShutdownTimeout != 12*time.Second {
 		t.Errorf("unexpected HTTP timeouts: %+v", srv.cfg)
+	}
+}
+
+func TestServer_DefaultPromptCompilerUsesLLMRegistry(t *testing.T) {
+	tests := []struct {
+		name              string
+		structuredOutput  bool
+		wantSchemaPresent bool
+	}{
+		{
+			name:              "omits fallback schema when resolved client supports structured output",
+			structuredOutput:  true,
+			wantSchemaPresent: false,
+		},
+		{
+			name:              "includes fallback schema when resolved client lacks structured output",
+			structuredOutput:  false,
+			wantSchemaPresent: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			memStore, err := memory.NewSeeded(ctx)
+			if err != nil {
+				t.Fatalf("failed to create seeded memory store: %v", err)
+			}
+
+			port := freePort(t)
+			client := &mockLLMClient{
+				name:             "custom-llm",
+				defaultModel:     "custom-model-v1",
+				structuredOutput: tc.structuredOutput,
+			}
+
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- Run(ctx,
+					WithPort(port),
+					WithAdminMode(true),
+					WithStore(memStore),
+					WithLLMClient(client),
+					WithMCPEnabled(false),
+					WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+				)
+			}()
+
+			baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+			waitForHealthy(t, baseURL)
+
+			createResp, err := http.Post(
+				baseURL+"/api/v1/branches",
+				"application/json",
+				strings.NewReader(`{"name":"Preview Test","target_role":"Staff Engineer","target_company":"Acme","template_set_id":"`+core.TemplateStandardCleanID+`"}`),
+			)
+			if err != nil {
+				t.Fatalf("POST /api/v1/branches failed: %v", err)
+			}
+			var created core.Branch
+			if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+				_ = createResp.Body.Close()
+				t.Fatalf("decode created branch failed: %v", err)
+			}
+			_ = createResp.Body.Close()
+			if createResp.StatusCode != http.StatusCreated {
+				t.Fatalf("expected 201 Created, got %d", createResp.StatusCode)
+			}
+
+			previewResp, err := http.Get(baseURL + "/api/v1/branches/" + created.ID + "/prompt-preview")
+			if err != nil {
+				t.Fatalf("GET /api/v1/branches/{id}/prompt-preview failed: %v", err)
+			}
+			var preview core.PromptPreview
+			if err := json.NewDecoder(previewResp.Body).Decode(&preview); err != nil {
+				_ = previewResp.Body.Close()
+				t.Fatalf("decode prompt preview failed: %v", err)
+			}
+			_ = previewResp.Body.Close()
+			if previewResp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d", previewResp.StatusCode)
+			}
+
+			hasSchema := strings.Contains(preview.SystemPrompt, "<response_schema>")
+			if hasSchema != tc.wantSchemaPresent {
+				t.Errorf("prompt preview <response_schema> present = %v, want %v", hasSchema, tc.wantSchemaPresent)
+			}
+
+			http.DefaultClient.CloseIdleConnections()
+			cancel()
+			select {
+			case err := <-errCh:
+				if err != nil {
+					t.Fatalf("unexpected shutdown error: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("timed out waiting for server shutdown")
+			}
+		})
 	}
 }

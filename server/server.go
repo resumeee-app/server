@@ -259,8 +259,8 @@ func (s *Server) initServices(ctx context.Context, logger *slog.Logger) (*server
 		return nil, err
 	}
 
-	templateRenderer, provValidator, pdfExtractor, promptCompiler := s.resolveCoreAdapters()
 	llmRegistry := s.resolveLLMRegistry(logger)
+	templateRenderer, provValidator, pdfExtractor, promptCompiler := s.resolveCoreAdapters(llmRegistry)
 	llmService := llm.NewService(llmRegistry)
 	resumeExtractor := s.resolveResumeExtractor(llmRegistry)
 
@@ -299,8 +299,8 @@ func (s *Server) initServices(ctx context.Context, logger *slog.Logger) (*server
 	}, nil
 }
 
-// resolveCoreAdapters returns injected adapters or constructs standard defaults.
-func (s *Server) resolveCoreAdapters() (TemplateRenderer, ProvenanceValidator, PDFTextExtractor, branch.PromptCompiler) {
+// resolveCoreAdapters returns injected adapters or constructs standard defaults backed by llmRegistry.
+func (s *Server) resolveCoreAdapters(llmRegistry *llm.Registry) (TemplateRenderer, ProvenanceValidator, PDFTextExtractor, branch.PromptCompiler) {
 	templateRenderer := s.templateRenderer
 	if templateRenderer == nil {
 		templateRenderer = renderer.New()
@@ -315,7 +315,7 @@ func (s *Server) resolveCoreAdapters() (TemplateRenderer, ProvenanceValidator, P
 	}
 	promptCompiler := s.promptCompiler
 	if promptCompiler == nil {
-		promptCompiler = llm.NewPromptCompiler()
+		promptCompiler = llm.NewPromptCompiler(llm.WithPromptRegistry(llmRegistry))
 	}
 	return templateRenderer, provValidator, pdfExtractor, promptCompiler
 }

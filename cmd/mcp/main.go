@@ -212,7 +212,7 @@ func buildMCPServerConfig(cfg *config.Config, st *store.Store, logger *slog.Logg
 		Validator:         provValidator,
 		Renderer:          templateRenderer,
 		Generator:         llmService,
-		PromptCompiler:    llm.NewPromptCompiler(),
+		PromptCompiler:    llm.NewPromptCompiler(llm.WithPromptRegistry(llmRegistry)),
 		DailyRequestLimit: cfg.LLMDailyRequestLimit,
 		MonthlyTokenLimit: cfg.LLMMonthlyTokenLimit,
 		Logger:            logger,
