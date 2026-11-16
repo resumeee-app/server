@@ -1,4 +1,4 @@
-package api_test
+package openapi_test
 
 import (
 	"fmt"
@@ -13,9 +13,9 @@ import (
 
 // nonStoragePackageDirs enumerates all non-binary packages that must stay free of direct database/ORM imports.
 var nonStoragePackageDirs = []string{
-	"api",
+	"openapi",
 	"auth",
-	"server",
+	".",
 	"internal/access",
 	"internal/api",
 	"internal/mcp",
@@ -24,8 +24,8 @@ var nonStoragePackageDirs = []string{
 
 // nonFirebasePackageDirs enumerates packages that must remain decoupled from resumeee-auth-firebase directly.
 var nonFirebasePackageDirs = []string{
-	"api",
-	"server",
+	"openapi",
+	".",
 	"internal/access",
 	"internal/api",
 	"internal/mcp",
@@ -34,9 +34,9 @@ var nonFirebasePackageDirs = []string{
 
 // nonMCPPackageDirs enumerates packages that must remain decoupled from mark3labs/mcp-go directly.
 var nonMCPPackageDirs = []string{
-	"api",
+	"openapi",
 	"auth",
-	"server",
+	".",
 	"internal/access",
 	"internal/api",
 	"internal/config",
@@ -116,7 +116,7 @@ func TestCheckImportBoundaryViolations(t *testing.T) {
 	}{
 		{
 			name:         "flags direct gorm import",
-			src:          "package api\nimport _ \"gorm.io/gorm\"\n",
+			src:          "package openapi\nimport _ \"gorm.io/gorm\"\n",
 			rule:         "storage/ORM",
 			forbidden:    forbiddenStoragePrefixes,
 			wantCount:    1,
