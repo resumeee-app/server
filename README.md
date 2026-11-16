@@ -93,7 +93,42 @@ test -z "$(gofmt -l .)"
 # Unit & race detection tests (includes TestGoFmtCompliance and AST guardrails)
 go test -race -v ./...
 
-# Static analysis & gofmt linter
+# Check formatting & static analysis
 golangci-lint run ./...
 ```
+
+---
+
+## Running Binaries & Docker
+
+Requires **Go 1.27+**. Copy `.env.example` to `.env` (or export environment variables) before starting:
+
+```bash
+cp .env.example .env
+
+# Run unified REST + HTTP/SSE MCP server
+go run ./cmd/server
+
+# Run standalone stdio MCP server
+go run ./cmd/mcp
+```
+
+See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PATH`, `ADMIN_MODE`, `FIREBASE_PROJECT_ID`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_COMPAT_BASE_URL`).
+
+`Dockerfile` expects sibling build contexts when building from the umbrella workspace:
+
+```bash
+docker build \
+  --build-context resumeee-core=../resumeee-core \
+  --build-context resumeee-storage-sql=../resumeee-storage-sql \
+  --build-context resumeee-auth-firebase=../resumeee-auth-firebase \
+  -t resumeee-api .
+```
+
+---
+
+## License
+
+GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](./LICENSE).
+
 
