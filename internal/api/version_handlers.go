@@ -415,11 +415,7 @@ func (h *branchHandler) loadRenderableVersion(ctx context.Context, w http.Respon
 		return nil, false
 	}
 
-	parentID := ver.ResumeID
-	if parentID == "" {
-		parentID = ver.BranchID
-	}
-	if parentID != b.ID {
+	if ver.BranchID != b.ID {
 		writeError(w, http.StatusNotFound, CodeNotFound, "version does not belong to resume", "")
 		return nil, false
 	}

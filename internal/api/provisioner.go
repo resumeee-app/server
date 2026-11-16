@@ -11,10 +11,10 @@ import (
 
 // defaultTenantProvisioner lazily seeds default tenant data on first authenticated request.
 type defaultTenantProvisioner struct {
-	profileStore  core.ProfileStore
-	branchStore   core.BranchStore
-	templateStore core.TemplateStore
-	userStore     core.UserStore
+	profileStore  ProfileStore
+	branchStore   BranchStore
+	templateStore TemplateStore
+	userStore     UserStore
 	provisioned   sync.Map
 }
 

@@ -26,10 +26,10 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var profileStore core.ProfileStore = store
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
-	var branchStore core.BranchStore = store
+	var profileStore api.ProfileStore = store.Profiles()
+	var presetStore api.PresetStore = store.Presets()
+	var templateStore api.TemplateStore = store.Templates()
+	var branchStore api.BranchStore = store.Branches()
 	rend := renderer.New()
 
 	branchSvc := branch.New(branch.Config{
@@ -103,7 +103,6 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 	// 3. Create completed version with classic template cached output
 	v1 := &core.BranchVersion{
 		ID:                "ver-dyn-1",
-		ResumeID:          targetBranch.ID,
 		BranchID:          targetBranch.ID,
 		VersionNumber:     1,
 		Status:            core.VersionStatusCompleted,
@@ -115,7 +114,7 @@ func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {
 		TailoredContent:   &core.TailoredContent{Summary: "Lead developer"},
 		CreatedAt:         now,
 	}
-	if err := branchStore.CreateVersion(ctx, v1); err != nil {
+	if err := branchStore.SaveCompletedVersion(ctx, v1); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
 

@@ -28,7 +28,7 @@ func TestGetQuota_DefaultsAndRemaining(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 30,
@@ -97,14 +97,14 @@ func TestGetQuota_AfterUsageReservation(t *testing.T) {
 
 	// Reserve 5 requests and 5000 tokens
 	for i := 0; i < 5; i++ {
-		_, err := store.ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 1000, 50, 1000000)
+		_, err := store.Quotas().ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 1000, 50, 1000000)
 		if err != nil {
 			t.Fatalf("failed to reserve quota: %v", err)
 		}
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 50,
@@ -151,13 +151,13 @@ func TestWriteQuotaError_RetryAfterHeader(t *testing.T) {
 	}
 
 	// Consume entire quota (daily limit = 1)
-	_, err = store.ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 100, 1, 100000)
+	_, err = store.Quotas().ReserveQuota(ctx, defaultUserID, core.OperationResumeTailoring, 100, 1, 100000)
 	if err != nil {
 		t.Fatalf("failed to reserve quota: %v", err)
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		DailyRequestLimit: 1,
@@ -216,8 +216,13 @@ func (m *mockUsageResumeExtractor) ExtractResume(_ context.Context, _, _, _ stri
 	return m.resume, m.telemetry, m.err
 }
 
+// usageRecordLister defines the test-only subset needed to inspect persisted LLM usage records.
+type usageRecordLister interface {
+	ListUsageRecords(ctx context.Context, userID string, limit int) ([]core.LLMUsageRecord, error)
+}
+
 // singleUsageRecord returns the only LLM usage record for userID, failing the test when the count differs.
-func singleUsageRecord(t *testing.T, store core.QuotaStore, userID string) core.LLMUsageRecord {
+func singleUsageRecord(t *testing.T, store usageRecordLister, userID string) core.LLMUsageRecord {
 	t.Helper()
 	records, err := store.ListUsageRecords(context.Background(), userID, 10)
 	if err != nil {
@@ -258,7 +263,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		ResumeExtractor:   extractor,
@@ -298,7 +303,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	// Verify quota was committed: daily used should be 1, monthly tokens should be 500 (not 1000)
-	quota, err := store.Quota(ctx, defaultUserID)
+	quota, err := store.Quotas().Quota(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to get quota: %v", err)
 	}
@@ -310,7 +315,7 @@ func TestSyncPDFParse_QuotaCommitOnSuccess(t *testing.T) {
 	}
 
 	// Verify provider call telemetry was persisted on the committed usage record.
-	rec := singleUsageRecord(t, store, defaultUserID)
+	rec := singleUsageRecord(t, store.Quotas(), defaultUserID)
 	if rec.Status != core.ReservationStatusCommitted {
 		t.Errorf("expected committed usage record, got status %q", rec.Status)
 	}
@@ -342,7 +347,7 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		ResumeExtractor:   extractor,
@@ -382,7 +387,7 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	// Verify quota was released: daily used should be refunded to 0, monthly tokens should be 0
-	quota, err := store.Quota(ctx, defaultUserID)
+	quota, err := store.Quotas().Quota(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to get quota: %v", err)
 	}
@@ -394,7 +399,7 @@ func TestSyncPDFParse_QuotaReleaseOnFailure(t *testing.T) {
 	}
 
 	// Verify the release recorded upstream telemetry with a sanitized reason rather than raw error text.
-	rec := singleUsageRecord(t, store, defaultUserID)
+	rec := singleUsageRecord(t, store.Quotas(), defaultUserID)
 	if rec.Status != core.ReservationStatusReleased {
 		t.Errorf("expected released usage record, got status %q", rec.Status)
 	}
@@ -421,7 +426,7 @@ func TestSyncPDFParse_NilExtractionResultReleasesQuota(t *testing.T) {
 		telemetry: core.LLMTelemetry{Provider: "openai", Model: "gpt-4o-mini", StatusCode: http.StatusOK, Usage: core.TokenUsage{TotalTokens: 42}},
 	}
 	router := api.NewRouter(api.RouterConfig{
-		QuotaStore:        store,
+		QuotaStore:        store.Quotas(),
 		DefaultUserID:     defaultUserID,
 		Admin:             true,
 		ResumeExtractor:   extractor,
@@ -456,14 +461,14 @@ func TestSyncPDFParse_NilExtractionResultReleasesQuota(t *testing.T) {
 		t.Fatalf("expected 502 Bad Gateway for empty extraction result, got %d", resp.StatusCode)
 	}
 
-	quota, err := store.Quota(ctx, defaultUserID)
+	quota, err := store.Quotas().Quota(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("failed to get quota: %v", err)
 	}
 	if quota.DailyRequestsUsed != 0 || quota.MonthlyTokensUsed != 0 {
 		t.Errorf("expected quota fully released for empty result, got daily=%d monthly=%d", quota.DailyRequestsUsed, quota.MonthlyTokensUsed)
 	}
-	rec := singleUsageRecord(t, store, defaultUserID)
+	rec := singleUsageRecord(t, store.Quotas(), defaultUserID)
 	if rec.Status != core.ReservationStatusReleased {
 		t.Errorf("expected released usage record for empty result, got status %q", rec.Status)
 	}
@@ -475,7 +480,7 @@ func TestSyncPDFParse_NilExtractionResultReleasesQuota(t *testing.T) {
 func TestGetQuota_UnauthorizedWhenNotAdmin(t *testing.T) {
 	memStore := memory.New()
 	prodRouter := api.NewRouter(api.RouterConfig{
-		QuotaStore: memStore,
+		QuotaStore: memStore.Quotas(),
 		Admin:      false,
 	})
 	server := httptest.NewServer(prodRouter)

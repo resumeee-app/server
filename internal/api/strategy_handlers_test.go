@@ -25,8 +25,8 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestStore
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
+	var presetStore api.PresetStore = store.Presets()
+	var templateStore api.TemplateStore = store.Templates()
 
 	router := api.NewRouter(api.RouterConfig{
 		PresetStore:   presetStore,
@@ -49,8 +49,8 @@ func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestStore
 
 type strategyTestStores struct {
 	db            any
-	presetStore   core.PresetStore
-	templateStore core.TemplateStore
+	presetStore   api.PresetStore
+	templateStore api.TemplateStore
 }
 
 func TestStrategyCRUD_RFC005(t *testing.T) {
@@ -151,8 +151,8 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 	t.Run("CreateStrategy_ForeignTemplateSetID_Returns403", func(t *testing.T) {
 		body := map[string]any{
 			"name":                "Malicious TemplateSet Strategy",
-			"system_instructions": "Attempt to link foreign tenant's template via template_set_id",
-			"template_set_id":     "tmpl-private-foreign",
+			"system_instructions": "Attempt to link foreign tenant's template via suggested_theme_id",
+			"suggested_theme_id":  "tmpl-private-foreign",
 		}
 		raw, _ := json.Marshal(body)
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/tailoring-strategies", bytes.NewReader(raw))
@@ -166,7 +166,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("expected 403 Forbidden for foreign template_set_id, got %d", resp.StatusCode)
+			t.Fatalf("expected 403 Forbidden for foreign suggested_theme_id, got %d", resp.StatusCode)
 		}
 
 		var errResp struct {
@@ -247,12 +247,13 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 
 	// 4. Update custom strategy with foreign template returns 403 Forbidden
 	t.Run("UpdateStrategy_ForeignTemplate_Returns403", func(t *testing.T) {
+		defaultTheme := "builtin-standard-clean"
 		customPreset := &core.Preset{
 			ID:                 "preset-custom-update-test",
 			UserID:             "user-1",
 			Name:               "Custom Strategy For Update Test",
 			SystemInstructions: "Original instructions",
-			TemplateSetID:      "builtin-standard-clean",
+			SuggestedThemeID:   &defaultTheme,
 			CreatedAt:          time.Now().UTC(),
 			UpdatedAt:          time.Now().UTC(),
 		}
@@ -294,12 +295,13 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 
 	// 5. Direct store-level immutability defense-in-depth
 	t.Run("StoreLevel_BuiltInImmutability_Guards", func(t *testing.T) {
+		defaultTheme := "builtin-standard-clean"
 		builtInPreset := &core.Preset{
-			ID:                 "builtin-immutability-test",
+			ID:                 core.Preset1PageTechResumeID,
 			UserID:             "system",
 			Name:               "Builtin Store Immutability Test",
 			SystemInstructions: "Immutable",
-			TemplateSetID:      "builtin-standard-clean",
+			SuggestedThemeID:   &defaultTheme,
 		}
 
 		errUpdate := stores.presetStore.UpdatePreset(ctx, builtInPreset)
@@ -307,7 +309,7 @@ func TestStrategyCRUD_RFC005(t *testing.T) {
 			t.Errorf("expected ErrStrategyImmutable from UpdatePreset, got %v", errUpdate)
 		}
 
-		errDelete := stores.presetStore.DeletePreset(ctx, "system", "builtin-immutability-test")
+		errDelete := stores.presetStore.DeletePreset(ctx, "system", core.Preset1PageTechResumeID)
 		if errDelete != core.ErrStrategyImmutable {
 			t.Errorf("expected ErrStrategyImmutable from DeletePreset, got %v", errDelete)
 		}

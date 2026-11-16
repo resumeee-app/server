@@ -32,6 +32,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
@@ -48,27 +49,26 @@ type TemplateRenderer interface {
 
 // RouterConfig contains all dependencies required by the API router.
 type RouterConfig struct {
-	ProfileStore    core.ProfileStore
-	CareerStore     core.CareerStore
-	PresetStore     core.PresetStore
-	TemplateStore   core.TemplateStore
-	BranchStore     core.BranchStore
-	PDFJobStore     core.PDFJobStore
-	PDFJobEnqueuer  core.PDFJobEnqueuer
-	QuotaStore      core.QuotaStore
+	ProfileStore    ProfileStore
+	CareerStore     CareerStore
+	PresetStore     PresetStore
+	TemplateStore   TemplateStore
+	BranchStore     BranchStore
+	JobStore        JobStore
+	JobNotifier     core.JobNotifier
+	QuotaStore      QuotaStore
 	BranchService   BranchService
 	ProfileService  ProfileService
 	PDFExtractor    PDFTextExtractor
 	ResumeExtractor worker.ResumeExtractor
 	Renderer        TemplateRenderer
 	Validator       branch.ProvenanceValidator
-	JobEnqueuer     branch.JobEnqueuer
 	PromptCompiler  branch.PromptCompiler
 	ModelEnumerator core.ModelEnumerator
 	DefaultUserID   string
 	Admin           bool
 	AuthProvider    auth.Provider
-	UserStore       core.UserStore
+	UserStore       UserStore
 	Provisioner     TenantProvisioner
 	Logger          *slog.Logger
 	RESTTimeout     time.Duration
@@ -81,22 +81,27 @@ type RouterConfig struct {
 	HTTPWriteTimeoutBuffer time.Duration
 	DailyRequestLimit      int
 	MonthlyTokenLimit      int
+	MaxPendingPerTenant    int
 }
 
-// NewRouterConfigFromStore populates a RouterConfig's sub-store fields from a composite core.Store.
-func NewRouterConfigFromStore(store core.Store) RouterConfig {
-	if store == nil {
+// NewRouterConfigFromStore populates a RouterConfig's sub-store fields from a composite store.Store.
+func NewRouterConfigFromStore(st *store.Store) RouterConfig {
+	if st == nil {
 		return RouterConfig{}
 	}
+	profiles := st.Profiles()
+	career := st.Career()
+	branches := st.Branches()
 	return RouterConfig{
-		ProfileStore:  store.Profiles(),
-		CareerStore:   store.Career(),
-		PresetStore:   store.Presets(),
-		TemplateStore: store.Templates(),
-		BranchStore:   store.Branches(),
-		PDFJobStore:   store.PDFJobs(),
-		QuotaStore:    store.Quotas(),
-		UserStore:     store.Users(),
+		ProfileStore:   profiles,
+		CareerStore:    career,
+		PresetStore:    st.Presets(),
+		TemplateStore:  st.Templates(),
+		BranchStore:    branches,
+		JobStore:       st.Jobs(),
+		QuotaStore:     st.Quotas(),
+		UserStore:      st.Users(),
+		ProfileService: profile.New(profiles, career, branches),
 	}
 }
 
@@ -163,18 +168,20 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	if cfg.BranchService == nil && cfg.BranchStore != nil {
 		cfg.BranchService = branch.New(branch.Config{
-			Branches:          cfg.BranchStore,
-			Profiles:          cfg.ProfileStore,
-			Presets:           cfg.PresetStore,
-			Templates:         cfg.TemplateStore,
-			Quotas:            cfg.QuotaStore,
-			JobEnqueuer:       cfg.JobEnqueuer,
-			Validator:         cfg.Validator,
-			Renderer:          cfg.Renderer,
-			PromptCompiler:    cfg.PromptCompiler,
-			DailyRequestLimit: cfg.DailyRequestLimit,
-			MonthlyTokenLimit: cfg.MonthlyTokenLimit,
-			Logger:            cfg.Logger,
+			Branches:            cfg.BranchStore,
+			Jobs:                cfg.JobStore,
+			Profiles:            cfg.ProfileStore,
+			Presets:             cfg.PresetStore,
+			Templates:           cfg.TemplateStore,
+			Quotas:              cfg.QuotaStore,
+			JobNotifier:         cfg.JobNotifier,
+			Validator:           cfg.Validator,
+			Renderer:            cfg.Renderer,
+			PromptCompiler:      cfg.PromptCompiler,
+			DailyRequestLimit:   cfg.DailyRequestLimit,
+			MonthlyTokenLimit:   cfg.MonthlyTokenLimit,
+			MaxPendingPerTenant: cfg.MaxPendingPerTenant,
+			Logger:              cfg.Logger,
 		})
 	}
 

@@ -14,7 +14,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/memory"
 )
 
-func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
+func setupPresetTestServer(t *testing.T) (*httptest.Server, api.PresetStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -24,8 +24,8 @@ func setupPresetTestServer(t *testing.T) (*httptest.Server, core.PresetStore) {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
+	var presetStore api.PresetStore = store.Presets()
+	var templateStore api.TemplateStore = store.Templates()
 
 	router := api.NewRouter(api.RouterConfig{
 		PresetStore:   presetStore,
@@ -119,11 +119,12 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 	baseURL := server.URL
 
 	t.Run("create custom preset without model or reasoning overrides", func(t *testing.T) {
+		themeID := core.TemplateStandardCleanID
 		body, err := json.Marshal(api.CreatePresetRequest{
 			Name:               "Custom Engineering Preset",
 			Description:        "High density technical bullets",
 			SystemInstructions: "Focus on metrics and system design.",
-			TemplateSetID:      core.TemplateStandardCleanID,
+			SuggestedThemeID:   &themeID,
 			Language:           "English",
 		})
 		if err != nil {
@@ -153,8 +154,8 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 		if created.Name != "Custom Engineering Preset" {
 			t.Errorf("expected name %q, got %q", "Custom Engineering Preset", created.Name)
 		}
-		if created.TemplateSetID != core.TemplateStandardCleanID {
-			t.Errorf("expected template_set_id %q, got %q", core.TemplateStandardCleanID, created.TemplateSetID)
+		if created.SuggestedThemeID == nil || *created.SuggestedThemeID != core.TemplateStandardCleanID {
+			t.Errorf("expected suggested_theme_id %q, got %+v", core.TemplateStandardCleanID, created.SuggestedThemeID)
 		}
 
 		// Update preset

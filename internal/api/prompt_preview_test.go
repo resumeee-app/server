@@ -122,7 +122,7 @@ func TestBranch_PromptPreviewEndpoint(t *testing.T) {
 	createPresetReq := map[string]any{
 		"name":                "Executive Preset",
 		"system_instructions": "Focus on P&L leadership and executive governance.",
-		"template_set_id":     core.TemplateStandardCleanID,
+		"suggested_theme_id":  core.TemplateStandardCleanID,
 	}
 	presetResp, presetBody := doRequest(t, client, http.MethodPost, baseURL+"/api/v1/presets", createPresetReq, nil)
 	if presetResp.StatusCode != http.StatusCreated {
@@ -218,11 +218,11 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 	}
 
 	router := api.NewRouter(api.RouterConfig{
-		ProfileStore:  store,
-		PresetStore:   store,
-		TemplateStore: store,
-		BranchStore:   store,
-		QuotaStore:    store,
+		ProfileStore:  store.Profiles(),
+		PresetStore:   store.Presets(),
+		TemplateStore: store.Templates(),
+		BranchStore:   store.Branches(),
+		QuotaStore:    store.Quotas(),
 		Renderer:      renderer.New(),
 		DefaultUserID: defaultUserID,
 		Admin:         false,
@@ -242,7 +242,7 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 		TargetRequirements: "Extensive distributed systems experience.",
 		TemplateSetID:      core.TemplateStandardCleanID,
 	}
-	if err := store.CreateBranch(ctx, branch); err != nil {
+	if err := store.Branches().CreateBranch(ctx, branch); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
@@ -324,11 +324,11 @@ func TestBranch_PromptPreviewAdminAuthorization(t *testing.T) {
 
 	t.Run("ADMIN_MODE=true allows prompt-preview without token", func(t *testing.T) {
 		adminRouter := api.NewRouter(api.RouterConfig{
-			ProfileStore:  store,
-			PresetStore:   store,
-			TemplateStore: store,
-			BranchStore:   store,
-			QuotaStore:    store,
+			ProfileStore:  store.Profiles(),
+			PresetStore:   store.Presets(),
+			TemplateStore: store.Templates(),
+			BranchStore:   store.Branches(),
+			QuotaStore:    store.Quotas(),
 			Renderer:      renderer.New(),
 			DefaultUserID: defaultUserID,
 			Admin:         true,

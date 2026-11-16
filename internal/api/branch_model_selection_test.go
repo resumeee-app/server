@@ -61,11 +61,11 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 
 	cfg := api.RouterConfig{
 		DefaultUserID:   defaultUser,
-		BranchStore:     store,
-		ProfileStore:    store,
-		PresetStore:     store,
-		TemplateStore:   store,
-		QuotaStore:      store,
+		BranchStore:     store.Branches(),
+		ProfileStore:    store.Profiles(),
+		PresetStore:     store.Presets(),
+		TemplateStore:   store.Templates(),
+		QuotaStore:      store.Quotas(),
 		ModelEnumerator: enumerator,
 		Admin:           admin,
 		AuthProvider:    authProvider,
@@ -79,11 +79,12 @@ func setupBranchModelTestServerWithAdmin(t *testing.T, enumerator core.ModelEnum
 
 	// Create a non-default branch for testing
 	branchService := branch.New(branch.Config{
-		Branches:  store,
-		Profiles:  store,
-		Presets:   store,
-		Templates: store,
-		Quotas:    store,
+		Branches:  store.Branches(),
+		Jobs:      store.Jobs(),
+		Profiles:  store.Profiles(),
+		Presets:   store.Presets(),
+		Templates: store.Templates(),
+		Quotas:    store.Quotas(),
 	})
 
 	testBranch := &core.Branch{

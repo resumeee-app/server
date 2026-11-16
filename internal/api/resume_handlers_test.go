@@ -31,10 +31,11 @@ func (m *mockLLMProvider) GenerateTailoredResume(_ context.Context, _ core.Gener
 type resumeTestEnv struct {
 	server        *httptest.Server
 	db            any
-	branchStore   core.BranchStore
-	profileStore  core.ProfileStore
-	presetStore   core.PresetStore
-	templateStore core.TemplateStore
+	branchStore   api.BranchStore
+	jobStore      api.JobStore
+	profileStore  api.ProfileStore
+	presetStore   api.PresetStore
+	templateStore api.TemplateStore
 	mockProvider  *mockLLMProvider
 }
 
@@ -48,15 +49,17 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 		t.Fatalf("failed to seed test store: %v", err)
 	}
 
-	var profileStore core.ProfileStore = store
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
-	var branchStore core.BranchStore = store
+	var profileStore api.ProfileStore = store.Profiles()
+	var presetStore api.PresetStore = store.Presets()
+	var templateStore api.TemplateStore = store.Templates()
+	var branchStore api.BranchStore = store.Branches()
+	var jobStore api.JobStore = store.Jobs()
 	mockProv := &mockLLMProvider{}
 	rend := renderer.New()
 
 	branchSvc := branch.New(branch.Config{
 		Branches:  branchStore,
+		Jobs:      jobStore,
 		Profiles:  profileStore,
 		Presets:   presetStore,
 		Templates: templateStore,
@@ -69,6 +72,7 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 		PresetStore:   presetStore,
 		TemplateStore: templateStore,
 		BranchStore:   branchStore,
+		JobStore:      jobStore,
 		BranchService: branchSvc,
 		Renderer:      rend,
 		DefaultUserID: defaultUserID,
@@ -84,6 +88,7 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 		server:        server,
 		db:            store,
 		branchStore:   branchStore,
+		jobStore:      jobStore,
 		profileStore:  profileStore,
 		presetStore:   presetStore,
 		templateStore: templateStore,
@@ -131,7 +136,6 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 	now := time.Now().UTC()
 	vCompleted := &core.BranchVersion{
 		ID:                "ver-completed-1",
-		ResumeID:          targetResume.ID,
 		BranchID:          targetResume.ID,
 		VersionNumber:     1,
 		Status:            core.VersionStatusCompleted,
@@ -145,10 +149,9 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 		CreatedAt:         now,
 		CompletedAt:       &now,
 	}
-	if err := env.branchStore.CreateVersion(ctx, vCompleted); err != nil {
+	if err := env.branchStore.SaveCompletedVersion(ctx, vCompleted); err != nil {
 		t.Fatalf("failed to create completed version: %v", err)
 	}
-	_ = env.branchStore.CompleteVersion(ctx, vCompleted)
 
 	// Create alternative custom template for user
 	userTemplate := &core.TemplateSet{
@@ -252,20 +255,23 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 4. Assert 409 Conflict when version status is pending or processing
 	t.Run("RenderPreview_PendingStatus_Returns409", func(t *testing.T) {
+		pendingJob := &core.Job{
+			ID:     "job-pending-1",
+			Kind:   core.JobKindBranchTailor,
+			UserID: userID,
+		}
 		vPending := &core.BranchVersion{
 			ID:                "ver-pending-1",
-			ResumeID:          targetResume.ID,
 			BranchID:          targetResume.ID,
 			VersionNumber:     2,
-			Status:            core.VersionStatusPending,
 			MainRevisionUsed:  1,
 			TemplateSetIDUsed: "builtin-standard-clean",
 			SourceType:        core.SourceTypeLLMGeneration,
 			TailoredContent:   tailoredContent,
 			CreatedAt:         time.Now().UTC(),
 		}
-		if err := env.branchStore.CreateVersion(ctx, vPending); err != nil {
-			t.Fatalf("failed to create pending version: %v", err)
+		if _, err := env.jobStore.SubmitBranchTailor(ctx, pendingJob, vPending, core.PendingJobOptions{}); err != nil {
+			t.Fatalf("failed to submit pending version: %v", err)
 		}
 
 		body := map[string]any{"template_set_id": "builtin-standard-clean"}
@@ -288,21 +294,30 @@ func TestResumeFastRenderPreview_RFC005(t *testing.T) {
 
 	// 5. Assert 422 Unprocessable Entity when TailoredContent is nil
 	t.Run("RenderPreview_NilTailoredContent_Returns422", func(t *testing.T) {
+		failedJob := &core.Job{
+			ID:     "job-failed-1",
+			Kind:   core.JobKindBranchTailor,
+			UserID: userID,
+		}
 		vFailed := &core.BranchVersion{
 			ID:                "ver-failed-1",
-			ResumeID:          targetResume.ID,
 			BranchID:          targetResume.ID,
 			VersionNumber:     3,
-			Status:            core.VersionStatusFailed,
 			MainRevisionUsed:  1,
 			TemplateSetIDUsed: "builtin-standard-clean",
 			SourceType:        core.SourceTypeLLMGeneration,
 			TailoredContent:   nil,
-			ErrorMessage:      "LLM failed to respond",
 			CreatedAt:         time.Now().UTC(),
 		}
-		if err := env.branchStore.CreateVersion(ctx, vFailed); err != nil {
-			t.Fatalf("failed to create failed version: %v", err)
+		if _, err := env.jobStore.SubmitBranchTailor(ctx, failedJob, vFailed, core.PendingJobOptions{}); err != nil {
+			t.Fatalf("failed to submit failed version job: %v", err)
+		}
+		claimed, err := env.jobStore.ClaimNext(ctx, core.ClaimJobRequest{WorkerID: "test-worker"})
+		if err != nil {
+			t.Fatalf("failed to claim job: %v", err)
+		}
+		if err := env.jobStore.FailClaimed(ctx, claimed.ID, "test-worker", "LLM failed to respond"); err != nil {
+			t.Fatalf("failed to fail claimed job: %v", err)
 		}
 
 		body := map[string]any{"template_set_id": "builtin-standard-clean"}
@@ -367,12 +382,13 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 	}
 
 	// Seed private preset owned by attacker
+	defaultTheme := "builtin-standard-clean"
 	foreignPreset := &core.Preset{
 		ID:                 "preset-foreign-attacker",
 		UserID:             attackerID,
 		Name:               "Secret Attacker Strategy",
 		SystemInstructions: "Strictly confidential attacker directives",
-		TemplateSetID:      "builtin-standard-clean",
+		SuggestedThemeID:   &defaultTheme,
 	}
 	if err := env.presetStore.CreatePreset(ctx, foreignPreset); err != nil {
 		t.Fatalf("failed to create attacker preset: %v", err)
@@ -412,26 +428,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		assertForbidden(t, resp)
 	})
 
-	// 2. POST /branches with foreign tailoring_strategy_id -> 403 Forbidden
-	t.Run("CreateBranch_ForeignTailoringStrategyID_Returns403", func(t *testing.T) {
-		reqBody := map[string]any{
-			"name":                  "Infiltrator Branch Strategy",
-			"template_set_id":       "builtin-standard-clean",
-			"tailoring_strategy_id": foreignPreset.ID,
-		}
-		raw, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches", bytes.NewReader(raw))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-User-ID", userID)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		assertForbidden(t, resp)
-	})
-
-	// 3. POST /branches with foreign preset_id -> 403 Forbidden
+	// 2. POST /branches with foreign preset_id -> 403 Forbidden
 	t.Run("CreateBranch_ForeignPresetID_Returns403", func(t *testing.T) {
 		reqBody := map[string]any{
 			"name":            "Infiltrator Branch Preset",
@@ -461,7 +458,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		t.Fatalf("failed to create legit branch: %v", err)
 	}
 
-	// 4. PUT /branches/{id} with foreign template_set_id -> 403 Forbidden
+	// 3. PUT /branches/{id} with foreign template_set_id -> 403 Forbidden
 	t.Run("UpdateBranch_ForeignTemplateSetID_Returns403", func(t *testing.T) {
 		reqBody := map[string]any{
 			"template_set_id": foreignTmpl.ID,
@@ -478,24 +475,7 @@ func TestBranchMultiTenantTemplateAndStrategyGuards_RFC005(t *testing.T) {
 		assertForbidden(t, resp)
 	})
 
-	// 5. PUT /branches/{id} with foreign tailoring_strategy_id -> 403 Forbidden
-	t.Run("UpdateBranch_ForeignTailoringStrategyID_Returns403", func(t *testing.T) {
-		reqBody := map[string]any{
-			"tailoring_strategy_id": foreignPreset.ID,
-		}
-		raw, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/branches/"+legitBranch.ID, bytes.NewReader(raw))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-User-ID", userID)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		assertForbidden(t, resp)
-	})
-
-	// 6. PUT /branches/{id} with foreign preset_id -> 403 Forbidden
+	// 4. PUT /branches/{id} with foreign preset_id -> 403 Forbidden
 	t.Run("UpdateBranch_ForeignPresetID_Returns403", func(t *testing.T) {
 		reqBody := map[string]any{
 			"preset_id": foreignPreset.ID,
@@ -547,11 +527,8 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 			},
 		},
 	}
-	if err := env.branchStore.CreateVersion(ctx, v); err != nil {
-		t.Fatalf("failed to create version: %v", err)
-	}
-	if err := env.branchStore.CompleteVersion(ctx, v); err != nil {
-		t.Fatalf("failed to complete version: %v", err)
+	if err := env.branchStore.SaveCompletedVersion(ctx, v); err != nil {
+		t.Fatalf("failed to save completed version: %v", err)
 	}
 
 	// 1. Test GET /api/v1/branches
@@ -657,11 +634,8 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 				},
 			},
 		}
-		if err := env.branchStore.CreateVersion(ctx, v2); err != nil {
-			t.Fatalf("failed to create version 2: %v", err)
-		}
-		if err := env.branchStore.CompleteVersion(ctx, v2); err != nil {
-			t.Fatalf("failed to complete version 2: %v", err)
+		if err := env.branchStore.SaveCompletedVersion(ctx, v2); err != nil {
+			t.Fatalf("failed to save completed version 2: %v", err)
 		}
 
 		// Switch active version back to v1 via PUT /api/v1/branches/{id}
@@ -753,14 +727,18 @@ func TestBranchHandlers_GapReportAndMatchScoreEndpoints(t *testing.T) {
 				},
 			},
 		}
-		if err := env.branchStore.CreateVersion(ctx, vLegacy); err != nil {
-			t.Fatalf("failed to create legacy version: %v", err)
+		if err := env.branchStore.SaveCompletedVersion(ctx, vLegacy); err != nil {
+			t.Fatalf("failed to save legacy version: %v", err)
 		}
 
-		// Directly set ActiveVersionID without gap_report in store (simulating legacy data)
-		bLegacy.ActiveVersionID = &vLegacy.ID
-		bLegacy.GapReport = nil
-		if err := env.branchStore.UpdateBranch(ctx, bLegacy); err != nil {
+		// Reload branch so epoch/active state match before clearing gap_report to simulate legacy data.
+		reloadedLegacy, err := env.branchStore.Branch(ctx, userID, bLegacy.ID)
+		if err != nil {
+			t.Fatalf("failed to reload legacy branch: %v", err)
+		}
+		reloadedLegacy.ActiveVersionID = &vLegacy.ID
+		reloadedLegacy.GapReport = nil
+		if err := env.branchStore.UpdateBranch(ctx, reloadedLegacy); err != nil {
 			t.Fatalf("failed to update legacy branch in store: %v", err)
 		}
 
@@ -907,11 +885,8 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			Status:           core.VersionStatusCompleted,
 			MarkdownOutput:   "# Jane Doe\n## Summary\nDistributed systems engineer skilled in Go and Kubernetes.\n## Experience\n- Built high-availability services.",
 		}
-		if err := env.branchStore.CreateVersion(ctx, v1); err != nil {
-			t.Fatalf("CreateVersion failed: %v", err)
-		}
-		if err := env.branchStore.CompleteVersion(ctx, v1); err != nil {
-			t.Fatalf("CompleteVersion failed: %v", err)
+		if err := env.branchStore.SaveCompletedVersion(ctx, v1); err != nil {
+			t.Fatalf("SaveCompletedVersion failed: %v", err)
 		}
 
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/branches/"+b.ID+"/ats-score", strings.NewReader(`{"format":"markdown"}`))

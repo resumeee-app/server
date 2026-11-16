@@ -22,7 +22,7 @@ func registerProfileRoutes(mux *http.ServeMux, cfg RouterConfig) {
 	profileGuard := routeGuard{ok: cfg.ProfileStore != nil, msg: "profile store unavailable"}
 	serviceGuard := routeGuard{ok: cfg.ProfileService != nil, msg: "profile service unavailable"}
 	careerGuard := routeGuard{ok: cfg.CareerStore != nil, msg: "career store unavailable"}
-	pdfJobGuard := routeGuard{ok: cfg.PDFJobStore != nil, msg: "pdf job store unavailable"}
+	pdfJobGuard := routeGuard{ok: cfg.JobStore != nil, msg: "pdf job store unavailable"}
 
 	// Main profile, JSON Resume, and PDF ingestion routes.
 	mux.HandleFunc("GET /api/v1/profile", withRouteGuards(h.getProfile, profileGuard))

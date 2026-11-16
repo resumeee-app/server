@@ -11,11 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	core "github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/llm"
+	"github.com/resumeee-app/resumeee-core/worker"
 )
 
 // PDF ingestion size, token quota, and retry defaults.
@@ -30,11 +29,39 @@ const (
 	defaultPDFQuotaRetryAfterSeconds = 3600
 )
 
-// AsyncPDFJobResponse represents the acknowledgement payload returned when an asynchronous PDF parse job is accepted.
-type AsyncPDFJobResponse struct {
-	JobID   string                 `json:"job_id"`
-	Status  core.PDFParseJobStatus `json:"status"`
-	Message string                 `json:"message"`
+// PDFParseJobResponse represents the public API projection of an asynchronous PDF parse job.
+type PDFParseJobResponse struct {
+	ID           string           `json:"id"`
+	UserID       string           `json:"user_id"`
+	Status       core.JobStatus   `json:"status"`
+	Filename     string           `json:"filename,omitempty"`
+	Provider     string           `json:"provider,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	Result       *core.JSONResume `json:"result,omitempty"`
+	ErrorMessage string           `json:"error_message,omitempty"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	CompletedAt  *time.Time       `json:"completed_at,omitempty"`
+}
+
+// newPDFParseJobResponse projects a persistent Job onto PDFParseJobResponse when it represents a PDF parse workload.
+func newPDFParseJobResponse(job *core.Job) (*PDFParseJobResponse, bool) {
+	if job == nil || job.Kind != core.JobKindPDFParse || job.PDF == nil {
+		return nil, false
+	}
+	return &PDFParseJobResponse{
+		ID:           job.ID,
+		UserID:       job.UserID,
+		Status:       job.Status,
+		Filename:     job.PDF.Filename,
+		Provider:     job.PDF.Provider,
+		Model:        job.PDF.Model,
+		Result:       job.PDF.Result,
+		ErrorMessage: job.ErrorMessage,
+		CreatedAt:    job.CreatedAt,
+		UpdatedAt:    job.UpdatedAt,
+		CompletedAt:  job.CompletedAt,
+	}, true
 }
 
 // pdfUploadPayload captures the decoded bytes and optional form overrides of a multipart PDF upload.
@@ -128,9 +155,9 @@ func (h *profileHandler) parsePDFResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Run asynchronously by default when an enqueuer is available unless the caller explicitly requests ?sync=true.
+	// Run asynchronously by default when a job notifier is available unless the caller explicitly requests ?sync=true.
 	runAsync := strings.EqualFold(r.URL.Query().Get("async"), "true") ||
-		(h.cfg.PDFJobEnqueuer != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
+		(h.cfg.JobNotifier != nil && !strings.EqualFold(r.URL.Query().Get("sync"), "true"))
 
 	if !runAsync {
 		h.extractPDFResumeSync(reqCtx, w, userID, upload, text)
@@ -351,14 +378,14 @@ func (h *profileHandler) writePDFExtractionError(ctx context.Context, w http.Res
 	writeDomainError(w, h.cfg.Logger, err)
 }
 
-// enqueueAsyncPDFJob persists a pending PDF parse job and enqueues it onto the background PDF worker pool.
+// enqueueAsyncPDFJob persists a pending PDF parse job and signals background workers.
 func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.ResponseWriter, userID string, upload pdfUploadPayload, text string) {
-	if h.cfg.PDFJobStore == nil {
+	if h.cfg.JobStore == nil {
 		writeError(w, http.StatusInternalServerError, CodeInternalError, "pdf job store unavailable", "")
 		return
 	}
 
-	if h.cfg.PDFJobEnqueuer == nil {
+	if h.cfg.JobNotifier == nil {
 		if h.cfg.Logger != nil {
 			h.cfg.Logger.ErrorContext(ctx, "PDF worker queue not configured on server")
 		}
@@ -366,46 +393,21 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 		return
 	}
 
-	dailyLimit, monthlyLimit := resolveQuotaLimits(h.cfg.DailyRequestLimit, h.cfg.MonthlyTokenLimit)
-	reservationID, ok := h.reserveQuota(ctx, w, userID, core.OperationPDFParse, estimatedPDFParseTokens, dailyLimit, monthlyLimit)
-	if !ok {
-		return
-	}
-
-	jobID := "pdf-job-" + uuid.New().String()
-	now := time.Now().UTC()
-	job := &core.PDFParseJob{
-		ID:        jobID,
-		UserID:    userID,
-		Status:    core.PDFParseJobStatusPending,
-		Filename:  upload.filename,
-		Provider:  upload.provider,
-		Model:     upload.model,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	if err := h.cfg.PDFJobStore.CreateJob(ctx, job); err != nil {
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to create PDF job", core.LLMTelemetry{})
-		}
-		writeDomainError(w, h.cfg.Logger, err)
-		return
-	}
-
-	task := core.PDFParseJobTask{
-		JobID:         jobID,
-		UserID:        userID,
-		RawText:       text,
-		Provider:      upload.provider,
-		Model:         upload.model,
-		ReservationID: reservationID,
-	}
-
-	if err := h.cfg.PDFJobEnqueuer.EnqueuePDFJob(task); err != nil {
-		if h.cfg.QuotaStore != nil && reservationID != "" {
-			_ = h.cfg.QuotaStore.ReleaseQuota(ctx, reservationID, "failed to enqueue PDF job", core.LLMTelemetry{})
-		}
+	job, err := worker.SubmitPDFJob(ctx, worker.PDFSubmitConfig{
+		Jobs:                h.cfg.JobStore,
+		Quotas:              h.cfg.QuotaStore,
+		Notifier:            h.cfg.JobNotifier,
+		MaxPendingPerTenant: h.cfg.MaxPendingPerTenant,
+	}, worker.PDFJobSubmission{
+		UserID:       userID,
+		Filename:     upload.filename,
+		Provider:     upload.provider,
+		Model:        upload.model,
+		RawText:      text,
+		DailyLimit:   h.cfg.DailyRequestLimit,
+		MonthlyLimit: h.cfg.MonthlyTokenLimit,
+	})
+	if err != nil {
 		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())
 			return
@@ -414,15 +416,17 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 		return
 	}
 
-	if h.cfg.Logger != nil {
-		h.cfg.Logger.InfoContext(ctx, "enqueued pdf resume parse job", "job_id", jobID, "filename", upload.filename)
+	resp, ok := newPDFParseJobResponse(job)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, CodeInternalError, "unexpected pdf parse job payload", "")
+		return
 	}
 
-	writeJSON(w, http.StatusAccepted, AsyncPDFJobResponse{
-		JobID:   jobID,
-		Status:  core.PDFParseJobStatusPending,
-		Message: "PDF parsing job queued",
-	})
+	if h.cfg.Logger != nil {
+		h.cfg.Logger.InfoContext(ctx, "enqueued pdf resume parse job", "job_id", job.ID, "filename", upload.filename)
+	}
+
+	writeJSON(w, http.StatusAccepted, resp)
 }
 
 // getPDFParseJob returns the status and candidate result of an asynchronous PDF resume parsing job.
@@ -435,7 +439,7 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	job, err := h.cfg.PDFJobStore.Job(ctx, userID, jobID)
+	job, err := h.cfg.JobStore.Job(ctx, userID, jobID)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
@@ -445,7 +449,13 @@ func (h *profileHandler) getPDFParseJob(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, job)
+	resp, ok := newPDFParseJobResponse(job)
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "pdf parse job not found", "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // commitPDFResume commits approved JSON Resume data into the user's main career graph.
