@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -943,4 +944,169 @@ func TestAPI_SimulateATSScore(t *testing.T) {
 			t.Errorf("expected persisted ATSScore on branch, got %+v", fetchedBranch.ATSScore)
 		}
 	})
+}
+
+// TestGreenfieldWireContracts verifies raw JSON wire serialization for greenfield Branch,
+// job-backed BranchVersion, and Preset/Strategy endpoints.
+func TestGreenfieldWireContracts(t *testing.T) {
+	env := setupResumeTestServer(t)
+	client := env.server.Client()
+	baseURL := env.server.URL
+	userID := "user-resume-1"
+
+	readMap := func(t *testing.T, method, path string, body any) (int, []byte, map[string]any) {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal %s %s body: %v", method, path, err)
+			}
+			reader = bytes.NewReader(raw)
+		}
+		req, _ := http.NewRequest(method, baseURL+path, reader)
+		req.Header.Set("X-User-ID", userID)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s failed: %v", method, path, err)
+		}
+		data, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read %s %s body: %v", method, path, readErr)
+		}
+		var out map[string]any
+		if len(data) > 0 && data[0] == '{' {
+			if err := json.Unmarshal(data, &out); err != nil {
+				t.Fatalf("unmarshal %s %s JSON: %v (raw: %s)", method, path, err, string(data))
+			}
+		}
+		return resp.StatusCode, data, out
+	}
+
+	assertAbsent := func(t *testing.T, label string, raw []byte, payload map[string]any, keys ...string) {
+		t.Helper()
+		rawStr := string(raw)
+		for _, k := range keys {
+			if _, exists := payload[k]; exists {
+				t.Errorf("%s response must omit key %q (raw: %s)", label, k, rawStr)
+			}
+			if strings.Contains(rawStr, `"`+k+`"`) {
+				t.Errorf("%s raw JSON must not contain %q (raw: %s)", label, k, rawStr)
+			}
+		}
+	}
+
+	// 1. Preset and TailoringStrategy wire responses omit template_set_id and preserve suggested_theme_id.
+	themeID := core.TemplateStandardCleanID
+	code, presetRaw, presetMap := readMap(t, http.MethodPost, "/api/v1/presets", api.CreatePresetRequest{
+		Name:               "Greenfield Strategy",
+		SystemInstructions: "Focus on concise impact bullets.",
+		SuggestedThemeID:   &themeID,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /presets expected 201, got %d (%s)", code, string(presetRaw))
+	}
+	assertAbsent(t, "POST /presets", presetRaw, presetMap, "template_set_id")
+	if gotTheme, _ := presetMap["suggested_theme_id"].(string); gotTheme != themeID {
+		t.Fatalf("POST /presets expected suggested_theme_id %q, got %v", themeID, presetMap["suggested_theme_id"])
+	}
+	presetID, _ := presetMap["id"].(string)
+
+	code, stratRaw, stratMap := readMap(t, http.MethodGet, "/api/v1/tailoring-strategies/"+presetID, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /tailoring-strategies/{id} expected 200, got %d (%s)", code, string(stratRaw))
+	}
+	assertAbsent(t, "GET /tailoring-strategies/{id}", stratRaw, stratMap, "template_set_id")
+	if gotTheme, _ := stratMap["suggested_theme_id"].(string); gotTheme != themeID {
+		t.Fatalf("GET /tailoring-strategies/{id} expected suggested_theme_id %q, got %v", themeID, stratMap["suggested_theme_id"])
+	}
+
+	// 2. Branch wire responses include epoch and omit custom_directives / tailoring_strategy_id.
+	code, branchRaw, branchMap := readMap(t, http.MethodPost, "/api/v1/branches", api.CreateBranchRequest{
+		Name:               "Greenfield Branch",
+		TargetRole:         "Staff Go Engineer",
+		TargetCompany:      "Acme",
+		TargetRequirements: "Go and distributed systems",
+		BranchInstructions: "Emphasize reliability",
+		PresetID:           &presetID,
+		TemplateSetID:      core.TemplateStandardCleanID,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /branches expected 201, got %d (%s)", code, string(branchRaw))
+	}
+	assertAbsent(t, "POST /branches", branchRaw, branchMap, "custom_directives", "tailoring_strategy_id")
+	if epoch, ok := branchMap["epoch"].(float64); !ok || epoch != 1 {
+		t.Fatalf("POST /branches expected epoch=1, got %v (%s)", branchMap["epoch"], string(branchRaw))
+	}
+	branchID, _ := branchMap["id"].(string)
+
+	// 3. Job-backed BranchVersion includes branch_epoch and job_id on wire responses.
+	code, genRaw, genMap := readMap(t, http.MethodPost, "/api/v1/branches/"+branchID+"/generate", nil)
+	if code != http.StatusAccepted {
+		t.Fatalf("POST /branches/{id}/generate expected 202, got %d (%s)", code, string(genRaw))
+	}
+	verID, _ := genMap["version_id"].(string)
+	if verID == "" {
+		t.Fatalf("POST /branches/{id}/generate expected non-empty version_id (%s)", string(genRaw))
+	}
+
+	code, verRaw, verMap := readMap(t, http.MethodGet, "/api/v1/branches/"+branchID+"/versions/"+verID, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /branches/{id}/versions/{v} expected 200, got %d (%s)", code, string(verRaw))
+	}
+	if branchEpoch, ok := verMap["branch_epoch"].(float64); !ok || branchEpoch != 1 {
+		t.Fatalf("GET /versions/{v} expected branch_epoch=1, got %v (%s)", verMap["branch_epoch"], string(verRaw))
+	}
+	if jobID, ok := verMap["job_id"].(string); !ok || jobID == "" {
+		t.Fatalf("GET /versions/{v} expected non-empty job_id, got %v (%s)", verMap["job_id"], string(verRaw))
+	}
+
+	// Verify list endpoint also serializes branch_epoch and job_id.
+	code, listRaw, _ := readMap(t, http.MethodGet, "/api/v1/branches/"+branchID+"/versions", nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /branches/{id}/versions expected 200, got %d (%s)", code, string(listRaw))
+	}
+	var listed []map[string]any
+	if err := json.Unmarshal(listRaw, &listed); err != nil || len(listed) != 1 {
+		t.Fatalf("expected 1 version in list, got len=%d err=%v raw=%s", len(listed), err, string(listRaw))
+	}
+	if branchEpoch, ok := listed[0]["branch_epoch"].(float64); !ok || branchEpoch != 1 {
+		t.Fatalf("list version expected branch_epoch=1, got %v", listed[0]["branch_epoch"])
+	}
+	if jobID, ok := listed[0]["job_id"].(string); !ok || jobID == "" {
+		t.Fatalf("list version expected non-empty job_id, got %v", listed[0]["job_id"])
+	}
+
+	// 4. Updating generation-defining config increments branch epoch and subsequent job-backed version carries epoch 2.
+	updatedReqs := "Go, Kubernetes, PostgreSQL"
+	code, updRaw, updMap := readMap(t, http.MethodPut, "/api/v1/branches/"+branchID, api.UpdateBranchRequest{
+		TargetRequirements: &updatedReqs,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("PUT /branches/{id} expected 200, got %d (%s)", code, string(updRaw))
+	}
+	assertAbsent(t, "PUT /branches/{id}", updRaw, updMap, "custom_directives", "tailoring_strategy_id")
+	if epoch, ok := updMap["epoch"].(float64); !ok || epoch != 2 {
+		t.Fatalf("PUT /branches/{id} expected incremented epoch=2, got %v (%s)", updMap["epoch"], string(updRaw))
+	}
+
+	code, gen2Raw, gen2Map := readMap(t, http.MethodPost, "/api/v1/branches/"+branchID+"/generate", nil)
+	if code != http.StatusAccepted {
+		t.Fatalf("second POST /branches/{id}/generate expected 202, got %d (%s)", code, string(gen2Raw))
+	}
+	ver2ID, _ := gen2Map["version_id"].(string)
+	code, ver2Raw, ver2Map := readMap(t, http.MethodGet, "/api/v1/branches/"+branchID+"/versions/"+ver2ID, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET second version expected 200, got %d (%s)", code, string(ver2Raw))
+	}
+	if branchEpoch, ok := ver2Map["branch_epoch"].(float64); !ok || branchEpoch != 2 {
+		t.Fatalf("second version expected branch_epoch=2, got %v (%s)", ver2Map["branch_epoch"], string(ver2Raw))
+	}
+	if jobID, ok := ver2Map["job_id"].(string); !ok || jobID == "" {
+		t.Fatalf("second version expected non-empty job_id, got %v (%s)", ver2Map["job_id"], string(ver2Raw))
+	}
 }
