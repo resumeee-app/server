@@ -167,22 +167,22 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	}
 
 	if cfg.BranchService == nil && cfg.BranchStore != nil {
-		cfg.BranchService = branch.New(branch.Config{
-			Branches:            cfg.BranchStore,
-			Jobs:                cfg.JobStore,
-			Profiles:            cfg.ProfileStore,
-			Presets:             cfg.PresetStore,
-			Templates:           cfg.TemplateStore,
-			Quotas:              cfg.QuotaStore,
-			JobNotifier:         cfg.JobNotifier,
-			Validator:           cfg.Validator,
-			Renderer:            cfg.Renderer,
-			PromptCompiler:      cfg.PromptCompiler,
-			DailyRequestLimit:   cfg.DailyRequestLimit,
-			MonthlyTokenLimit:   cfg.MonthlyTokenLimit,
-			MaxPendingPerTenant: cfg.MaxPendingPerTenant,
-			Logger:              cfg.Logger,
-		})
+		cfg.BranchService = branch.New(
+			branch.WithBranches(cfg.BranchStore),
+			branch.WithJobs(cfg.JobStore),
+			branch.WithProfiles(cfg.ProfileStore),
+			branch.WithPresets(cfg.PresetStore),
+			branch.WithTemplates(cfg.TemplateStore),
+			branch.WithQuotas(cfg.QuotaStore),
+			branch.WithJobNotifier(cfg.JobNotifier),
+			branch.WithValidator(cfg.Validator),
+			branch.WithRenderer(cfg.Renderer),
+			branch.WithPromptCompiler(cfg.PromptCompiler),
+			branch.WithDailyRequestLimit(cfg.DailyRequestLimit),
+			branch.WithMonthlyTokenLimit(cfg.MonthlyTokenLimit),
+			branch.WithMaxPendingPerTenant(cfg.MaxPendingPerTenant),
+			branch.WithLogger(cfg.Logger),
+		)
 	}
 
 	mux := http.NewServeMux()

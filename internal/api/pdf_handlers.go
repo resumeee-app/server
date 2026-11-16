@@ -393,12 +393,7 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 		return
 	}
 
-	job, err := worker.SubmitPDFJob(ctx, worker.PDFSubmitConfig{
-		Jobs:                h.cfg.JobStore,
-		Quotas:              h.cfg.QuotaStore,
-		Notifier:            h.cfg.JobNotifier,
-		MaxPendingPerTenant: h.cfg.MaxPendingPerTenant,
-	}, worker.PDFJobSubmission{
+	job, err := worker.SubmitPDFJob(ctx, h.cfg.JobStore, worker.PDFJobSubmission{
 		UserID:       userID,
 		Filename:     upload.filename,
 		Provider:     upload.provider,
@@ -406,7 +401,11 @@ func (h *profileHandler) enqueueAsyncPDFJob(ctx context.Context, w http.Response
 		RawText:      text,
 		DailyLimit:   h.cfg.DailyRequestLimit,
 		MonthlyLimit: h.cfg.MonthlyTokenLimit,
-	})
+	},
+		worker.WithPDFQuotas(h.cfg.QuotaStore),
+		worker.WithPDFNotifier(h.cfg.JobNotifier),
+		worker.WithPDFMaxPendingPerTenant(h.cfg.MaxPendingPerTenant),
+	)
 	if err != nil {
 		if errors.Is(err, core.ErrQueueFull) {
 			writeError(w, http.StatusServiceUnavailable, CodeQueueFull, "worker queue full", err.Error())

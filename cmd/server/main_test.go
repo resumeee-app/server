@@ -758,10 +758,10 @@ func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
 		t.Fatalf("ClaimNext failed: claimed=%+v err=%v", claimed, err)
 	}
 
-	recoveryPool := worker.New(worker.Config{
-		Jobs:   st.Jobs(),
-		Quotas: st.Quotas(),
-	})
+	recoveryPool := worker.New(
+		worker.WithJobs(st.Jobs()),
+		worker.WithQuotas(st.Quotas()),
+	)
 	if err := recoveryPool.RecoverStaleJobs(ctx, "e2e server crash recovery"); err != nil {
 		t.Fatalf("RecoverStaleJobs: %v", err)
 	}
@@ -795,21 +795,21 @@ func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
 	llmService := llm.NewService(reg)
 	resumeExtractor := llm.NewRegistryExtractor(reg)
 
-	pool := worker.New(worker.Config{
-		Concurrency:            2,
-		MaxConcurrentPerTenant: 2,
-		PollInterval:           20 * time.Millisecond,
-		Jobs:                   st.Jobs(),
-		Branches:               st.Branches(),
-		Profiles:               st.Profiles(),
-		Presets:                st.Presets(),
-		Templates:              st.Templates(),
-		Quotas:                 st.Quotas(),
-		ResumeExtractor:        resumeExtractor,
-		Generator:              llmService,
-		Validator:              provenance.New(),
-		Renderer:               renderer.New(),
-	})
+	pool := worker.New(
+		worker.WithConcurrency(2),
+		worker.WithMaxConcurrentPerTenant(2),
+		worker.WithPollInterval(20*time.Millisecond),
+		worker.WithJobs(st.Jobs()),
+		worker.WithBranches(st.Branches()),
+		worker.WithProfiles(st.Profiles()),
+		worker.WithPresets(st.Presets()),
+		worker.WithTemplates(st.Templates()),
+		worker.WithQuotas(st.Quotas()),
+		worker.WithResumeExtractor(resumeExtractor),
+		worker.WithGenerator(llmService),
+		worker.WithValidator(provenance.New()),
+		worker.WithRenderer(renderer.New()),
+	)
 	pool.Start(ctx)
 	defer pool.Stop()
 

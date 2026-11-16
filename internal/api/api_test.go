@@ -1542,15 +1542,14 @@ func TestProfilePDF_Parse_AsyncLifecycle(t *testing.T) {
 
 		notifier := core.JobNotifierFunc(func() {})
 		env := setupTestServerWithPDFNotifier(t, mockExtractor, notifier, 1)
-		if _, err := worker.SubmitPDFJob(context.Background(), worker.PDFSubmitConfig{
-			Jobs:                env.jobStore,
-			Notifier:            notifier,
-			MaxPendingPerTenant: 1,
-		}, worker.PDFJobSubmission{
+		if _, err := worker.SubmitPDFJob(context.Background(), env.jobStore, worker.PDFJobSubmission{
 			UserID:   "default",
 			Filename: "prior.pdf",
 			RawText:  "prior resume content",
-		}); err != nil {
+		},
+			worker.WithPDFNotifier(notifier),
+			worker.WithPDFMaxPendingPerTenant(1),
+		); err != nil {
 			t.Fatalf("failed to pre-fill pending job quota: %v", err)
 		}
 

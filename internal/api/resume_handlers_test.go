@@ -58,15 +58,15 @@ func setupResumeTestServer(t *testing.T) *resumeTestEnv {
 	mockProv := &mockLLMProvider{}
 	rend := renderer.New()
 
-	branchSvc := branch.New(branch.Config{
-		Branches:  branchStore,
-		Jobs:      jobStore,
-		Profiles:  profileStore,
-		Presets:   presetStore,
-		Templates: templateStore,
-		Validator: provenance.New(),
-		Renderer:  rend,
-	})
+	branchSvc := branch.New(
+		branch.WithBranches(branchStore),
+		branch.WithJobs(jobStore),
+		branch.WithProfiles(profileStore),
+		branch.WithPresets(presetStore),
+		branch.WithTemplates(templateStore),
+		branch.WithValidator(provenance.New()),
+		branch.WithRenderer(rend),
+	)
 
 	router := api.NewRouter(api.RouterConfig{
 		ProfileStore:  profileStore,
