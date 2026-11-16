@@ -14,9 +14,9 @@ import (
 	"syscall"
 
 	"github.com/resumeee-app/core/store"
+	"github.com/resumeee-app/resumeee-api"
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
-	"github.com/resumeee-app/resumeee-api/server"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
