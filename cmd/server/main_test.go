@@ -820,7 +820,7 @@ func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
 	routerCfg.ResumeExtractor = resumeExtractor
 	routerCfg.Renderer = renderer.New()
 	routerCfg.Validator = provenance.New()
-	routerCfg.PromptCompiler = llm.NewPromptCompiler()
+	routerCfg.PromptCompiler = llm.NewPromptCompiler(llm.WithPromptRegistry(reg))
 	routerCfg.ModelEnumerator = reg
 
 	httpSrv := httptest.NewServer(api.NewRouter(routerCfg))
