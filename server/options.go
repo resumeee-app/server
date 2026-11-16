@@ -15,6 +15,7 @@ import (
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
@@ -91,7 +92,6 @@ func validateConfigLimits(cfg *Config) error {
 		{"LLMDailyRequestLimit", cfg.LLMDailyRequestLimit},
 		{"LLMMonthlyTokenLimit", cfg.LLMMonthlyTokenLimit},
 		{"WorkerConcurrency", cfg.WorkerConcurrency},
-		{"WorkerQueueSize", cfg.WorkerQueueSize},
 		{"MaxConcurrentJobsPerTenant", cfg.MaxConcurrentJobsPerTenant},
 	}
 	for _, limit := range limits {
@@ -173,21 +173,17 @@ func WithQuotaLimits(dailyRequests, monthlyTokens int) Option {
 	}
 }
 
-// WithWorkerPoolConfig customizes the background generation worker pool concurrency, queue capacity,
+// WithWorkerPoolConfig customizes the background generation worker pool concurrency
 // and per-tenant concurrency ceiling.
-func WithWorkerPoolConfig(concurrency, queueSize, maxPerTenant int) Option {
+func WithWorkerPoolConfig(concurrency, maxPerTenant int) Option {
 	return func(s *Server) error {
 		if concurrency <= 0 {
 			return fmt.Errorf("server: worker concurrency must be > 0, got %d", concurrency)
-		}
-		if queueSize <= 0 {
-			return fmt.Errorf("server: worker queueSize must be > 0, got %d", queueSize)
 		}
 		if maxPerTenant <= 0 {
 			return fmt.Errorf("server: maxPerTenant must be > 0, got %d", maxPerTenant)
 		}
 		s.cfg.WorkerConcurrency = concurrency
-		s.cfg.WorkerQueueSize = queueSize
 		s.cfg.MaxConcurrentJobsPerTenant = maxPerTenant
 		return nil
 	}
@@ -294,13 +290,13 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithStore injects a configured core.Store implementation (e.g., from resumeee-storage-sql or resumeee-core/memory).
-func WithStore(store core.Store) Option {
+// WithStore injects a configured *store.Store (e.g., from resumeee-storage-sql or resumeee-core/memory).
+func WithStore(st *store.Store) Option {
 	return func(s *Server) error {
-		if store == nil {
+		if st == nil {
 			return errors.New("server: Store cannot be nil")
 		}
-		s.store = store
+		s.store = st
 		return nil
 	}
 }

@@ -1,7 +1,7 @@
 // Package server provides a configurable, dependency-injected HTTP REST and Model Context Protocol (MCP)
 // server for Resumeee.
 //
-// External dependencies (such as core.Store, core.AuthProvider, and llm.Client / *llm.Registry)
+// External dependencies (such as *store.Store, core.AuthProvider, and llm.Client / *llm.Registry)
 // are configured in their respective packages and injected into Server using functional With<Option> constructors.
 package server
 
@@ -19,13 +19,13 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/pdf"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
@@ -49,7 +49,6 @@ type Config struct {
 	LLMDailyRequestLimit       int
 	LLMMonthlyTokenLimit       int
 	WorkerConcurrency          int
-	WorkerQueueSize            int
 	MaxConcurrentJobsPerTenant int
 	Environment                string
 	LogLevel                   slog.Level
@@ -77,7 +76,6 @@ func DefaultConfig() *Config {
 		LLMDailyRequestLimit:       config.DefaultLLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       config.DefaultLLMMonthlyTokenLimit,
 		WorkerConcurrency:          config.DefaultWorkerConcurrency,
-		WorkerQueueSize:            config.DefaultWorkerQueueSize,
 		MaxConcurrentJobsPerTenant: config.DefaultMaxConcurrentJobsPerTenant,
 		Environment:                config.DefaultEnvironment,
 		LogLevel:                   slog.LevelInfo,
@@ -109,7 +107,6 @@ func (c *Config) toInternalConfig() *config.Config {
 		LLMDailyRequestLimit:       c.LLMDailyRequestLimit,
 		LLMMonthlyTokenLimit:       c.LLMMonthlyTokenLimit,
 		WorkerConcurrency:          c.WorkerConcurrency,
-		WorkerQueueSize:            c.WorkerQueueSize,
 		MaxConcurrentJobsPerTenant: c.MaxConcurrentJobsPerTenant,
 		Environment:                c.Environment,
 		LogLevel:                   c.LogLevel,
@@ -141,7 +138,7 @@ type HTTPTimeouts struct {
 type Server struct {
 	cfg              *Config
 	logger           *slog.Logger
-	store            core.Store
+	store            *store.Store
 	authProvider     auth.Provider
 	llmRegistry      *llm.Registry
 	llmClients       []llm.Client
@@ -203,7 +200,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cfg = DefaultConfig()
 	}
 	if s.store == nil {
-		return errors.New("server: a configured core.Store must be injected via WithStore")
+		return errors.New("server: a configured *store.Store must be injected via WithStore")
 	}
 
 	logger := s.resolveLogger()
@@ -238,7 +235,6 @@ func (s *Server) logStartup(logger *slog.Logger) {
 		"env", s.cfg.Environment,
 		"default_user_id", s.cfg.DefaultUserID,
 		"worker_concurrency", s.cfg.WorkerConcurrency,
-		"worker_queue_size", s.cfg.WorkerQueueSize,
 		"worker_max_concurrent_per_tenant", s.cfg.MaxConcurrentJobsPerTenant,
 		"llm_debug_prompts", s.cfg.LLMDebugPrompts,
 		"llm_debug_dir", s.cfg.LLMDebugDir,
@@ -256,15 +252,8 @@ func (s *Server) ensureLLMDebugDir() error {
 	return nil
 }
 
-// initServices recovers stale state, instantiates domain services, and starts the background worker pool.
+// initServices instantiates domain services and starts the background worker pool.
 func (s *Server) initServices(ctx context.Context, logger *slog.Logger) (*serverDeps, error) {
-	branchStore := s.store.Branches()
-	if err := branchStore.FailInterruptedVersions(ctx, "server restarted while generation job was in flight"); err != nil {
-		logger.Warn("failed to clean up interrupted versions on boot", "err", err)
-	} else {
-		logger.Info("cleaned up interrupted generation versions")
-	}
-
 	authProvider, err := s.resolveAuthProvider(logger)
 	if err != nil {
 		return nil, err
@@ -276,14 +265,16 @@ func (s *Server) initServices(ctx context.Context, logger *slog.Logger) (*server
 	resumeExtractor := s.resolveResumeExtractor(llmRegistry)
 
 	workerPool := s.startWorkerPool(ctx, logger, resumeExtractor, llmService, provValidator, templateRenderer)
+	branchStore := s.store.Branches()
 	profileSvc := profile.New(s.store.Profiles(), s.store.Career(), branchStore)
 	branchSvc := branch.New(branch.Config{
 		Branches:          branchStore,
+		Jobs:              s.store.Jobs(),
 		Profiles:          s.store.Profiles(),
 		Presets:           s.store.Presets(),
 		Templates:         s.store.Templates(),
 		Quotas:            s.store.Quotas(),
-		JobEnqueuer:       workerPool,
+		JobNotifier:       workerPool,
 		Validator:         provValidator,
 		Renderer:          templateRenderer,
 		Generator:         llmService,
@@ -348,13 +339,12 @@ func (s *Server) startWorkerPool(
 ) *worker.Pool {
 	workerPool := worker.New(worker.Config{
 		Concurrency:            s.cfg.WorkerConcurrency,
-		QueueSize:              s.cfg.WorkerQueueSize,
 		MaxConcurrentPerTenant: s.cfg.MaxConcurrentJobsPerTenant,
+		Jobs:                   s.store.Jobs(),
 		Branches:               s.store.Branches(),
 		Profiles:               s.store.Profiles(),
 		Presets:                s.store.Presets(),
 		Templates:              s.store.Templates(),
-		PDFJobs:                s.store.PDFJobs(),
 		Quotas:                 s.store.Quotas(),
 		ResumeExtractor:        resumeExtractor,
 		LLMTimeout:             s.cfg.LLMTimeout,
@@ -363,7 +353,7 @@ func (s *Server) startWorkerPool(
 		Renderer:               templateRenderer,
 		Logger:                 logger,
 	})
-	if err := workerPool.RecoverStaleJobs(ctx, "server restarted during job processing"); err != nil {
+	if err := workerPool.RecoverStaleJobs(ctx, "server restarted while generation job was in flight"); err != nil {
 		logger.Warn("failed to recover stale jobs", "err", err)
 	}
 	workerPool.Start(ctx)
@@ -374,36 +364,29 @@ func (s *Server) startWorkerPool(
 func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Handler {
 	isLocalAdmin := deps.authProvider != nil && deps.authProvider.Name() == auth.ProviderAdmin
 
-	apiRouter := api.NewRouter(api.RouterConfig{
-		ProfileStore:           s.store.Profiles(),
-		CareerStore:            s.store.Career(),
-		PresetStore:            s.store.Presets(),
-		TemplateStore:          s.store.Templates(),
-		BranchStore:            s.store.Branches(),
-		PDFJobStore:            s.store.PDFJobs(),
-		QuotaStore:             s.store.Quotas(),
-		BranchService:          deps.branchService,
-		ProfileService:         deps.profileService,
-		PDFExtractor:           deps.pdfExtractor,
-		ResumeExtractor:        deps.resumeExtractor,
-		Renderer:               deps.templateRenderer,
-		Validator:              deps.provValidator,
-		JobEnqueuer:            deps.workerPool,
-		PDFJobEnqueuer:         deps.workerPool,
-		ModelEnumerator:        deps.llmRegistry,
-		DefaultUserID:          s.cfg.DefaultUserID,
-		Admin:                  isLocalAdmin,
-		AuthProvider:           deps.authProvider,
-		UserStore:              s.store.Users(),
-		DailyRequestLimit:      s.cfg.LLMDailyRequestLimit,
-		MonthlyTokenLimit:      s.cfg.LLMMonthlyTokenLimit,
-		RESTTimeout:            s.cfg.RESTTimeout,
-		LLMTimeout:             s.cfg.LLMTimeout,
-		PDFParseTimeout:        s.cfg.PDFParseTimeout,
-		RenderPreviewTimeout:   s.cfg.RenderPreviewTimeout,
-		HTTPWriteTimeoutBuffer: s.cfg.HTTPWriteTimeoutBuffer,
-		Logger:                 logger,
-	})
+	routerCfg := api.NewRouterConfigFromStore(s.store)
+	routerCfg.JobNotifier = deps.workerPool
+	routerCfg.BranchService = deps.branchService
+	routerCfg.ProfileService = deps.profileService
+	routerCfg.PDFExtractor = deps.pdfExtractor
+	routerCfg.ResumeExtractor = deps.resumeExtractor
+	routerCfg.Renderer = deps.templateRenderer
+	routerCfg.Validator = deps.provValidator
+	routerCfg.PromptCompiler = deps.promptCompiler
+	routerCfg.ModelEnumerator = deps.llmRegistry
+	routerCfg.DefaultUserID = s.cfg.DefaultUserID
+	routerCfg.Admin = isLocalAdmin
+	routerCfg.AuthProvider = deps.authProvider
+	routerCfg.DailyRequestLimit = s.cfg.LLMDailyRequestLimit
+	routerCfg.MonthlyTokenLimit = s.cfg.LLMMonthlyTokenLimit
+	routerCfg.RESTTimeout = s.cfg.RESTTimeout
+	routerCfg.LLMTimeout = s.cfg.LLMTimeout
+	routerCfg.PDFParseTimeout = s.cfg.PDFParseTimeout
+	routerCfg.RenderPreviewTimeout = s.cfg.RenderPreviewTimeout
+	routerCfg.HTTPWriteTimeoutBuffer = s.cfg.HTTPWriteTimeoutBuffer
+	routerCfg.Logger = logger
+
+	apiRouter := api.NewRouter(routerCfg)
 
 	if !s.mcpEnabled {
 		return BuildRootHandler(apiRouter, nil)
@@ -420,7 +403,6 @@ func (s *Server) buildHTTPHandler(deps *serverDeps, logger *slog.Logger) http.Ha
 		PresetStore:           s.store.Presets(),
 		UserStore:             s.store.Users(),
 		ResumeExtractor:       deps.resumeExtractor,
-		JobEnqueuer:           deps.workerPool,
 		DefaultUserID:         s.cfg.DefaultUserID,
 		Admin:                 isLocalAdmin,
 		AuthProvider:          deps.authProvider,
