@@ -15,7 +15,7 @@ import (
 	"github.com/resumeee-app/core/memory"
 	"github.com/resumeee-app/core/provenance"
 	"github.com/resumeee-app/core/renderer"
-	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/server/internal/api"
 )
 
 func TestBranchPreview_DynamicTemplateRendering(t *testing.T) {

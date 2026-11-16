@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/internal/access"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/internal/access"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // Standard OpenAPI error codes.

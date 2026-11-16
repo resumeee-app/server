@@ -1,4 +1,4 @@
-module github.com/resumeee-app/resumeee-api
+module github.com/resumeee-app/server
 
 go 1.27.2
 

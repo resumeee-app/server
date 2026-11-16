@@ -10,7 +10,7 @@ import (
 
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/renderer"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // templateHandler serves resume template set CRUD and preview rendering endpoints.

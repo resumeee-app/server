@@ -24,8 +24,8 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/api"
 )
 
 type testEnv struct {

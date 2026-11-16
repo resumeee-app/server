@@ -156,7 +156,7 @@ func TestCheckImportBoundaryViolations(t *testing.T) {
 		},
 		{
 			name:      "allows core and auth imports",
-			src:       "package server\nimport (\n\t\"github.com/resumeee-app/core\"\n\t\"github.com/resumeee-app/resumeee-api/auth\"\n)\n",
+			src:       "package server\nimport (\n\t\"github.com/resumeee-app/core\"\n\t\"github.com/resumeee-app/server/auth\"\n)\n",
 			rule:      "storage/ORM",
 			forbidden: forbiddenStoragePrefixes,
 			wantCount: 0,

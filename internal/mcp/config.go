@@ -9,8 +9,8 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/seed"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // contextKey defines a private string type used for context value keys in the mcp package.

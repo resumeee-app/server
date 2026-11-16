@@ -21,10 +21,10 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
-	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
+	resumeeeMCP "github.com/resumeee-app/server/internal/mcp"
 )
 
 // StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.

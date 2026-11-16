@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // responseWriterRecorder wraps http.ResponseWriter to record the HTTP status code written by downstream handlers.

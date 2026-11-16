@@ -14,7 +14,7 @@ import (
 	core "github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/llm"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // PDF ingestion size, token quota, and retry defaults.

@@ -6,7 +6,7 @@ import (
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/seed"
 	"github.com/resumeee-app/core/store"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // ProfileStore defines tenant profile persistence operations required by MCP handlers and tenant provisioning.

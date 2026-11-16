@@ -20,7 +20,7 @@ import (
 	"github.com/resumeee-app/core/branch"
 	"github.com/resumeee-app/core/memory"
 	"github.com/resumeee-app/core/profile"
-	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/server/auth"
 )
 
 type mockTokenVerifier struct {

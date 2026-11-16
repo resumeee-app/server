@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/server/auth"
 )
 
 type stubVerifier struct {

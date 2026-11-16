@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // QuotaResponse describes the tenant's current quota status, usage, limits, and reset window timestamps.

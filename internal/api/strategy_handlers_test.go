@@ -12,7 +12,7 @@ import (
 
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/memory"
-	"github.com/resumeee-app/resumeee-api/internal/api"
+	"github.com/resumeee-app/server/internal/api"
 )
 
 func setupStrategyTestServer(t *testing.T) (*httptest.Server, *strategyTestStores) {

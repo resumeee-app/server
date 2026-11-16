@@ -12,8 +12,8 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // connectionLimiter manages active SSE stream concurrency limits per user and across the system.

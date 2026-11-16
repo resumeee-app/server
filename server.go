@@ -23,10 +23,10 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-api/internal/config"
-	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/api"
+	"github.com/resumeee-app/server/internal/config"
+	resumeeeMCP "github.com/resumeee-app/server/internal/mcp"
 )
 
 // httpMaxHeaderBytes caps incoming HTTP request header bytes at 1 MiB.
