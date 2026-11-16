@@ -290,7 +290,7 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithStore injects a configured *store.Store (e.g., from resumeee-storage-sql or core/memory).
+// WithStore injects a configured *store.Store (e.g., from sql or core/memory).
 func WithStore(st *store.Store) Option {
 	return func(s *Server) error {
 		if st == nil {

@@ -7,7 +7,7 @@ require (
 	github.com/mark3labs/mcp-go v1.5.0
 	github.com/resumeee-app/core v0.0.0-20261116055334-268b7be87011
 	github.com/resumeee-app/resumeee-auth-firebase v0.0.0-20261116055412-929932082ebc
-	github.com/resumeee-app/resumeee-storage-sql v0.0.0-20261116055412-85999a821749
+	github.com/resumeee-app/sql v0.0.0-20261116061314-f526b63092a4
 )
 
 require (

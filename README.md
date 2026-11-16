@@ -4,7 +4,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 ## Overview
 
-`server` is a thin transport and dependency-injection layer built on top of `core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
+`server` is a thin transport and dependency-injection layer built on top of `core`, `sql`, and `resumeee-auth-firebase`:
 
 - `./` (`package server`) — Public Go package (`github.com/resumeee-app/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
 - `auth/` — Public Go package (`github.com/resumeee-app/server/auth`) providing request authentication providers and multi-scheme registry resolution.
@@ -36,14 +36,14 @@ import (
 	"github.com/resumeee-app/server"
 	auth "github.com/resumeee-app/resumeee-auth-firebase"
 	"github.com/resumeee-app/core/llm/gemini"
-	"github.com/resumeee-app/resumeee-storage-sql/sql"
+	"github.com/resumeee-app/sql"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Configure storage in resumeee-storage-sql
+	// 1. Configure storage in sql
 	store, err := sql.OpenWithOptions(ctx,
 		sql.WithDriver("sqlite"),
 		sql.WithDBPath("resumeee.db"),
@@ -120,7 +120,7 @@ See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PA
 ```bash
 docker build \
   --build-context core=../core \
-  --build-context resumeee-storage-sql=../resumeee-storage-sql \
+  --build-context sql=../sql \
   --build-context resumeee-auth-firebase=../resumeee-auth-firebase \
   -t server .
 ```
