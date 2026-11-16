@@ -14,10 +14,10 @@ import (
 	"syscall"
 
 	"github.com/resumeee-app/core/store"
-	"github.com/resumeee-app/resumeee-api"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
+	"github.com/resumeee-app/server"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // StoreInitializer initializes a storage backend and returns a configured *store.Store.

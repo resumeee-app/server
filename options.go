@@ -15,8 +15,8 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 // TemplateRenderer defines the template rendering and validation contract required by Server.

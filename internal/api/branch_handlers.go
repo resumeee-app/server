@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/auth"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // branchHandler serves resume branch CRUD, synchronization, generation, and preview endpoints.

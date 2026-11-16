@@ -8,7 +8,7 @@ import (
 
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/renderer"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // RenderPreviewRequest specifies the target template set for an ephemeral branch version preview render.

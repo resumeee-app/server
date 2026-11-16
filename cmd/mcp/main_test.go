@@ -14,7 +14,7 @@ import (
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/memory"
 	"github.com/resumeee-app/core/store"
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 func TestCLI_Run_StdioHandshake(t *testing.T) {

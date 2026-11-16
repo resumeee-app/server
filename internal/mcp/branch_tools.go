@@ -12,7 +12,7 @@ import (
 
 	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/core/renderer"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // tailorResumePayload serializes the asynchronous tailoring initiation response returned by tailor_resume.

@@ -10,7 +10,7 @@ import (
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // jsonResourceContents serializes any data structure into indented JSON text resource contents.

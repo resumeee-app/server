@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resumeee-app/resumeee-api/internal/config"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 func TestLoadDefaults(t *testing.T) {

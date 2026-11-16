@@ -25,10 +25,10 @@ import (
 	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/core/store"
 	"github.com/resumeee-app/core/worker"
-	"github.com/resumeee-app/resumeee-api"
-	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-api/internal/config"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
+	"github.com/resumeee-app/server"
+	"github.com/resumeee-app/server/internal/api"
+	"github.com/resumeee-app/server/internal/config"
 )
 
 func freePort(t *testing.T) string {

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 type stubTemplateStore struct {

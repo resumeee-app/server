@@ -1,13 +1,13 @@
-# resumeee-api
+# server
 
-REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/resumeee-app/resumeee-api`).
+REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/resumeee-app/server`).
 
 ## Overview
 
-`resumeee-api` is a thin transport and dependency-injection layer built on top of `core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
+`server` is a thin transport and dependency-injection layer built on top of `core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
 
-- `./` (`package server`) — Public Go package (`github.com/resumeee-app/resumeee-api`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
-- `auth/` — Public Go package (`github.com/resumeee-app/resumeee-api/auth`) providing request authentication providers and multi-scheme registry resolution.
+- `./` (`package server`) — Public Go package (`github.com/resumeee-app/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
+- `auth/` — Public Go package (`github.com/resumeee-app/server/auth`) providing request authentication providers and multi-scheme registry resolution.
 - `cmd/server/` — Default unified HTTP server binary serving REST `/api/v1/*` and MCP `/mcp/sse` + `/mcp/messages` endpoints.
 - `cmd/mcp/` — Standalone MCP CLI binary supporting `stdio` transport for desktop AI assistants (Claude Desktop, Cursor, Antigravity).
 - `openapi/` — OpenAPI 3.1 contract (`openapi/openapi.yaml`) and repository-wide guardrail tests (`godoc_test.go`, `gofmt_test.go`, `import_boundary_test.go`, `interface_assertion_test.go`, `openapi_test.go`).
@@ -20,7 +20,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 ## Programmatic Usage (`server` Package)
 
-External callers configure storage, authentication, and LLM providers in their respective packages and inject them into `github.com/resumeee-app/resumeee-api` (`package server`):
+External callers configure storage, authentication, and LLM providers in their respective packages and inject them into `github.com/resumeee-app/server` (`package server`):
 
 ```go
 package main
@@ -33,7 +33,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/resumeee-app/resumeee-api"
+	"github.com/resumeee-app/server"
 	auth "github.com/resumeee-app/resumeee-auth-firebase"
 	"github.com/resumeee-app/core/llm/gemini"
 	"github.com/resumeee-app/resumeee-storage-sql/sql"
@@ -63,7 +63,7 @@ func main() {
 		gemini.WithDefaultModel("gemini-2.5-flash"),
 	)
 
-	// 4. Inject configured dependencies into resumeee-api (package server)
+	// 4. Inject configured dependencies into server
 	err = server.Run(ctx,
 		server.WithStore(store),
 		server.WithAuthProvider(authProvider),
@@ -119,10 +119,10 @@ See [`.env.example`](./.env.example) for configuration variables (`PORT`, `DB_PA
 
 ```bash
 docker build \
-  --build-context resumeee-core=../resumeee-core \
+  --build-context core=../core \
   --build-context resumeee-storage-sql=../resumeee-storage-sql \
   --build-context resumeee-auth-firebase=../resumeee-auth-firebase \
-  -t resumeee-api .
+  -t server .
 ```
 
 ---

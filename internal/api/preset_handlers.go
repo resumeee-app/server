@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/resumeee-app/core"
-	"github.com/resumeee-app/resumeee-api/internal/access"
+	"github.com/resumeee-app/server/internal/access"
 )
 
 // presetHandler serves tailoring strategy preset CRUD endpoints.

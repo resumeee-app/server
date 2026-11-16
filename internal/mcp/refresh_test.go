@@ -21,7 +21,7 @@ import (
 	"github.com/resumeee-app/core/memory"
 	"github.com/resumeee-app/core/provenance"
 	"github.com/resumeee-app/core/renderer"
-	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
+	resumeeeMCP "github.com/resumeee-app/server/internal/mcp"
 )
 
 func toolReq(name string, args map[string]any) mcpSDK.CallToolRequest {

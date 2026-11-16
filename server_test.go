@@ -20,7 +20,7 @@ import (
 	"github.com/resumeee-app/core/memory"
 	"github.com/resumeee-app/core/provenance"
 	"github.com/resumeee-app/core/renderer"
-	"github.com/resumeee-app/resumeee-api/auth"
+	"github.com/resumeee-app/server/auth"
 )
 
 func freePort(t *testing.T) int {
