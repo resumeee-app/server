@@ -6,6 +6,7 @@ import (
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/profile"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 )
 
@@ -144,3 +145,15 @@ type UserStore interface {
 	// UpsertUser creates or updates a user record.
 	UpsertUser(ctx context.Context, user *core.User) error
 }
+
+// Compile-time assertions verify core sub-store implementations satisfy API consumer store contracts.
+var (
+	_ ProfileStore  = (*store.Profiles)(nil)
+	_ CareerStore   = (*store.Career)(nil)
+	_ PresetStore   = (*store.Presets)(nil)
+	_ TemplateStore = (*store.Templates)(nil)
+	_ BranchStore   = (*store.Branches)(nil)
+	_ JobStore      = (*store.Jobs)(nil)
+	_ QuotaStore    = (*store.Quotas)(nil)
+	_ UserStore     = (*store.Users)(nil)
+)

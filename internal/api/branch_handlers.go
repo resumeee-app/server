@@ -259,16 +259,16 @@ func (h *branchHandler) updateBranch(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateBranchReferences verifies multi-tenant authorization for optional template set and tailoring preset IDs.
-func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.ResponseWriter, userID, templateSetID string, strategyID *string) bool {
+func (h *branchHandler) validateBranchReferences(ctx context.Context, w http.ResponseWriter, userID, templateSetID string, presetID *string) bool {
 	if templateSetID != "" {
 		if _, err := access.Template(ctx, h.cfg.TemplateStore, userID, templateSetID); err != nil {
 			writeAccessError(w, err, "cannot access foreign or nonexistent template")
 			return false
 		}
 	}
-	if strategyID != nil && *strategyID != "" {
-		if _, err := access.Preset(ctx, h.cfg.PresetStore, userID, h.cfg.DefaultUserID, *strategyID); err != nil {
-			writeAccessError(w, err, "cannot access foreign or nonexistent tailoring strategy")
+	if presetID != nil && *presetID != "" {
+		if _, err := access.Preset(ctx, h.cfg.PresetStore, userID, h.cfg.DefaultUserID, *presetID); err != nil {
+			writeAccessError(w, err, "cannot access foreign or nonexistent preset")
 			return false
 		}
 	}

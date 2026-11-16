@@ -195,5 +195,66 @@ func TestPresetCRUD_CustomPreset(t *testing.T) {
 		if updated.Description != newDesc {
 			t.Errorf("expected description %q, got %q", newDesc, updated.Description)
 		}
+
+		// Clear suggested_theme_id by passing empty string, matching MCP semantics.
+		emptyTheme := ""
+		clearBody, err := json.Marshal(api.UpdatePresetRequest{
+			SuggestedThemeID: &emptyTheme,
+		})
+		if err != nil {
+			t.Fatalf("failed to marshal clear request: %v", err)
+		}
+		clearReq, err := http.NewRequest(http.MethodPut, baseURL+"/api/v1/presets/"+created.ID, bytes.NewReader(clearBody))
+		if err != nil {
+			t.Fatalf("failed to create clear request: %v", err)
+		}
+		clearReq.Header.Set("Content-Type", "application/json")
+		clearResp, err := client.Do(clearReq)
+		if err != nil {
+			t.Fatalf("clear request failed: %v", err)
+		}
+		defer func() { _ = clearResp.Body.Close() }()
+		if clearResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK clearing suggested_theme_id, got %d", clearResp.StatusCode)
+		}
+		var cleared core.Preset
+		if err := json.NewDecoder(clearResp.Body).Decode(&cleared); err != nil {
+			t.Fatalf("failed to decode cleared preset: %v", err)
+		}
+		if cleared.SuggestedThemeID != nil {
+			t.Errorf("expected suggested_theme_id nil after empty update, got %q", *cleared.SuggestedThemeID)
+		}
+	})
+
+	t.Run("create custom preset normalizes empty suggested_theme_id to nil", func(t *testing.T) {
+		emptyTheme := "   "
+		body, err := json.Marshal(api.CreatePresetRequest{
+			Name:               "Minimal Custom Preset",
+			SystemInstructions: "Keep output concise.",
+			SuggestedThemeID:   &emptyTheme,
+		})
+		if err != nil {
+			t.Fatalf("failed to marshal request: %v", err)
+		}
+		req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/presets", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d", resp.StatusCode)
+		}
+		var created core.Preset
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode created preset: %v", err)
+		}
+		if created.SuggestedThemeID != nil {
+			t.Errorf("expected suggested_theme_id nil on empty create input, got %q", *created.SuggestedThemeID)
+		}
 	})
 }
