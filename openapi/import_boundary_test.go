@@ -52,7 +52,7 @@ var forbiddenStoragePrefixes = []string{
 	"github.com/lib/pq",
 	"github.com/jackc/pgx",
 	"github.com/go-sql-driver/mysql",
-	"github.com/resumeee-app/resumeee-storage-sql",
+	"github.com/resumeee-app/sql",
 }
 
 // TestImportBoundaries enforces architectural dependency separation across all Go files (including tests):
@@ -123,12 +123,12 @@ func TestCheckImportBoundaryViolations(t *testing.T) {
 			wantContains: "gorm.io/gorm",
 		},
 		{
-			name:         "flags resumeee-storage-sql subpackage import",
-			src:          "package server\nimport _ \"github.com/resumeee-app/resumeee-storage-sql/sql\"\n",
+			name:         "flags sql storage import",
+			src:          "package server\nimport _ \"github.com/resumeee-app/sql\"\n",
 			rule:         "storage/ORM",
 			forbidden:    forbiddenStoragePrefixes,
 			wantCount:    1,
-			wantContains: "resumeee-storage-sql/sql",
+			wantContains: "github.com/resumeee-app/sql",
 		},
 		{
 			name:         "flags direct database/sql import",
