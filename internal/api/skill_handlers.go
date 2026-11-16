@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/internal/access"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 // CreateSkillRequest defines the JSON payload for creating a custom skill in the candidate profile.

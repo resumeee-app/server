@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // Provider identifier constants.

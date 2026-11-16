@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/core"
 )
 
 // StoreUnavailableError indicates a required domain store was omitted from handler configuration.

@@ -4,7 +4,7 @@ REST API and Model Context Protocol (MCP) server for **Resumeee** (`github.com/r
 
 ## Overview
 
-`resumeee-api` is a thin transport and dependency-injection layer built on top of `resumeee-core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
+`resumeee-api` is a thin transport and dependency-injection layer built on top of `core`, `resumeee-storage-sql`, and `resumeee-auth-firebase`:
 
 - `server/` — Public Go package (`github.com/resumeee-app/resumeee-api/server`) for embedding, configuring, and launching customized Resumeee servers with functional `With<Option>` constructors.
 - `auth/` — Public Go package (`github.com/resumeee-app/resumeee-api/auth`) providing request authentication providers and multi-scheme registry resolution.
@@ -35,7 +35,7 @@ import (
 
 	"github.com/resumeee-app/resumeee-api/server"
 	auth "github.com/resumeee-app/resumeee-auth-firebase"
-	"github.com/resumeee-app/resumeee-core/llm/gemini"
+	"github.com/resumeee-app/core/llm/gemini"
 	"github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
@@ -57,7 +57,7 @@ func main() {
 	// 2. Configure authentication in resumeee-auth-firebase
 	authProvider := auth.NewFirebaseTokenVerifier("my-firebase-project")
 
-	// 3. Configure LLM provider(s) in resumeee-core/llm
+	// 3. Configure LLM provider(s) in core/llm
 	geminiClient := gemini.New(
 		os.Getenv("GEMINI_API_KEY"),
 		gemini.WithDefaultModel("gemini-2.5-flash"),

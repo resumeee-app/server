@@ -10,35 +10,35 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /workspace
 
 # Copy Go module manifests from all local workspace modules for layer caching
-COPY --from=resumeee-core go.mod go.sum ./resumeee-core/
+COPY --from=core go.mod go.sum ./core/
 COPY --from=resumeee-storage-sql go.mod go.sum ./resumeee-storage-sql/
 COPY --from=resumeee-auth-firebase go.mod go.sum ./resumeee-auth-firebase/
 COPY go.mod go.sum ./resumeee-api/
 
 # Point inter-module dependencies to local workspace paths before downloading public modules
 RUN go -C ./resumeee-storage-sql mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+        -replace github.com/resumeee-app/core=../core && \
     go -C ./resumeee-auth-firebase mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+        -replace github.com/resumeee-app/core=../core && \
     go -C ./resumeee-api mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core \
+        -replace github.com/resumeee-app/core=../core \
         -replace github.com/resumeee-app/resumeee-storage-sql=../resumeee-storage-sql \
         -replace github.com/resumeee-app/resumeee-auth-firebase=../resumeee-auth-firebase && \
     go -C ./resumeee-api mod download
 
 # Copy application and module source trees
-COPY --from=resumeee-core . ./resumeee-core/
+COPY --from=core . ./core/
 COPY --from=resumeee-storage-sql . ./resumeee-storage-sql/
 COPY --from=resumeee-auth-firebase . ./resumeee-auth-firebase/
 COPY . ./resumeee-api/
 
 # Re-apply local module replacements over copied go.mod files
 RUN go -C ./resumeee-storage-sql mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+        -replace github.com/resumeee-app/core=../core && \
     go -C ./resumeee-auth-firebase mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core && \
+        -replace github.com/resumeee-app/core=../core && \
     go -C ./resumeee-api mod edit \
-        -replace github.com/resumeee-app/resumeee-core=../resumeee-core \
+        -replace github.com/resumeee-app/core=../core \
         -replace github.com/resumeee-app/resumeee-storage-sql=../resumeee-storage-sql \
         -replace github.com/resumeee-app/resumeee-auth-firebase=../resumeee-auth-firebase
 

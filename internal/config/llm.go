@@ -3,11 +3,11 @@ package config
 import (
 	"log/slog"
 
-	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/llm/anthropic"
-	"github.com/resumeee-app/resumeee-core/llm/gemini"
-	"github.com/resumeee-app/resumeee-core/llm/openai"
-	"github.com/resumeee-app/resumeee-core/llm/openaicompat"
+	"github.com/resumeee-app/core/llm"
+	"github.com/resumeee-app/core/llm/anthropic"
+	"github.com/resumeee-app/core/llm/gemini"
+	"github.com/resumeee-app/core/llm/openai"
+	"github.com/resumeee-app/core/llm/openaicompat"
 )
 
 // RegisterLLMClients populates registry with every LLM provider client configured on c.

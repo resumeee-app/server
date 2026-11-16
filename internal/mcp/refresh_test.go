@@ -16,12 +16,12 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/branch"
+	"github.com/resumeee-app/core/memory"
+	"github.com/resumeee-app/core/provenance"
+	"github.com/resumeee-app/core/renderer"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/provenance"
-	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func toolReq(name string, args map[string]any) mcpSDK.CallToolRequest {

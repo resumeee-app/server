@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/profile"
-	"github.com/resumeee-app/resumeee-core/store"
-	"github.com/resumeee-app/resumeee-core/worker"
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/branch"
+	"github.com/resumeee-app/core/profile"
+	"github.com/resumeee-app/core/store"
+	"github.com/resumeee-app/core/worker"
 )
 
 // ProfileStore defines tenant profile persistence operations required by API handlers,

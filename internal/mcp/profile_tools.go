@@ -8,8 +8,8 @@ import (
 	mcpSDK "github.com/mark3labs/mcp-go/mcp"
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/internal/access"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 // registerProfileTools registers career profile read and mutation tools onto s.

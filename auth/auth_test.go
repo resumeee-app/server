@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resumeee-app/core"
 	"github.com/resumeee-app/resumeee-api/auth"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 type stubVerifier struct {

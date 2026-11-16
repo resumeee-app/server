@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/memory"
+	"github.com/resumeee-app/core/renderer"
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/api"
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/memory"
-	"github.com/resumeee-app/resumeee-core/renderer"
 )
 
 func TestBranch_PromptPreviewEndpoint(t *testing.T) {

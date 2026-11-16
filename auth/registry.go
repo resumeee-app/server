@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/resumeee-app/core"
 	firebase "github.com/resumeee-app/resumeee-auth-firebase"
-	"github.com/resumeee-app/resumeee-core"
 )
 
 // Config provides configuration parameters required to initialize an auth.Registry.

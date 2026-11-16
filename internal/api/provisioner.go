@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/resumeee-app/resumeee-core"
-	"github.com/resumeee-app/resumeee-core/seed"
+	"github.com/resumeee-app/core"
+	"github.com/resumeee-app/core/seed"
 )
 
 // defaultTenantProvisioner lazily seeds default tenant data on first authenticated request.

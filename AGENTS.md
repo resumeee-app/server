@@ -26,7 +26,7 @@ Idiomatic Go standards for `resumeee-api`. Run `make verify` after every change.
   - Omit `Get` on simple getters (`Config()` rather than `GetConfig()`).
   - Name constructors `New` or `New<Type>`, and sentinel errors `Err<Name>`.
   - Use a consistent 1–2 letter receiver name derived from the type across all methods (never `this` or `self`).
-- **Dependency boundaries**: Keep transport handlers decoupled from database/ORM specifics; depend on `resumeee-core` domain types and consumer-defined interfaces.
+- **Dependency boundaries**: Keep transport handlers decoupled from database/ORM specifics; depend on `core` domain types and consumer-defined interfaces.
 
 ## Verification
 

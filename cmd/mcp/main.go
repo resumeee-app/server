@@ -14,16 +14,16 @@ import (
 
 	serverSDK "github.com/mark3labs/mcp-go/server"
 
+	"github.com/resumeee-app/core/branch"
+	"github.com/resumeee-app/core/llm"
+	"github.com/resumeee-app/core/profile"
+	"github.com/resumeee-app/core/provenance"
+	"github.com/resumeee-app/core/renderer"
+	"github.com/resumeee-app/core/store"
+	"github.com/resumeee-app/core/worker"
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-core/branch"
-	"github.com/resumeee-app/resumeee-core/llm"
-	"github.com/resumeee-app/resumeee-core/profile"
-	"github.com/resumeee-app/resumeee-core/provenance"
-	"github.com/resumeee-app/resumeee-core/renderer"
-	"github.com/resumeee-app/resumeee-core/store"
-	"github.com/resumeee-app/resumeee-core/worker"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
