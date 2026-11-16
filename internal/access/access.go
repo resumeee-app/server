@@ -46,8 +46,18 @@ func IsSystemPreset(preset *core.Preset) bool {
 	return preset != nil && (preset.IsBuiltIn() || strings.HasPrefix(preset.ID, "builtin-") || preset.UserID == core.SystemUserID)
 }
 
+// TemplateReader retrieves a template set for ownership and access checks.
+type TemplateReader interface {
+	Template(ctx context.Context, userID, id string) (*core.TemplateSet, error)
+}
+
+// PresetReader retrieves a tailoring preset for ownership and access checks.
+type PresetReader interface {
+	Preset(ctx context.Context, userID, id string) (*core.Preset, error)
+}
+
 // Template resolves templateID from store and verifies tenant ownership or built-in/system visibility.
-func Template(ctx context.Context, store core.TemplateStore, userID, templateID string) (*core.TemplateSet, error) {
+func Template(ctx context.Context, store TemplateReader, userID, templateID string) (*core.TemplateSet, error) {
 	if store == nil {
 		return nil, NewStoreUnavailableError("template store unavailable")
 	}
@@ -59,7 +69,7 @@ func Template(ctx context.Context, store core.TemplateStore, userID, templateID 
 }
 
 // Preset resolves presetID from store, checking user ownership, fallback user built-in visibility, and system defaults.
-func Preset(ctx context.Context, store core.PresetStore, userID, fallbackUserID, presetID string) (*core.Preset, error) {
+func Preset(ctx context.Context, store PresetReader, userID, fallbackUserID, presetID string) (*core.Preset, error) {
 	if store == nil {
 		return nil, NewStoreUnavailableError("preset store unavailable")
 	}
