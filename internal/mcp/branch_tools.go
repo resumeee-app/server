@@ -39,12 +39,13 @@ func registerBranchTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	), withToolDeps(handleRenderResume(cfg), branchStoreDep(cfg), templateStoreDep(cfg)))
 
 	s.AddTool(mcpSDK.NewTool("create_branch",
-		mcpSDK.WithDescription("Creates a new targeted resume branch tailored for a specific company, role, tailoring strategy, and template. Presets govern target language (EffectiveLanguage) and prompt instructions."),
+		mcpSDK.WithDescription("Creates a new targeted resume branch tailored for a specific company, role, preset, and template. Presets govern target language (EffectiveLanguage) and prompt instructions."),
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the resume branch")),
 		mcpSDK.WithString("target_company", mcpSDK.Required(), mcpSDK.Description("Name of the prospective employer")),
 		mcpSDK.WithString("target_role", mcpSDK.Required(), mcpSDK.Description("Target job title")),
 		mcpSDK.WithString("target_requirements", mcpSDK.Description("Target job description requirements or posting text")),
-		mcpSDK.WithString("tailoring_strategy_id", mcpSDK.Description("Optional preset / tailoring strategy ID")),
+		mcpSDK.WithString("branch_instructions", mcpSDK.Description("Optional branch-specific custom prompt instructions")),
+		mcpSDK.WithString("preset_id", mcpSDK.Description("Optional tailoring preset ID")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional template set ID (defaults to 'builtin-standard-clean')")),
 		mcpSDK.WithString("provider_override", mcpSDK.Description("Optional AI provider override (e.g., 'gemini', 'anthropic', 'openai')")),
 		mcpSDK.WithString("model_override", mcpSDK.Description("Optional LLM model override")),
@@ -59,8 +60,8 @@ func registerBranchTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("target_company", mcpSDK.Description("Updated target company name")),
 		mcpSDK.WithString("target_role", mcpSDK.Description("Updated target role title")),
 		mcpSDK.WithString("target_requirements", mcpSDK.Description("Updated target job description requirements or posting text")),
-		mcpSDK.WithString("custom_directives", mcpSDK.Description("Updated custom candidate prompt directives")),
-		mcpSDK.WithString("tailoring_strategy_id", mcpSDK.Description("Updated preset / tailoring strategy ID")),
+		mcpSDK.WithString("branch_instructions", mcpSDK.Description("Updated branch-specific custom prompt instructions")),
+		mcpSDK.WithString("preset_id", mcpSDK.Description("Updated tailoring preset ID")),
 		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated template set ID")),
 		mcpSDK.WithString("provider_override", mcpSDK.Description("Updated LLM provider override (e.g. 'gemini', 'anthropic', 'openai')")),
 		mcpSDK.WithString("model_override", mcpSDK.Description("Updated model identifier override")),
@@ -259,7 +260,8 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		targetCompany := optionalTrimmedString(args, "target_company")
 		targetRole := optionalTrimmedString(args, "target_role")
 		targetRequirements, _ := args["target_requirements"].(string)
-		strategyID := optionalTrimmedString(args, "tailoring_strategy_id")
+		branchInstructions, _ := args["branch_instructions"].(string)
+		presetID := optionalTrimmedString(args, "preset_id")
 		templateSetID := optionalTrimmedString(args, "template_set_id")
 		providerOverride := optionalTrimmedString(args, "provider_override")
 		modelOverride := optionalTrimmedString(args, "model_override")
@@ -278,7 +280,7 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			return mcpSDK.NewToolResultError("name, target_company, and target_role are required"), nil
 		}
 
-		strategyPtr, errMsg := validateBranchPresetAccess(ctx, cfg, userID, strategyID)
+		presetPtr, errMsg := validateBranchPresetAccess(ctx, cfg, userID, presetID)
 		if errMsg != "" {
 			return mcpSDK.NewToolResultError(errMsg), nil
 		}
@@ -297,20 +299,24 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		if strings.TrimSpace(targetRequirements) != "" {
 			fencedRequirements = SanitizeXMLFence(targetRequirements, "target_job_description")
 		}
+		fencedInstructions := strings.TrimSpace(branchInstructions)
+		if fencedInstructions != "" {
+			fencedInstructions = SanitizeXMLFence(fencedInstructions, "custom_instructions")
+		}
 
 		branch := &core.Branch{
-			ID:                  "branch-" + uuid.New().String(),
-			UserID:              userID,
-			Name:                name,
-			TargetCompany:       targetCompany,
-			TargetRole:          targetRole,
-			TargetRequirements:  fencedRequirements,
-			TailoringStrategyID: strategyPtr,
-			PresetID:            strategyPtr,
-			TemplateSetID:       templateSetID,
-			ProviderOverride:    providerOverride,
-			ModelOverride:       modelOverride,
-			ReasoningLevel:      reasoningLevel,
+			ID:                 "branch-" + uuid.New().String(),
+			UserID:             userID,
+			Name:               name,
+			TargetCompany:      targetCompany,
+			TargetRole:         targetRole,
+			TargetRequirements: fencedRequirements,
+			BranchInstructions: fencedInstructions,
+			PresetID:           presetPtr,
+			TemplateSetID:      templateSetID,
+			ProviderOverride:   providerOverride,
+			ModelOverride:      modelOverride,
+			ReasoningLevel:     reasoningLevel,
 		}
 
 		createdBranch, err := cfg.BranchService.CreateBranch(ctx, branch)
@@ -327,18 +333,18 @@ func handleCreateBranch(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 	}
 }
 
-// validateBranchPresetAccess verifies that an optional tailoring strategy preset is accessible to userID.
-func validateBranchPresetAccess(ctx context.Context, cfg ServerConfig, userID, strategyID string) (*string, string) {
-	if strategyID == "" {
+// validateBranchPresetAccess verifies that an optional tailoring preset is accessible to userID.
+func validateBranchPresetAccess(ctx context.Context, cfg ServerConfig, userID, presetID string) (*string, string) {
+	if presetID == "" {
 		return nil, ""
 	}
-	if _, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, strategyID); err != nil {
+	if _, err := access.Preset(ctx, cfg.PresetStore, userID, cfg.DefaultUserID, presetID); err != nil {
 		if msg, ok := access.StoreUnavailableMessage(err); ok {
 			return nil, msg
 		}
-		return nil, fmt.Sprintf("tailoring strategy %q not found or access denied", strategyID)
+		return nil, fmt.Sprintf("preset %q not found or access denied", presetID)
 	}
-	return &strategyID, ""
+	return &presetID, ""
 }
 
 // handleUpdateBranch handles tool 'update_branch', updating an existing targeted resume branch.
@@ -402,14 +408,11 @@ func applyBranchTextUpdates(branch *core.Branch, args map[string]any) {
 			branch.TargetRequirements = ""
 		}
 	}
-	if dirs, ok := args["custom_directives"].(string); ok {
+	if dirs, ok := args["branch_instructions"].(string); ok {
 		dirs = strings.TrimSpace(dirs)
 		if dirs != "" {
-			fenced := SanitizeXMLFence(dirs, "custom_instructions")
-			branch.CustomDirectives = fenced
-			branch.BranchInstructions = fenced
+			branch.BranchInstructions = SanitizeXMLFence(dirs, "custom_instructions")
 		} else {
-			branch.CustomDirectives = ""
 			branch.BranchInstructions = ""
 		}
 	}
@@ -417,17 +420,15 @@ func applyBranchTextUpdates(branch *core.Branch, args map[string]any) {
 
 // applyBranchReferenceUpdates validates and applies preset and template set reference updates onto branch.
 func applyBranchReferenceUpdates(ctx context.Context, cfg ServerConfig, userID string, branch *core.Branch, args map[string]any) string {
-	if rawStrategy, ok := args["tailoring_strategy_id"].(string); ok {
-		strategyID := strings.TrimSpace(rawStrategy)
-		if strategyID != "" {
-			strategyPtr, errMsg := validateBranchPresetAccess(ctx, cfg, userID, strategyID)
+	if rawPreset, ok := args["preset_id"].(string); ok {
+		presetID := strings.TrimSpace(rawPreset)
+		if presetID != "" {
+			presetPtr, errMsg := validateBranchPresetAccess(ctx, cfg, userID, presetID)
 			if errMsg != "" {
 				return errMsg
 			}
-			branch.TailoringStrategyID = strategyPtr
-			branch.PresetID = strategyPtr
+			branch.PresetID = presetPtr
 		} else {
-			branch.TailoringStrategyID = nil
 			branch.PresetID = nil
 		}
 	}
@@ -500,8 +501,7 @@ func handleTailorResume(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		// Apply XML boundary fencing to untrusted client inputs before persisting and queuing tailoring.
 		branch.TargetRequirements = SanitizeXMLFence(jobDescription, "target_job_description")
 		if customInstructions != "" {
-			branch.CustomDirectives = SanitizeXMLFence(customInstructions, "custom_instructions")
-			branch.BranchInstructions = branch.CustomDirectives
+			branch.BranchInstructions = SanitizeXMLFence(customInstructions, "custom_instructions")
 		}
 
 		if errMsg := applyBranchModelUpdates(ctx, cfg, branch, args, false); errMsg != "" {

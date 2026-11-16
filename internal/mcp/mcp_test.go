@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,18 +24,15 @@ import (
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 )
 
-type dummyJobEnqueuer struct {
-	mu   sync.Mutex
-	jobs []core.GenerationJob
+type dummyJobNotifier struct {
+	calls atomic.Int32
 }
 
-func (d *dummyJobEnqueuer) Enqueue(job core.GenerationJob) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.jobs = append(d.jobs, job)
-	return nil
+func (d *dummyJobNotifier) Notify() {
+	d.calls.Add(1)
 }
 
 type dummyLLMService struct{}
@@ -88,16 +85,16 @@ type jsonRPCResponse struct {
 }
 
 type testEnv struct {
-	db               any
-	profileStore     core.ProfileStore
-	careerStore      core.CareerStore
-	branchStore      core.BranchStore
-	presetStore      core.PresetStore
-	templateStore    core.TemplateStore
+	db               *store.Store
+	profileStore     resumeeeMCP.ProfileStore
+	careerStore      resumeeeMCP.CareerStore
+	branchStore      resumeeeMCP.BranchStore
+	presetStore      resumeeeMCP.PresetStore
+	templateStore    resumeeeMCP.TemplateStore
 	profileSvc       *profile.Service
 	branchSvc        *branch.Service
 	templateRenderer renderer.TemplateRenderer
-	jobEnqueuer      *dummyJobEnqueuer
+	jobNotifier      *dummyJobNotifier
 	logger           *slog.Logger
 	cfg              resumeeeMCP.ServerConfig
 	mcpServer        *serverSDK.MCPServer
@@ -108,29 +105,31 @@ func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
 	ctx := context.Background()
-	store, err := memory.NewSeeded(ctx, "user-1")
+	st, err := memory.NewSeeded(ctx, "user-1")
 	if err != nil {
 		t.Fatalf("failed to seed store in memory: %v", err)
 	}
 
-	var profileStore core.ProfileStore = store
-	var careerStore core.CareerStore = store
-	var branchStore core.BranchStore = store
-	var presetStore core.PresetStore = store
-	var templateStore core.TemplateStore = store
+	var profileStore resumeeeMCP.ProfileStore = st.Profiles()
+	var careerStore resumeeeMCP.CareerStore = st.Career()
+	var branchStore resumeeeMCP.BranchStore = st.Branches()
+	var presetStore resumeeeMCP.PresetStore = st.Presets()
+	var templateStore resumeeeMCP.TemplateStore = st.Templates()
+	var userStore resumeeeMCP.UserStore = st.Users()
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
-	jobEnq := &dummyJobEnqueuer{}
+	jobNotifier := &dummyJobNotifier{}
 	llmSvc := &dummyLLMService{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	profileSvc := profile.New(profileStore, careerStore, branchStore)
+	profileSvc := profile.New(st.Profiles(), st.Career(), st.Branches())
 	branchSvc := branch.New(branch.Config{
-		Branches:    branchStore,
-		Profiles:    profileStore,
-		Presets:     presetStore,
-		Templates:   templateStore,
-		JobEnqueuer: jobEnq,
+		Branches:    st.Branches(),
+		Jobs:        st.Jobs(),
+		Profiles:    st.Profiles(),
+		Presets:     st.Presets(),
+		Templates:   st.Templates(),
+		JobNotifier: jobNotifier,
 		Validator:   provValidator,
 		Renderer:    templateRenderer,
 		Generator:   llmSvc,
@@ -146,7 +145,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 		BranchStore:           branchStore,
 		TemplateStore:         templateStore,
 		PresetStore:           presetStore,
-		JobEnqueuer:           jobEnq,
+		UserStore:             userStore,
 		DefaultUserID:         "user-1",
 		Logger:                logger,
 		RESTTimeout:           5 * time.Second,
@@ -163,16 +162,16 @@ func setupTestEnv(t *testing.T) *testEnv {
 	httpHandler := resumeeeMCP.NewHTTPHandler(mcpServer, cfg)
 
 	return &testEnv{
-		db:               store,
+		db:               st,
 		profileStore:     profileStore,
-		careerStore:      store,
+		careerStore:      careerStore,
 		branchStore:      branchStore,
 		presetStore:      presetStore,
 		templateStore:    templateStore,
 		profileSvc:       profileSvc,
 		branchSvc:        branchSvc,
 		templateRenderer: templateRenderer,
-		jobEnqueuer:      jobEnq,
+		jobNotifier:      jobNotifier,
 		logger:           logger,
 		cfg:              cfg,
 		mcpServer:        mcpServer,
@@ -335,7 +334,7 @@ func TestTool_AddExperience(t *testing.T) {
 		}
 
 		// Verify in store
-		exps, err := env.careerStore.ListExperiences(ctx, "user-1")
+		exps, err := env.db.Career().ListExperiences(ctx, "user-1")
 		if err != nil || len(exps) == 0 {
 			t.Fatalf("expected experience to be in store, err: %v", err)
 		}
@@ -441,7 +440,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", result)
 		}
 
-		facts, err := env.careerStore.ListFactsByOwner(ctx, "user-1", "work_experience", "exp-123")
+		facts, err := env.db.Career().ListFactsByOwner(ctx, "user-1", "work_experience", "exp-123")
 		if err != nil || len(facts) == 0 {
 			t.Fatalf("expected fact to be stored, err: %v", err)
 		}
@@ -482,7 +481,7 @@ func TestTool_AddAchievementBullet(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", result)
 		}
 
-		facts, err := env.careerStore.ListFactsByOwner(ctx, "user-1", "work_experience", "exp-canon-1")
+		facts, err := env.db.Career().ListFactsByOwner(ctx, "user-1", "work_experience", "exp-canon-1")
 		if err != nil || len(facts) != 1 {
 			t.Fatalf("expected 1 fact under canonical owner exp-canon-1, got %d (err: %v)", len(facts), err)
 		}
@@ -553,16 +552,17 @@ func TestTool_CreateBranch(t *testing.T) {
 		}
 	})
 
-	t.Run("valid branch creation with built-in template and strategy", func(t *testing.T) {
+	t.Run("valid branch creation with built-in template and preset", func(t *testing.T) {
 		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
 				Arguments: map[string]any{
-					"name":                  "Google Staff SRE",
-					"target_company":        "Google",
-					"target_role":           "Staff SRE",
-					"target_requirements":   "Kubernetes, Go, High Reliability",
-					"tailoring_strategy_id": "builtin-1-page-tech-resume",
-					"template_set_id":       "builtin-standard-clean",
+					"name":                "Google Staff SRE",
+					"target_company":      "Google",
+					"target_role":         "Staff SRE",
+					"target_requirements": "Kubernetes, Go, High Reliability",
+					"branch_instructions": "Emphasize reliability metrics.",
+					"preset_id":           "builtin-1-page-tech-resume",
+					"template_set_id":     "builtin-standard-clean",
 				},
 			},
 		})
@@ -595,8 +595,12 @@ func TestTool_CreateBranch(t *testing.T) {
 			!strings.Contains(created.TargetRequirements, "Kubernetes, Go, High Reliability") {
 			t.Errorf("expected XML boundary fenced target requirements, got %q", created.TargetRequirements)
 		}
-		if created.TailoringStrategyID == nil || *created.TailoringStrategyID != "builtin-1-page-tech-resume" {
-			t.Errorf("expected tailoring strategy 'builtin-1-page-tech-resume', got %+v", created.TailoringStrategyID)
+		if !strings.Contains(created.BranchInstructions, "<custom_instructions>") ||
+			!strings.Contains(created.BranchInstructions, "Emphasize reliability metrics.") {
+			t.Errorf("expected XML boundary fenced branch instructions, got %q", created.BranchInstructions)
+		}
+		if created.PresetID == nil || *created.PresetID != "builtin-1-page-tech-resume" {
+			t.Errorf("expected preset_id 'builtin-1-page-tech-resume', got %+v", created.PresetID)
 		}
 		if created.TemplateSetID != "builtin-standard-clean" {
 			t.Errorf("expected template set 'builtin-standard-clean', got %q", created.TemplateSetID)
@@ -646,15 +650,15 @@ func TestTool_CreateBranch(t *testing.T) {
 		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
 				Arguments: map[string]any{
-					"name":                  "Anthropic AI Engineer",
-					"target_company":        "Anthropic",
-					"target_role":           "AI Engineer",
-					"target_requirements":   "LLMs, Prompt Engineering, Python",
-					"tailoring_strategy_id": "builtin-1-page-tech-resume",
-					"template_set_id":       "builtin-standard-clean",
-					"provider_override":     "anthropic",
-					"model_override":        "claude-3-7-sonnet",
-					"reasoning_level":       "high",
+					"name":                "Anthropic AI Engineer",
+					"target_company":      "Anthropic",
+					"target_role":         "AI Engineer",
+					"target_requirements": "LLMs, Prompt Engineering, Python",
+					"preset_id":           "builtin-1-page-tech-resume",
+					"template_set_id":     "builtin-standard-clean",
+					"provider_override":   "anthropic",
+					"model_override":      "claude-3-7-sonnet",
+					"reasoning_level":     "high",
 				},
 			},
 		})
@@ -817,15 +821,16 @@ func TestTool_UpdateBranch(t *testing.T) {
 		result, err := tool.Handler(adminCtx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
 				Arguments: map[string]any{
-					"id":                    "br-update-1",
-					"name":                  "Google Staff Site Reliability Engineer",
-					"target_company":        "Google",
-					"target_role":           "Staff SRE",
-					"target_requirements":   "Distributed Systems, Go, SRE",
-					"provider_override":     "gemini",
-					"model_override":        "gemini-2.5-pro",
-					"reasoning_level":       "medium",
-					"tailoring_strategy_id": "builtin-1-page-tech-resume",
+					"id":                  "br-update-1",
+					"name":                "Google Staff Site Reliability Engineer",
+					"target_company":      "Google",
+					"target_role":         "Staff SRE",
+					"target_requirements": "Distributed Systems, Go, SRE",
+					"branch_instructions": "Highlight incident response.",
+					"provider_override":   "gemini",
+					"model_override":      "gemini-2.5-pro",
+					"reasoning_level":     "medium",
+					"preset_id":           "builtin-1-page-tech-resume",
 				},
 			},
 		})
@@ -853,6 +858,13 @@ func TestTool_UpdateBranch(t *testing.T) {
 		}
 		if updated.ReasoningLevel != "medium" {
 			t.Errorf("expected reasoning_level 'medium', got %q", updated.ReasoningLevel)
+		}
+		if updated.PresetID == nil || *updated.PresetID != "builtin-1-page-tech-resume" {
+			t.Errorf("expected preset_id 'builtin-1-page-tech-resume', got %+v", updated.PresetID)
+		}
+		if !strings.Contains(updated.BranchInstructions, "<custom_instructions>") ||
+			!strings.Contains(updated.BranchInstructions, "Highlight incident response.") {
+			t.Errorf("expected fenced branch_instructions, got %q", updated.BranchInstructions)
 		}
 
 		saved, err := env.branchStore.Branch(ctx, "user-1", "br-update-1")
@@ -923,9 +935,9 @@ func TestTool_TailorResume_XMLPromptFencing(t *testing.T) {
 	}
 
 	// Verify custom instructions fencing
-	if !strings.HasPrefix(updatedBranch.CustomDirectives, "<custom_instructions>") ||
-		!strings.HasSuffix(strings.TrimSpace(updatedBranch.CustomDirectives), "</custom_instructions>") {
-		t.Errorf("expected XML boundary fencing on CustomDirectives, got: %s", updatedBranch.CustomDirectives)
+	if !strings.HasPrefix(updatedBranch.BranchInstructions, "<custom_instructions>") ||
+		!strings.HasSuffix(strings.TrimSpace(updatedBranch.BranchInstructions), "</custom_instructions>") {
+		t.Errorf("expected XML boundary fencing on BranchInstructions, got: %s", updatedBranch.BranchInstructions)
 	}
 
 	t.Run("tailor resume rejects non-admin model selection overrides", func(t *testing.T) {
@@ -1049,11 +1061,9 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 		CreatedAt:         now,
 		CompletedAt:       &now,
 	}
-	if err := env.branchStore.CreateVersion(ctx, ver); err != nil {
+	if err := env.branchStore.SaveCompletedVersion(ctx, ver); err != nil {
 		t.Fatalf("failed to create version: %v", err)
 	}
-	b.ActiveVersionID = &ver.ID
-	_ = env.branchStore.UpdateBranch(ctx, b)
 
 	tool := env.mcpServer.GetTool("render_resume")
 	if tool == nil {
@@ -1129,7 +1139,9 @@ func TestTool_RenderResume_ScriptTagStripping(t *testing.T) {
 
 	t.Run("Standalone unclosed script tag is stripped", func(t *testing.T) {
 		ver.HTMLOutput = `<div class="resume"><h1>John Doe</h1><script src="evil.js"><p>Engineer</p></div>`
-		_ = env.branchStore.CompleteVersion(ctx, ver)
+		if err := env.branchStore.SaveCompletedVersion(ctx, ver); err != nil {
+			t.Fatalf("SaveCompletedVersion failed: %v", err)
+		}
 
 		result, err := tool.Handler(ctx, mcpSDK.CallToolRequest{
 			Params: mcpSDK.CallToolParams{
@@ -1924,11 +1936,8 @@ func TestTools_SimulateATS(t *testing.T) {
 		Status:           core.VersionStatusCompleted,
 		MarkdownOutput:   "# Candidate\n## Summary\nCloud Engineer experienced in Go, Kubernetes, and AWS.",
 	}
-	if err := env.branchStore.CreateVersion(ctx, v1); err != nil {
-		t.Fatalf("CreateVersion failed: %v", err)
-	}
-	if err := env.branchStore.CompleteVersion(ctx, v1); err != nil {
-		t.Fatalf("CompleteVersion failed: %v", err)
+	if err := env.branchStore.SaveCompletedVersion(ctx, v1); err != nil {
+		t.Fatalf("SaveCompletedVersion failed: %v", err)
 	}
 
 	tool := env.mcpServer.GetTool("simulate_ats")

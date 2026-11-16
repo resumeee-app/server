@@ -30,8 +30,7 @@ func registerPresetTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("name", mcpSDK.Required(), mcpSDK.Description("Descriptive name for the preset")),
 		mcpSDK.WithString("system_instructions", mcpSDK.Required(), mcpSDK.Description("Core system instructions and tailoring prompt strategy guidelines")),
 		mcpSDK.WithString("description", mcpSDK.Description("Optional human-readable description of the preset purpose")),
-		mcpSDK.WithString("template_set_id", mcpSDK.Description("Optional default template set ID to suggest with this preset")),
-		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
+		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Optional suggested visual theme / template set ID")),
 		mcpSDK.WithString("language", mcpSDK.Description("Target output language for contextual translation (e.g. 'English', 'Spanish', 'French'). Defaults to 'English'. RTL languages are rejected.")),
 	), withToolDeps(handleCreatePreset(cfg), presetStoreDep(cfg)))
 
@@ -41,8 +40,7 @@ func registerPresetTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 		mcpSDK.WithString("name", mcpSDK.Description("Updated descriptive name")),
 		mcpSDK.WithString("description", mcpSDK.Description("Updated description")),
 		mcpSDK.WithString("system_instructions", mcpSDK.Description("Updated system instructions")),
-		mcpSDK.WithString("template_set_id", mcpSDK.Description("Updated default template set ID")),
-		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Alias for template_set_id")),
+		mcpSDK.WithString("suggested_theme_id", mcpSDK.Description("Updated suggested visual theme / template set ID")),
 		mcpSDK.WithString("language", mcpSDK.Description("Updated target output language (validated, RTL languages rejected)")),
 	), withToolDeps(handleUpdatePreset(cfg), presetStoreDep(cfg)))
 
@@ -125,13 +123,13 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		desc, _ := args["description"].(string)
-		templateSetID := optionalTrimmedString(args, "template_set_id", "suggested_theme_id")
-		if templateSetID != "" {
-			if _, err := access.Template(ctx, cfg.TemplateStore, userID, templateSetID); err != nil {
+		suggestedThemeID := optionalTrimmedString(args, "suggested_theme_id")
+		if suggestedThemeID != "" {
+			if _, err := access.Template(ctx, cfg.TemplateStore, userID, suggestedThemeID); err != nil {
 				if msg, ok := access.StoreUnavailableMessage(err); ok {
 					return mcpSDK.NewToolResultError(msg), nil
 				}
-				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", templateSetID)), nil
+				return mcpSDK.NewToolResultError(fmt.Sprintf("cannot access foreign or nonexistent template %q", suggestedThemeID)), nil
 			}
 		}
 
@@ -142,8 +140,8 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 		}
 
 		var suggestedTheme *string
-		if templateSetID != "" {
-			suggestedTheme = &templateSetID
+		if suggestedThemeID != "" {
+			suggestedTheme = &suggestedThemeID
 		}
 
 		preset := core.Preset{
@@ -153,7 +151,6 @@ func handleCreatePreset(cfg ServerConfig) serverSDK.ToolHandlerFunc {
 			Description:        desc,
 			SystemInstructions: instructions,
 			SuggestedThemeID:   suggestedTheme,
-			TemplateSetID:      templateSetID,
 			Language:           validatedLang,
 		}
 
@@ -214,15 +211,19 @@ func applyPresetUpdates(ctx context.Context, cfg ServerConfig, userID string, pr
 	if sys, ok := args["system_instructions"].(string); ok && strings.TrimSpace(sys) != "" {
 		preset.SystemInstructions = strings.TrimSpace(sys)
 	}
-	if rawTemplateID := optionalTrimmedString(args, "template_set_id", "suggested_theme_id"); rawTemplateID != "" {
-		if _, err := access.Template(ctx, cfg.TemplateStore, userID, rawTemplateID); err != nil {
-			if msg, ok := access.StoreUnavailableMessage(err); ok {
-				return msg
+	if rawThemeID, ok := args["suggested_theme_id"].(string); ok {
+		themeID := strings.TrimSpace(rawThemeID)
+		if themeID == "" {
+			preset.SuggestedThemeID = nil
+		} else {
+			if _, err := access.Template(ctx, cfg.TemplateStore, userID, themeID); err != nil {
+				if msg, ok := access.StoreUnavailableMessage(err); ok {
+					return msg
+				}
+				return fmt.Sprintf("cannot access foreign or nonexistent template %q", themeID)
 			}
-			return fmt.Sprintf("cannot access foreign or nonexistent template %q", rawTemplateID)
+			preset.SuggestedThemeID = &themeID
 		}
-		preset.TemplateSetID = rawTemplateID
-		preset.SuggestedThemeID = &rawTemplateID
 	}
 	if langRaw, ok := args["language"].(string); ok {
 		validatedLang, err := core.ValidateLanguage(langRaw)
