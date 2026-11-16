@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,10 +18,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resumeee-app/resumeee-api/internal/api"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-api/server"
 	"github.com/resumeee-app/resumeee-core"
+	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/provenance"
+	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
+	"github.com/resumeee-app/resumeee-core/worker"
+	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
 func freePort(t *testing.T) string {
@@ -43,7 +52,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 		return memStore, nil
 	}
 	t.Setenv("PORT", freePort(t))
@@ -72,7 +81,7 @@ func TestRunGracefulShutdown(t *testing.T) {
 	}
 
 	// Verify profile is accessible
-	prof, err := memStore.Profile(context.Background(), "default")
+	prof, err := memStore.Profiles().Profile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("expected default profile to be seeded, got: %v", err)
 	}
@@ -82,43 +91,53 @@ func TestRunGracefulShutdown(t *testing.T) {
 }
 
 func TestRun_RecoversInterruptedVersions(t *testing.T) {
-	memStore, err := memory.NewSeeded(context.Background())
+	ctx := context.Background()
+	memStore, err := memory.NewSeeded(ctx)
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
 	t.Setenv("PORT", freePort(t))
 	t.Setenv("ADMIN_MODE", "true")
 
-	branch := &core.Branch{
+	br := &core.Branch{
 		ID:            "br-recover",
 		UserID:        "default",
 		Name:          "Pending Branch",
-		TemplateSetID: "tmpl-1",
+		TemplateSetID: core.TemplateStandardCleanID,
 	}
-	if err := memStore.CreateBranch(context.Background(), branch); err != nil {
+	if err := memStore.Branches().CreateBranch(ctx, br); err != nil {
 		t.Fatalf("failed to create branch: %v", err)
 	}
 
+	job := &core.Job{
+		ID:     "job-interrupted",
+		UserID: "default",
+		Kind:   core.JobKindBranchTailor,
+	}
 	ver := &core.BranchVersion{
 		ID:       "ver-interrupted",
-		BranchID: branch.ID,
-		Status:   core.VersionStatusProcessing,
+		UserID:   "default",
+		BranchID: br.ID,
 	}
-	if err := memStore.CreateVersion(context.Background(), ver); err != nil {
-		t.Fatalf("failed to create version: %v", err)
+	if _, err := memStore.Jobs().SubmitBranchTailor(ctx, job, ver, core.PendingJobOptions{}); err != nil {
+		t.Fatalf("failed to submit branch tailor job: %v", err)
 	}
-	// Force status to processing
-	_ = memStore.UpdateVersionStatus(context.Background(), ver.ID, core.VersionStatusProcessing, "")
+	claimed, err := memStore.Jobs().ClaimNext(ctx, core.ClaimJobRequest{
+		WorkerID: "crashed-worker",
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("failed to claim branch tailor job: claimed=%v err=%v", claimed, err)
+	}
 
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 		return memStore, nil
 	}
 
 	// Now run the server boot sequence
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runWithStore(ctx, storeInit)
+		errCh <- runWithStore(runCtx, storeInit)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -133,13 +152,20 @@ func TestRun_RecoversInterruptedVersions(t *testing.T) {
 		t.Fatal("timed out waiting for server shutdown")
 	}
 
-	// Verify interrupted version was marked failed
-	recoveredVer, err := memStore.Version(context.Background(), branch.ID, ver.ID)
+	// Verify interrupted version and job were marked failed on boot
+	recoveredVer, err := memStore.Branches().Version(context.Background(), br.ID, ver.ID)
 	if err != nil {
 		t.Fatalf("failed to get version: %v", err)
 	}
 	if recoveredVer.Status != core.VersionStatusFailed {
 		t.Errorf("expected version to be transitioned to failed on boot, got: %s", recoveredVer.Status)
+	}
+	recoveredJob, err := memStore.Jobs().Job(context.Background(), "default", job.ID)
+	if err != nil {
+		t.Fatalf("failed to get job: %v", err)
+	}
+	if recoveredJob.Status != core.JobStatusFailed {
+		t.Errorf("expected job to be transitioned to failed on boot, got: %s", recoveredJob.Status)
 	}
 }
 
@@ -485,7 +511,7 @@ func TestRun_MultiTenantRequiresAuthOrAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 		return memStore, nil
 	}
 
@@ -508,7 +534,7 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 		return memStore, nil
 	}
 
@@ -586,4 +612,368 @@ func TestRun_AuthProviderConfigurations(t *testing.T) {
 			t.Fatal("timed out waiting for shutdown")
 		}
 	})
+}
+
+type e2eMockLLMClient struct{}
+
+func (e2eMockLLMClient) Name() string         { return "e2e-mock" }
+func (e2eMockLLMClient) DefaultModel() string { return "e2e-model-v1" }
+func (e2eMockLLMClient) Models() []core.ModelOption {
+	return []core.ModelOption{
+		{
+			Provider:    "e2e-mock",
+			Model:       "e2e-model-v1",
+			DisplayName: "E2E Mock Model",
+			IsDefault:   true,
+		},
+	}
+}
+func (e2eMockLLMClient) SupportsStructuredOutput(_ string) bool { return true }
+func (e2eMockLLMClient) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
+	payload := `{"tailored_content":{"summary":"E2E tailored summary for Staff Go role"},"gap_report":{"overall_match":88}}`
+	if req.SchemaName == "resume_extract_response" {
+		payload = `{"basics":{"name":"E2E Candidate","label":"Staff Backend Engineer","email":"e2e@example.com"}}`
+	}
+	return &llm.Response{
+		Text:       payload,
+		StatusCode: http.StatusOK,
+		Usage: core.TokenUsage{
+			PromptTokens:     120,
+			CompletionTokens: 80,
+			TotalTokens:      200,
+		},
+	}, nil
+}
+
+func buildMinimalTestPDF(text string) []byte {
+	stream := fmt.Sprintf("BT\n/F1 12 Tf\n100 700 Td\n(%s) Tj\nET", text)
+	body := fmt.Sprintf("%%PDF-1.4\n"+
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"+
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"+
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"+
+		"4 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n"+
+		"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+		len(stream), stream)
+
+	off1 := 9
+	off2 := off1 + len("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	off3 := off2 + len("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+	off4 := off3 + len("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n")
+	off5 := off4 + len(fmt.Sprintf("4 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(stream), stream))
+	startXref := len(body)
+
+	xrefAndTrailer := fmt.Sprintf("xref\n0 6\n0000000000 65535 f \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"%010d 00000 n \n"+
+		"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF",
+		off1, off2, off3, off4, off5, startXref)
+
+	return []byte(body + xrefAndTrailer)
+}
+
+func assertOmitsInternalJobJSONFields(t *testing.T, label string, body []byte) {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("%s invalid JSON (%v): %s", label, err, string(body))
+	}
+	raw := string(body)
+	for _, forbidden := range []string{"raw_text", "reservation_id", "claimed_by"} {
+		if _, exists := payload[forbidden]; exists {
+			t.Errorf("%s response must omit JSON key %q (body: %s)", label, forbidden, raw)
+		}
+		if strings.Contains(raw, `"`+forbidden+`"`) {
+			t.Errorf("%s raw JSON must not contain %q (body: %s)", label, forbidden, raw)
+		}
+	}
+}
+
+func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	dbPath := filepath.Join(t.TempDir(), "e2e.db")
+	st, err := storage.OpenStore(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("storage.OpenStore: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const tenantID = "e2e-tenant"
+	const branchID = "br-e2e-tailor"
+
+	// 1. Seed tenant + profile + branch + quota.
+	if err := st.Users().UpsertUser(ctx, &core.User{
+		ID:    tenantID,
+		Email: "e2e@example.com",
+	}); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := st.Profiles().UpsertProfile(ctx, &core.Profile{
+		UserID:   tenantID,
+		FullName: "E2E Candidate",
+		Headline: "Staff Backend Engineer",
+		Email:    "e2e@example.com",
+	}); err != nil {
+		t.Fatalf("UpsertProfile: %v", err)
+	}
+	if err := st.Branches().CreateBranch(ctx, &core.Branch{
+		ID:                 branchID,
+		UserID:             tenantID,
+		Name:               "Staff Go Branch",
+		TargetRole:         "Staff Go Engineer",
+		TargetCompany:      "Acme",
+		TargetRequirements: "Go, SQLite, Distributed Systems",
+		TemplateSetID:      core.TemplateStandardCleanID,
+	}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	res, err := st.Quotas().ReserveQuota(ctx, tenantID, core.OperationResumeTailoring, 1200, 50, 1000000)
+	if err != nil {
+		t.Fatalf("ReserveQuota: %v", err)
+	}
+
+	// 2. Submit and claim a processing job, then recover via a fresh worker.Pool.
+	staleJob := &core.Job{
+		ID:            "job-e2e-stale",
+		UserID:        tenantID,
+		Kind:          core.JobKindBranchTailor,
+		ReservationID: res.ID,
+	}
+	staleVer := &core.BranchVersion{
+		ID:       "ver-e2e-stale",
+		UserID:   tenantID,
+		BranchID: branchID,
+	}
+	if _, err := st.Jobs().SubmitBranchTailor(ctx, staleJob, staleVer, core.PendingJobOptions{}); err != nil {
+		t.Fatalf("SubmitBranchTailor (stale): %v", err)
+	}
+	claimed, err := st.Jobs().ClaimNext(ctx, core.ClaimJobRequest{
+		WorkerID: "crashed-e2e-worker",
+	})
+	if err != nil || claimed == nil || claimed.Status != core.JobStatusProcessing {
+		t.Fatalf("ClaimNext failed: claimed=%+v err=%v", claimed, err)
+	}
+
+	recoveryPool := worker.New(worker.Config{
+		Jobs:   st.Jobs(),
+		Quotas: st.Quotas(),
+	})
+	if err := recoveryPool.RecoverStaleJobs(ctx, "e2e server crash recovery"); err != nil {
+		t.Fatalf("RecoverStaleJobs: %v", err)
+	}
+
+	recoveredJob, err := st.Jobs().Job(ctx, tenantID, staleJob.ID)
+	if err != nil {
+		t.Fatalf("Job after recovery: %v", err)
+	}
+	if recoveredJob.Status != core.JobStatusFailed {
+		t.Fatalf("expected stale job status %s, got %s", core.JobStatusFailed, recoveredJob.Status)
+	}
+	quotaAfterRecovery, err := st.Quotas().Quota(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("Quota after recovery: %v", err)
+	}
+	if quotaAfterRecovery.DailyRequestsUsed != 0 || quotaAfterRecovery.MonthlyTokensUsed != 0 {
+		t.Fatalf("expected reserved quota released (daily=0, monthly=0), got daily=%d monthly=%d",
+			quotaAfterRecovery.DailyRequestsUsed, quotaAfterRecovery.MonthlyTokensUsed)
+	}
+	usageRecords, err := st.Quotas().ListUsageRecords(ctx, tenantID, 10)
+	if err != nil {
+		t.Fatalf("ListUsageRecords: %v", err)
+	}
+	if len(usageRecords) != 1 || usageRecords[0].Status != core.ReservationStatusReleased {
+		t.Fatalf("expected reservation %s status %s, got %+v", res.ID, core.ReservationStatusReleased, usageRecords)
+	}
+
+	// 3. Start *worker.Pool + router via NewRouterConfigFromStore and verify async PDF parse E2E.
+	reg := llm.NewRegistry()
+	reg.Register(e2eMockLLMClient{})
+	llmService := llm.NewService(reg)
+	resumeExtractor := llm.NewRegistryExtractor(reg)
+
+	pool := worker.New(worker.Config{
+		Concurrency:            2,
+		MaxConcurrentPerTenant: 2,
+		PollInterval:           20 * time.Millisecond,
+		Jobs:                   st.Jobs(),
+		Branches:               st.Branches(),
+		Profiles:               st.Profiles(),
+		Presets:                st.Presets(),
+		Templates:              st.Templates(),
+		Quotas:                 st.Quotas(),
+		ResumeExtractor:        resumeExtractor,
+		Generator:              llmService,
+		Validator:              provenance.New(),
+		Renderer:               renderer.New(),
+	})
+	pool.Start(ctx)
+	defer pool.Stop()
+
+	routerCfg := api.NewRouterConfigFromStore(st)
+	routerCfg.JobNotifier = pool
+	routerCfg.DefaultUserID = tenantID
+	routerCfg.Admin = true
+	routerCfg.ResumeExtractor = resumeExtractor
+	routerCfg.Renderer = renderer.New()
+	routerCfg.Validator = provenance.New()
+	routerCfg.PromptCompiler = llm.NewPromptCompiler()
+	routerCfg.ModelEnumerator = reg
+
+	httpSrv := httptest.NewServer(api.NewRouter(routerCfg))
+	defer httpSrv.Close()
+	client := httpSrv.Client()
+
+	var pdfForm bytes.Buffer
+	mw := multipart.NewWriter(&pdfForm)
+	part, err := mw.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(buildMinimalTestPDF("E2E Candidate Confidential Raw Text")); err != nil {
+		t.Fatalf("Write PDF bytes: %v", err)
+	}
+	_ = mw.WriteField("provider", "e2e-mock")
+	_ = mw.WriteField("model", "e2e-model-v1")
+	_ = mw.Close()
+
+	pdfReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpSrv.URL+"/api/v1/profile/pdf/parse?async=true", &pdfForm)
+	if err != nil {
+		t.Fatalf("NewRequest PDF: %v", err)
+	}
+	pdfReq.Header.Set("Content-Type", mw.FormDataContentType())
+	pdfPostResp, err := client.Do(pdfReq)
+	if err != nil {
+		t.Fatalf("POST /api/v1/profile/pdf/parse?async=true: %v", err)
+	}
+	pdfPostBody, err := io.ReadAll(pdfPostResp.Body)
+	_ = pdfPostResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read PDF POST response: %v", err)
+	}
+	if pdfPostResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for async PDF parse, got %d (%s)", pdfPostResp.StatusCode, string(pdfPostBody))
+	}
+	assertOmitsInternalJobJSONFields(t, "POST /api/v1/profile/pdf/parse?async=true", pdfPostBody)
+
+	var pdfQueued api.PDFParseJobResponse
+	if err := json.Unmarshal(pdfPostBody, &pdfQueued); err != nil {
+		t.Fatalf("unmarshal PDF queued response: %v (%s)", err, string(pdfPostBody))
+	}
+	if pdfQueued.ID == "" {
+		t.Fatalf("expected non-empty PDF job ID (%s)", string(pdfPostBody))
+	}
+
+	var pdfCompleted api.PDFParseJobResponse
+	var pdfCompletedBody []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		getReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/profile/pdf/jobs/"+pdfQueued.ID, nil)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET /profile/pdf/jobs/{id}: %v", err)
+		}
+		body, readErr := io.ReadAll(getResp.Body)
+		_ = getResp.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read PDF poll response: %v", readErr)
+		}
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK polling PDF job, got %d (%s)", getResp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, &pdfCompleted); err != nil {
+			t.Fatalf("unmarshal PDF poll response: %v", err)
+		}
+		if pdfCompleted.Status == core.JobStatusCompleted {
+			pdfCompletedBody = body
+			break
+		}
+		if pdfCompleted.Status == core.JobStatusFailed {
+			t.Fatalf("PDF parse job failed unexpectedly: %s", string(body))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if pdfCompleted.Status != core.JobStatusCompleted {
+		t.Fatalf("timed out waiting for PDF parse job %s to complete; last status=%s", pdfQueued.ID, pdfCompleted.Status)
+	}
+	assertOmitsInternalJobJSONFields(t, "GET /profile/pdf/jobs/{id} (completed)", pdfCompletedBody)
+	if pdfCompleted.Filename != "resume.pdf" || pdfCompleted.Provider != "e2e-mock" || pdfCompleted.Model != "e2e-model-v1" {
+		t.Errorf("unexpected PDF job metadata: filename=%q provider=%q model=%q",
+			pdfCompleted.Filename, pdfCompleted.Provider, pdfCompleted.Model)
+	}
+	if pdfCompleted.Result == nil || pdfCompleted.Result.Basics.Name != "E2E Candidate" {
+		t.Errorf("unexpected PDF extracted result: %+v", pdfCompleted.Result)
+	}
+
+	// 4. Trigger an async POST /branches/{id}/generate job and poll until completed.
+	genReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpSrv.URL+"/api/v1/branches/"+branchID+"/generate", nil)
+	if err != nil {
+		t.Fatalf("NewRequest generate: %v", err)
+	}
+	genResp, err := client.Do(genReq)
+	if err != nil {
+		t.Fatalf("POST /api/v1/branches/{id}/generate: %v", err)
+	}
+	genBody, err := io.ReadAll(genResp.Body)
+	_ = genResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read generate response: %v", err)
+	}
+	if genResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for branch generate, got %d (%s)", genResp.StatusCode, string(genBody))
+	}
+	var enqueued api.AsyncJobEnqueued
+	if err := json.Unmarshal(genBody, &enqueued); err != nil {
+		t.Fatalf("unmarshal AsyncJobEnqueued: %v (%s)", err, string(genBody))
+	}
+	if enqueued.VersionID == "" {
+		t.Fatalf("expected non-empty version_id in AsyncJobEnqueued (%s)", string(genBody))
+	}
+
+	var completedVer core.BranchVersion
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		verReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/api/v1/branches/"+branchID+"/versions/"+enqueued.VersionID, nil)
+		verResp, err := client.Do(verReq)
+		if err != nil {
+			t.Fatalf("GET /api/v1/branches/{id}/versions/{v}: %v", err)
+		}
+		body, readErr := io.ReadAll(verResp.Body)
+		_ = verResp.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read version poll response: %v", readErr)
+		}
+		if verResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK polling version, got %d (%s)", verResp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, &completedVer); err != nil {
+			t.Fatalf("unmarshal BranchVersion: %v", err)
+		}
+		if completedVer.Status == core.VersionStatusCompleted {
+			break
+		}
+		if completedVer.Status == core.VersionStatusFailed {
+			t.Fatalf("branch generation failed unexpectedly: %s", string(body))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if completedVer.Status != core.VersionStatusCompleted {
+		t.Fatalf("timed out waiting for branch version %s to complete; last status=%s", enqueued.VersionID, completedVer.Status)
+	}
+	if completedVer.BranchEpoch != 1 {
+		t.Errorf("expected branch_epoch 1, got %d", completedVer.BranchEpoch)
+	}
+	if completedVer.JobID == "" {
+		t.Errorf("expected non-empty job_id on completed BranchVersion")
+	}
+	if completedVer.TailoredContent == nil || completedVer.TailoredContent.Summary == "" {
+		t.Errorf("expected non-empty tailored_content.summary on completed BranchVersion, got %+v", completedVer.TailoredContent)
+	}
+	if completedVer.HTMLOutput == "" || completedVer.MarkdownOutput == "" || completedVer.PlainTextOutput == "" {
+		t.Errorf("expected non-empty rendered outputs (html=%d md=%d txt=%d)",
+			len(completedVer.HTMLOutput), len(completedVer.MarkdownOutput), len(completedVer.PlainTextOutput))
+	}
 }

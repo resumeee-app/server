@@ -17,21 +17,21 @@ import (
 	"github.com/resumeee-app/resumeee-api/auth"
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	resumeeeMCP "github.com/resumeee-app/resumeee-api/internal/mcp"
-	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/branch"
 	"github.com/resumeee-app/resumeee-core/llm"
 	"github.com/resumeee-app/resumeee-core/profile"
 	"github.com/resumeee-app/resumeee-core/provenance"
 	"github.com/resumeee-app/resumeee-core/renderer"
+	"github.com/resumeee-app/resumeee-core/store"
 	"github.com/resumeee-app/resumeee-core/worker"
 	storage "github.com/resumeee-app/resumeee-storage-sql/sql"
 )
 
 // StoreInitializer is a factory function initializing domain stores and storage resources for the MCP server.
-type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (core.Store, error)
+type StoreInitializer func(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*store.Store, error)
 
 // defaultSQLiteInitializer creates a SQLite persistence backend and seeds default records.
-func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, _ *slog.Logger) (core.Store, error) {
+func defaultSQLiteInitializer(ctx context.Context, cfg *config.Config, _ *slog.Logger) (*store.Store, error) {
 	return storage.Open(ctx, storage.Config{
 		Driver:        storage.DriverSQLite,
 		DSN:           cfg.DBPath,
@@ -68,15 +68,18 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, in io.Read
 		Level: slog.LevelWarn,
 	}))
 
-	store, err := storeInit(ctx, cfg, logger)
+	st, err := storeInit(ctx, cfg, logger)
 	if err != nil {
 		return fmt.Errorf("initializing store: %w", err)
 	}
-	defer closeMCPStore(store, logger)
+	defer closeMCPStore(st, logger)
 
-	mcpCfg, workerPool, err := buildMCPServerConfig(cfg, store, logger)
+	mcpCfg, workerPool, err := buildMCPServerConfig(cfg, st, logger)
 	if err != nil {
 		return err
+	}
+	if err := workerPool.RecoverStaleJobs(ctx, "mcp server restarted during job processing"); err != nil {
+		logger.WarnContext(ctx, "failed to recover stale jobs", "err", err)
 	}
 	workerPool.Start(ctx)
 	defer workerPool.Stop()
@@ -149,19 +152,20 @@ func loadMCPConfig(args []string) (*config.Config, error) {
 }
 
 // buildMCPServerConfig wires domain services, worker pool, and auth provider for MCP execution.
-func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Logger) (resumeeeMCP.ServerConfig, *worker.Pool, error) {
+func buildMCPServerConfig(cfg *config.Config, st *store.Store, logger *slog.Logger) (resumeeeMCP.ServerConfig, *worker.Pool, error) {
 	authProvider, err := resolveMCPAuthProvider(cfg, logger)
 	if err != nil {
 		return resumeeeMCP.ServerConfig{}, nil, err
 	}
 
-	profileStore := store.Profiles()
-	careerStore := store.Career()
-	presetStore := store.Presets()
-	templateStore := store.Templates()
-	branchStore := store.Branches()
-	userStore := store.Users()
-	quotaStore := store.Quotas()
+	profileStore := st.Profiles()
+	careerStore := st.Career()
+	presetStore := st.Presets()
+	templateStore := st.Templates()
+	branchStore := st.Branches()
+	userStore := st.Users()
+	quotaStore := st.Quotas()
+	jobStore := st.Jobs()
 
 	templateRenderer := renderer.New()
 	provValidator := provenance.New()
@@ -175,10 +179,6 @@ func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Log
 	if concurrency <= 0 {
 		concurrency = config.DefaultWorkerConcurrency
 	}
-	queueSize := cfg.WorkerQueueSize
-	if queueSize <= 0 {
-		queueSize = config.DefaultWorkerQueueSize
-	}
 	maxPerTenant := cfg.MaxConcurrentJobsPerTenant
 	if maxPerTenant <= 0 {
 		maxPerTenant = config.DefaultMaxConcurrentJobsPerTenant
@@ -186,8 +186,8 @@ func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Log
 
 	workerPool := worker.New(worker.Config{
 		Concurrency:            concurrency,
-		QueueSize:              queueSize,
 		MaxConcurrentPerTenant: maxPerTenant,
+		Jobs:                   jobStore,
 		Branches:               branchStore,
 		Profiles:               profileStore,
 		Presets:                presetStore,
@@ -203,11 +203,12 @@ func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Log
 
 	branchSvc := branch.New(branch.Config{
 		Branches:          branchStore,
+		Jobs:              jobStore,
 		Profiles:          profileStore,
 		Presets:           presetStore,
 		Templates:         templateStore,
 		Quotas:            quotaStore,
-		JobEnqueuer:       workerPool,
+		JobNotifier:       workerPool,
 		Validator:         provValidator,
 		Renderer:          templateRenderer,
 		Generator:         llmService,
@@ -228,7 +229,6 @@ func buildMCPServerConfig(cfg *config.Config, store core.Store, logger *slog.Log
 		PresetStore:          presetStore,
 		UserStore:            userStore,
 		ResumeExtractor:      resumeExtractor,
-		JobEnqueuer:          workerPool,
 		DefaultUserID:        cfg.DefaultUserID,
 		Admin:                cfg.Admin && (authProvider == nil || authProvider.Name() == auth.ProviderAdmin),
 		AuthProvider:         authProvider,
@@ -263,9 +263,12 @@ func resolveMCPAuthProvider(cfg *config.Config, logger *slog.Logger) (auth.Provi
 	return prov, nil
 }
 
-// closeMCPStore closes store on exit and logs any failure to stderr.
-func closeMCPStore(store core.Store, logger *slog.Logger) {
-	if err := store.Close(); err != nil {
+// closeMCPStore closes st on exit and logs any failure to stderr.
+func closeMCPStore(st *store.Store, logger *slog.Logger) {
+	if st == nil {
+		return
+	}
+	if err := st.Close(); err != nil {
 		logger.Warn("failed to close store", "err", err)
 	}
 }

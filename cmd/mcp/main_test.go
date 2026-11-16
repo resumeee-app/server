@@ -13,6 +13,7 @@ import (
 	"github.com/resumeee-app/resumeee-api/internal/config"
 	"github.com/resumeee-app/resumeee-core"
 	"github.com/resumeee-app/resumeee-core/memory"
+	"github.com/resumeee-app/resumeee-core/store"
 )
 
 func TestCLI_Run_StdioHandshake(t *testing.T) {
@@ -99,7 +100,7 @@ func TestCLI_RunWithStore_MemoryBackend(t *testing.T) {
 		t.Fatalf("failed to create seeded memory store: %v", err)
 	}
 
-	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 		return memStore, nil
 	}
 
@@ -212,7 +213,7 @@ func TestCLI_Run_AdminFlags(t *testing.T) {
 			defer cancel()
 
 			var capturedAdmin bool
-			storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (core.Store, error) {
+			storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (*store.Store, error) {
 				capturedAdmin = cfg.Admin
 				cancel()
 				return memory.NewSeeded(context.Background())
@@ -242,7 +243,7 @@ func TestCLI_Run_ConfigFlag(t *testing.T) {
 		defer cancel()
 
 		var captured *config.Config
-		storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (core.Store, error) {
+		storeInit := func(_ context.Context, cfg *config.Config, _ *slog.Logger) (*store.Store, error) {
 			captured = cfg
 			cancel()
 			return memory.NewSeeded(context.Background())
@@ -269,7 +270,7 @@ func TestCLI_Run_ConfigFlag(t *testing.T) {
 
 	t.Run("returns error when -config file does not exist", func(t *testing.T) {
 		missingPath := filepath.Join(t.TempDir(), "nonexistent.env")
-		err := runWithStore(context.Background(), func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+		err := runWithStore(context.Background(), func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 			t.Fatal("storeInit should not be called when -config file is missing")
 			return nil, nil
 		}, bytes.NewBuffer(nil), &bytes.Buffer{}, "-config", missingPath)
@@ -280,7 +281,7 @@ func TestCLI_Run_ConfigFlag(t *testing.T) {
 
 	t.Run("returns error on invalid environment config without -config", func(t *testing.T) {
 		t.Setenv("REST_TIMEOUT", "not-a-duration")
-		err := runWithStore(context.Background(), func(_ context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+		err := runWithStore(context.Background(), func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 			t.Fatal("storeInit should not be called when environment configuration is invalid")
 			return nil, nil
 		}, bytes.NewBuffer(nil), &bytes.Buffer{})
@@ -311,7 +312,7 @@ func TestCLI_Run_InvalidAuthProvider(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("AUTH_PROVIDER", tc.authProvider)
 			t.Setenv("FIREBASE_PROJECT_ID", tc.firebaseProjectID)
-			storeInit := func(ctx context.Context, _ *config.Config, _ *slog.Logger) (core.Store, error) {
+			storeInit := func(ctx context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
 				return memory.NewSeeded(ctx)
 			}
 			err := runWithStore(context.Background(), storeInit, bytes.NewBuffer(nil), &bytes.Buffer{})
@@ -319,5 +320,113 @@ func TestCLI_Run_InvalidAuthProvider(t *testing.T) {
 				t.Fatalf("expected error for invalid AUTH_PROVIDER=%q", tc.authProvider)
 			}
 		})
+	}
+}
+
+func TestCLI_RunWithStore_RecoversStaleJobsAndReleasesQuota(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	memStore, err := memory.NewSeeded(ctx)
+	if err != nil {
+		t.Fatalf("failed to create seeded memory store: %v", err)
+	}
+
+	br := &core.Branch{
+		ID:            "br-mcp-recover",
+		UserID:        "default",
+		Name:          "MCP Interrupted Branch",
+		TemplateSetID: core.TemplateStandardCleanID,
+	}
+	if err := memStore.Branches().CreateBranch(ctx, br); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	res, err := memStore.Quotas().ReserveQuota(ctx, "default", core.OperationResumeTailoring, 1500, 50, 1000000)
+	if err != nil {
+		t.Fatalf("failed to reserve quota: %v", err)
+	}
+
+	job := &core.Job{
+		ID:            "job-mcp-interrupted",
+		UserID:        "default",
+		Kind:          core.JobKindBranchTailor,
+		ReservationID: res.ID,
+	}
+	ver := &core.BranchVersion{
+		ID:       "ver-mcp-interrupted",
+		UserID:   "default",
+		BranchID: br.ID,
+	}
+	if _, err := memStore.Jobs().SubmitBranchTailor(ctx, job, ver, core.PendingJobOptions{}); err != nil {
+		t.Fatalf("failed to submit branch tailor job: %v", err)
+	}
+	claimed, err := memStore.Jobs().ClaimNext(ctx, core.ClaimJobRequest{
+		WorkerID: "crashed-mcp-worker",
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("failed to claim job before mcp boot: claimed=%v err=%v", claimed, err)
+	}
+
+	storeInit := func(_ context.Context, _ *config.Config, _ *slog.Logger) (*store.Store, error) {
+		return memStore, nil
+	}
+
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "test-client",
+				"version": "1.0.0",
+			},
+		},
+	}
+	initBytes, err := json.Marshal(initReq)
+	if err != nil {
+		t.Fatalf("failed to marshal init request: %v", err)
+	}
+
+	if err := runWithStore(ctx, storeInit, bytes.NewBuffer(append(initBytes, '\n')), &bytes.Buffer{}); err != nil && err != context.Canceled {
+		t.Logf("runWithStore exited with: %v", err)
+	}
+
+	recoveredJob, err := memStore.Jobs().Job(context.Background(), "default", job.ID)
+	if err != nil {
+		t.Fatalf("failed to load recovered job: %v", err)
+	}
+	if recoveredJob.Status != core.JobStatusFailed {
+		t.Errorf("expected interrupted job status %s, got %s", core.JobStatusFailed, recoveredJob.Status)
+	}
+	if recoveredJob.ErrorMessage != "mcp server restarted during job processing" {
+		t.Errorf("unexpected error message %q", recoveredJob.ErrorMessage)
+	}
+
+	recoveredVer, err := memStore.Branches().Version(context.Background(), br.ID, ver.ID)
+	if err != nil {
+		t.Fatalf("failed to load recovered version: %v", err)
+	}
+	if recoveredVer.Status != core.VersionStatusFailed {
+		t.Errorf("expected interrupted version status %s, got %s", core.VersionStatusFailed, recoveredVer.Status)
+	}
+
+	quotaAfter, err := memStore.Quotas().Quota(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("failed to load quota after recovery: %v", err)
+	}
+	if quotaAfter.DailyRequestsUsed != 0 || quotaAfter.MonthlyTokensUsed != 0 {
+		t.Errorf("expected reserved quota released on startup recovery, got daily=%d monthly=%d",
+			quotaAfter.DailyRequestsUsed, quotaAfter.MonthlyTokensUsed)
+	}
+
+	records, err := memStore.Quotas().ListUsageRecords(context.Background(), "default", 10)
+	if err != nil {
+		t.Fatalf("failed to list usage records: %v", err)
+	}
+	if len(records) != 1 || records[0].Status != core.ReservationStatusReleased {
+		t.Errorf("expected reservation %s status %s, got %+v", res.ID, core.ReservationStatusReleased, records)
 	}
 }
