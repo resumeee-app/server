@@ -265,6 +265,32 @@ func TestMCP_PresetTools_LanguageSupport(t *testing.T) {
 		t.Errorf("expected persisted updated Language 'French', got %q", persistedUpdatedPreset.Language)
 	}
 
+	// 6b. update_preset with suggested_theme_id="" clears SuggestedThemeID to nil
+	clearThemeReq := toolReq("update_preset", map[string]any{
+		"id":                 createdPreset.ID,
+		"suggested_theme_id": "",
+	})
+	clearThemeRes, err := updateTool.Handler(userCtx, clearThemeReq)
+	if err != nil || clearThemeRes.IsError {
+		t.Fatalf("expected clearing suggested_theme_id to succeed, got: %+v, err: %v", clearThemeRes, err)
+	}
+	var clearedPreset core.Preset
+	clearedText := clearThemeRes.Content[0].(mcpSDK.TextContent).Text
+	if err := json.Unmarshal([]byte(clearedText), &clearedPreset); err != nil {
+		t.Fatalf("failed to unmarshal cleared preset: %v", err)
+	}
+	if clearedPreset.SuggestedThemeID != nil {
+		t.Errorf("expected SuggestedThemeID to be nil after clearing, got %v", *clearedPreset.SuggestedThemeID)
+	}
+
+	persistedClearedPreset, err := store.Presets().Preset(ctx, "user-1", createdPreset.ID)
+	if err != nil || persistedClearedPreset == nil {
+		t.Fatalf("expected cleared preset to be in store: %v", err)
+	}
+	if persistedClearedPreset.SuggestedThemeID != nil {
+		t.Errorf("expected persisted SuggestedThemeID to be nil after clearing, got %v", *persistedClearedPreset.SuggestedThemeID)
+	}
+
 	// 7. update_preset rejecting built-in preset
 	builtInUpdateReq := toolReq("update_preset", map[string]any{
 		"id":       core.Preset1PageTechResumeID,

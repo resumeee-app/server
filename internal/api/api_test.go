@@ -4011,6 +4011,43 @@ func TestGetPDFParseJob_NonPDFJobReturns404(t *testing.T) {
 	}
 }
 
+// postMultipartPDFParse posts pdfBytes as a multipart/form-data file upload with provider "mock" to url.
+func postMultipartPDFParse(t *testing.T, client *http.Client, url string, pdfBytes []byte) (*http.Response, []byte) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", "resume.pdf")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(pdfBytes); err != nil {
+		t.Fatalf("write pdf bytes: %v", err)
+	}
+	if err := mw.WriteField("provider", "mock"); err != nil {
+		t.Fatalf("write provider field: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	if err != nil {
+		t.Fatalf("NewRequest POST %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s failed: %v", url, err)
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read response body: %v", readErr)
+	}
+	return resp, body
+}
+
 // TestProfilePDF_Parse_ResponseOmitsInternalJobFields verifies that POST /profile/pdf/parse and
 // GET /profile/pdf/jobs/{id} project public PDFParseJobResponse fields without exposing internal
 // job fields (raw_text, reservation_id, claimed_by) across pending, claimed, and completed states.
@@ -4038,29 +4075,7 @@ func TestProfilePDF_Parse_ResponseOmitsInternalJobFields(t *testing.T) {
 		return payload
 	}
 
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	part, err := mw.CreateFormFile("file", "resume.pdf")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
-	if _, err := part.Write(pdfBytes); err != nil {
-		t.Fatalf("write pdf bytes: %v", err)
-	}
-	_ = mw.WriteField("provider", "mock")
-	_ = mw.Close()
-
-	req, _ := http.NewRequest(http.MethodPost, env.server.URL+"/api/v1/profile/pdf/parse", &buf)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	postResp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("POST /profile/pdf/parse failed: %v", err)
-	}
-	postBody, err := io.ReadAll(postResp.Body)
-	_ = postResp.Body.Close()
-	if err != nil {
-		t.Fatalf("read POST body failed: %v", err)
-	}
+	postResp, postBody := postMultipartPDFParse(t, client, env.server.URL+"/api/v1/profile/pdf/parse", pdfBytes)
 	if postResp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202 Accepted, got %d (body: %s)", postResp.StatusCode, string(postBody))
 	}
@@ -4129,37 +4144,9 @@ func TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503(t *testing.T)
 		return `{"basics":{"name":"Morgan BrandNew"}}`, nil
 	}))
 
-	postPDF := func(t *testing.T, client *http.Client, url string) (*http.Response, []byte) {
-		t.Helper()
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		part, err := mw.CreateFormFile("file", "resume.pdf")
-		if err != nil {
-			t.Fatalf("CreateFormFile: %v", err)
-		}
-		if _, err := part.Write(pdfBytes); err != nil {
-			t.Fatalf("write pdf bytes: %v", err)
-		}
-		_ = mw.WriteField("provider", "mock")
-		_ = mw.Close()
-
-		req, _ := http.NewRequest(http.MethodPost, url, &buf)
-		req.Header.Set("Content-Type", mw.FormDataContentType())
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("POST %s failed: %v", url, err)
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			t.Fatalf("read response body: %v", readErr)
-		}
-		return resp, body
-	}
-
 	t.Run("JobNotifier nil executes sync by default and returns 200", func(t *testing.T) {
 		env := setupTestServerWithExtractor(t, mockExtractor)
-		resp, body := postPDF(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse")
+		resp, body := postMultipartPDFParse(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse", pdfBytes)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 OK, got %d (body: %s)", resp.StatusCode, string(body))
 		}
@@ -4171,7 +4158,7 @@ func TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503(t *testing.T)
 
 	t.Run("async=true with JobNotifier nil returns 503", func(t *testing.T) {
 		env := setupTestServerWithExtractor(t, mockExtractor)
-		resp, body := postPDF(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse?async=true")
+		resp, body := postMultipartPDFParse(t, env.server.Client(), env.server.URL+"/api/v1/profile/pdf/parse?async=true", pdfBytes)
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("expected 503 Service Unavailable, got %d (body: %s)", resp.StatusCode, string(body))
 		}
@@ -4188,7 +4175,7 @@ func TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503(t *testing.T)
 		}
 		cfg := api.NewRouterConfigFromStore(memStore)
 		cfg.JobStore = nil
-		cfg.JobNotifier = nil
+		cfg.JobNotifier = core.JobNotifierFunc(func() {})
 		cfg.PDFExtractor = pdf.NewExtractor()
 		cfg.ResumeExtractor = mockExtractor
 		cfg.DefaultUserID = "default"
@@ -4197,7 +4184,7 @@ func TestProfilePDF_Parse_SyncByDefaultWithoutNotifier_AndAsync503(t *testing.T)
 		server := httptest.NewServer(api.NewRouter(cfg))
 		t.Cleanup(server.Close)
 
-		resp, body := postPDF(t, server.Client(), server.URL+"/api/v1/profile/pdf/parse?async=true")
+		resp, body := postMultipartPDFParse(t, server.Client(), server.URL+"/api/v1/profile/pdf/parse?async=true", pdfBytes)
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Fatalf("expected 500 Internal Server Error, got %d (body: %s)", resp.StatusCode, string(body))
 		}

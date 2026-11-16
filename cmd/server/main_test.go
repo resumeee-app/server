@@ -871,7 +871,10 @@ func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
 	var pdfCompletedBody []byte
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		getReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/profile/pdf/jobs/"+pdfQueued.ID, nil)
+		getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/profile/pdf/jobs/"+pdfQueued.ID, nil)
+		if err != nil {
+			t.Fatalf("NewRequest GET /profile/pdf/jobs/{id}: %v", err)
+		}
 		getResp, err := client.Do(getReq)
 		if err != nil {
 			t.Fatalf("GET /profile/pdf/jobs/{id}: %v", err)
@@ -936,7 +939,10 @@ func TestSQLite_EndToEnd_RecoveryPDFAndBranchTailor(t *testing.T) {
 	var completedVer core.BranchVersion
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		verReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/api/v1/branches/"+branchID+"/versions/"+enqueued.VersionID, nil)
+		verReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpSrv.URL+"/api/v1/branches/"+branchID+"/versions/"+enqueued.VersionID, nil)
+		if err != nil {
+			t.Fatalf("NewRequest GET /api/v1/branches/{id}/versions/{v}: %v", err)
+		}
 		verResp, err := client.Do(verReq)
 		if err != nil {
 			t.Fatalf("GET /api/v1/branches/{id}/versions/{v}: %v", err)

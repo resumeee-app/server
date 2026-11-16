@@ -235,7 +235,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AsyncPDFJobResponse'
+                $ref: '#/components/schemas/PDFParseJob'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -2048,7 +2048,7 @@ components:
               details: "invalid source_fact_id: fact-999"
 
     QueueFull:
-      description: In-memory worker queue channel is at maximum capacity
+      description: Tenant pending-job admission limit reached or worker queue unavailable
       content:
         application/json:
           schema:
@@ -3696,22 +3696,6 @@ components:
         message:
           type: string
           example: "Resume generation job queued"
-
-    AsyncPDFJobResponse:
-      type: object
-      required:
-        - job_id
-        - status
-        - message
-      properties:
-        job_id:
-          type: string
-          example: "pdf-job-7a3b8c4d-1234-5678-90ab-cdef12345678"
-        status:
-          $ref: '#/components/schemas/PDFParseJobStatus'
-        message:
-          type: string
-          example: "PDF parsing job queued"
 
     PDFParseJobStatus:
       type: string

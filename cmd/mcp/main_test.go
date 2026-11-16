@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -390,8 +391,8 @@ func TestCLI_RunWithStore_RecoversStaleJobsAndReleasesQuota(t *testing.T) {
 		t.Fatalf("failed to marshal init request: %v", err)
 	}
 
-	if err := runWithStore(ctx, storeInit, bytes.NewBuffer(append(initBytes, '\n')), &bytes.Buffer{}); err != nil && err != context.Canceled {
-		t.Logf("runWithStore exited with: %v", err)
+	if err := runWithStore(ctx, storeInit, bytes.NewBuffer(append(initBytes, '\n')), &bytes.Buffer{}); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("runWithStore returned unexpected error: %v", err)
 	}
 
 	recoveredJob, err := memStore.Jobs().Job(context.Background(), "default", job.ID)

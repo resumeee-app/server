@@ -67,11 +67,11 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, err := storeInit(ctx, cfg, logger)
+	st, err := storeInit(ctx, cfg, logger)
 	if err != nil {
 		return fmt.Errorf("initializing store: %w", err)
 	}
-	defer closeStore(store, logger)
+	defer closeStore(st, logger)
 
 	authProvider, err := resolveCLIAuthProvider(cfg, logger)
 	if err != nil {
@@ -80,7 +80,7 @@ func runWithStore(parent context.Context, storeInit StoreInitializer, args ...st
 
 	return server.Run(ctx,
 		server.WithConfig(toServerConfig(cfg)),
-		server.WithStore(store),
+		server.WithStore(st),
 		server.WithRequestAuthProvider(authProvider),
 		server.WithLLMRegistry(cfg.NewLLMRegistry(logger)),
 		server.WithLogger(logger),

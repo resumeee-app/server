@@ -53,7 +53,7 @@ func registerBranchTools(s *serverSDK.MCPServer, cfg ServerConfig) {
 	), withToolDeps(handleCreateBranch(cfg), branchServiceDep(cfg), templateStoreDep(cfg)))
 
 	s.AddTool(mcpSDK.NewTool("update_branch",
-		mcpSDK.WithDescription("Updates an existing targeted resume branch's configuration, target job requirements, prompt directives, template, or LLM model settings."),
+		mcpSDK.WithDescription("Updates an existing targeted resume branch's configuration, target job requirements, branch instructions, template, or LLM model settings."),
 		mcpSDK.WithString("id", mcpSDK.Required(), mcpSDK.Description("ID of the target resume branch to update")),
 		mcpSDK.WithString("branch_id", mcpSDK.Description("Alias for id")),
 		mcpSDK.WithString("name", mcpSDK.Description("Updated descriptive name for the branch")),
