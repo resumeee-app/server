@@ -209,8 +209,8 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("multi-tenant mode with valid bearer token injects UID", func(t *testing.T) {
 		verifier := &mockTokenVerifier{
 			verifyFunc: func(_ context.Context, token string) (*core.TokenInfo, error) {
-				if token == "valid-firebase-jwt" {
-					return &core.TokenInfo{UID: "firebase-uid-42", Email: "alex@example.com"}, nil
+				if token == "valid-bearer-jwt" {
+					return &core.TokenInfo{UID: "tenant-uid-42", Email: "alex@example.com"}, nil
 				}
 				return nil, core.ErrUnauthorized
 			},
@@ -223,15 +223,15 @@ func TestAuthMiddleware(t *testing.T) {
 		}))
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/branches", nil)
-		req.Header.Set("Authorization", "Bearer valid-firebase-jwt")
+		req.Header.Set("Authorization", "Bearer valid-bearer-jwt")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected status 200, got %d", rec.Code)
 		}
-		if capturedUID != "firebase-uid-42" {
-			t.Errorf("expected captured UID 'firebase-uid-42', got %q", capturedUID)
+		if capturedUID != "tenant-uid-42" {
+			t.Errorf("expected captured UID 'tenant-uid-42', got %q", capturedUID)
 		}
 	})
 

@@ -19,9 +19,6 @@ type Config struct {
 	DefaultUserID              string
 	Admin                      bool
 	AuthProvider               string
-	FirebaseProjectID          string
-	FirebaseAPIKey             string
-	FirebaseAuthDomain         string
 	LLMDailyRequestLimit       int
 	LLMMonthlyTokenLimit       int
 	WorkerConcurrency          int
@@ -204,7 +201,7 @@ func loadServerConfig(cfg *Config, lookup func(string) string) error {
 	return nil
 }
 
-// loadAuthConfig populates tenant defaults, admin mode, and Firebase settings from lookup.
+// loadAuthConfig populates tenant defaults, admin mode, and auth provider selection from lookup.
 func loadAuthConfig(cfg *Config, lookup func(string) string) error {
 	if val := strings.TrimSpace(lookup("DEFAULT_USER_ID")); val != "" {
 		cfg.DefaultUserID = val
@@ -216,12 +213,6 @@ func loadAuthConfig(cfg *Config, lookup func(string) string) error {
 	}
 
 	cfg.AuthProvider = strings.TrimSpace(lookup("AUTH_PROVIDER"))
-	cfg.FirebaseProjectID = strings.TrimSpace(lookup("FIREBASE_PROJECT_ID"))
-	cfg.FirebaseAPIKey = strings.TrimSpace(lookup("FIREBASE_API_KEY"))
-	cfg.FirebaseAuthDomain = strings.TrimSpace(lookup("FIREBASE_AUTH_DOMAIN"))
-	if cfg.FirebaseAuthDomain == "" && cfg.FirebaseProjectID != "" {
-		cfg.FirebaseAuthDomain = cfg.FirebaseProjectID + ".firebaseapp.com"
-	}
 	return nil
 }
 
@@ -373,7 +364,7 @@ func (c *Config) ParseFlags(args []string) error {
 
 	admin := fs.Bool("admin-mode", c.Admin, "Run in local single-user admin mode")
 	fs.BoolVar(admin, "admin", c.Admin, "Alias for -admin-mode")
-	authProvider := fs.String("auth-provider", c.AuthProvider, "Authentication provider to use (e.g. admin, firebase)")
+	authProvider := fs.String("auth-provider", c.AuthProvider, "Authentication provider to use (e.g. admin)")
 	debugPrompts := fs.Bool("debug-llm-prompts", c.LLMDebugPrompts, "Store LLM prompts and responses in data/llm")
 	fs.BoolVar(debugPrompts, "llm-debug-prompts", c.LLMDebugPrompts, "Alias for -debug-llm-prompts")
 	debugDir := fs.String("llm-debug-dir", c.LLMDebugDir, "Directory to store LLM debug markdown files")

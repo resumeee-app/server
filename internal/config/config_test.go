@@ -57,15 +57,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Admin != false {
 		t.Errorf("expected default Admin false, got %v", cfg.Admin)
 	}
-	if cfg.FirebaseProjectID != "" {
-		t.Errorf("expected default FirebaseProjectID empty, got %q", cfg.FirebaseProjectID)
-	}
-	if cfg.FirebaseAPIKey != "" {
-		t.Errorf("expected default FirebaseAPIKey empty, got %q", cfg.FirebaseAPIKey)
-	}
-	if cfg.FirebaseAuthDomain != "" {
-		t.Errorf("expected default FirebaseAuthDomain empty, got %q", cfg.FirebaseAuthDomain)
-	}
 	if cfg.AuthProvider != "" {
 		t.Errorf("expected default AuthProvider empty, got %q", cfg.AuthProvider)
 	}
@@ -89,10 +80,7 @@ func TestLoadOverrides(t *testing.T) {
 		"ANTHROPIC_API_KEY":              "ant-secret",
 		"OPENAI_COMPAT_BASE_URL":         "http://localhost:11434/v1",
 		"OPENAI_COMPAT_API_KEY":          "ollama-secret",
-		"FIREBASE_PROJECT_ID":            "custom-project",
-		"FIREBASE_API_KEY":               "custom-api-key",
-		"FIREBASE_AUTH_DOMAIN":           "custom-core.firebaseapp.com",
-		"AUTH_PROVIDER":                  "firebase",
+		"AUTH_PROVIDER":                  "custom",
 		"ENV":                            "production",
 		"LOG_LEVEL":                      "DEBUG",
 	}
@@ -142,17 +130,8 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Errorf("expected LogLevel LevelDebug, got %v", cfg.LogLevel)
 	}
-	if cfg.FirebaseProjectID != "custom-project" {
-		t.Errorf("expected FirebaseProjectID 'custom-project', got %q", cfg.FirebaseProjectID)
-	}
-	if cfg.FirebaseAPIKey != "custom-api-key" {
-		t.Errorf("expected FirebaseAPIKey 'custom-api-key', got %q", cfg.FirebaseAPIKey)
-	}
-	if cfg.FirebaseAuthDomain != "custom-core.firebaseapp.com" {
-		t.Errorf("expected FirebaseAuthDomain 'custom-core.firebaseapp.com', got %q", cfg.FirebaseAuthDomain)
-	}
-	if cfg.AuthProvider != "firebase" {
-		t.Errorf("expected AuthProvider 'firebase', got %q", cfg.AuthProvider)
+	if cfg.AuthProvider != "custom" {
+		t.Errorf("expected AuthProvider 'custom', got %q", cfg.AuthProvider)
 	}
 }
 
@@ -854,7 +833,7 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 	t.Run("Valid multi-tenancy env variables with ADMIN_MODE", func(t *testing.T) {
 		env := map[string]string{
 			"ADMIN_MODE":              "true",
-			"FIREBASE_PROJECT_ID":     "resumeee-prod-123",
+			"AUTH_PROVIDER":           "custom",
 			"LLM_DAILY_REQUEST_LIMIT": "100",
 			"LLM_MONTHLY_TOKEN_LIMIT": "5000000",
 		}
@@ -865,8 +844,8 @@ func TestLoadMultiTenancyConfig(t *testing.T) {
 		if !cfg.Admin {
 			t.Errorf("expected Admin true, got false")
 		}
-		if cfg.FirebaseProjectID != "resumeee-prod-123" {
-			t.Errorf("expected FirebaseProjectID 'resumeee-prod-123', got %q", cfg.FirebaseProjectID)
+		if cfg.AuthProvider != "custom" {
+			t.Errorf("expected AuthProvider 'custom', got %q", cfg.AuthProvider)
 		}
 		if cfg.LLMDailyRequestLimit != 100 {
 			t.Errorf("expected LLMDailyRequestLimit 100, got %d", cfg.LLMDailyRequestLimit)
@@ -1024,11 +1003,11 @@ func TestConfig_ParseFlags_AuthProvider(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if err := cfg.ParseFlags([]string{"-auth-provider=firebase"}); err != nil {
+		if err := cfg.ParseFlags([]string{"-auth-provider=custom"}); err != nil {
 			t.Fatalf("ParseFlags failed: %v", err)
 		}
-		if cfg.AuthProvider != "firebase" {
-			t.Errorf("expected AuthProvider 'firebase', got %q", cfg.AuthProvider)
+		if cfg.AuthProvider != "custom" {
+			t.Errorf("expected AuthProvider 'custom', got %q", cfg.AuthProvider)
 		}
 	})
 }
