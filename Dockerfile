@@ -1,57 +1,34 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1
 # ==============================================================================
 # Stage 1: Hermetic Go Builder
 # ==============================================================================
 FROM golang:1.27-alpine AS builder
 
-# Install build prerequisites
-RUN apk add --no-cache git ca-certificates tzdata
+# Install build prerequisites (gcc and musl-dev are required for CGO / mattn/go-sqlite3)
+RUN apk add --no-cache ca-certificates tzdata gcc musl-dev
 
 WORKDIR /workspace
 
-# Copy Go module manifests from all local workspace modules for layer caching
-COPY --from=core go.mod go.sum ./core/
-COPY --from=sql go.mod go.sum ./sql/
-COPY go.mod go.sum ./server/
+# Copy Go module manifests for layer caching
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Point inter-module dependencies to local workspace paths before downloading public modules
-RUN go -C ./sql mod edit \
-        -replace github.com/resumeee-app/core=../core && \
-    go -C ./server mod edit \
-        -replace github.com/resumeee-app/core=../core \
-        -replace github.com/resumeee-app/sql=../sql && \
-    go -C ./server mod download
+# Copy application source tree
+COPY . .
 
-# Copy application and module source trees
-COPY --from=core . ./core/
-COPY --from=sql . ./sql/
-COPY . ./server/
-
-# Re-apply local module replacements over copied go.mod files
-RUN go -C ./sql mod edit \
-        -replace github.com/resumeee-app/core=../core && \
-    go -C ./server mod edit \
-        -replace github.com/resumeee-app/core=../core \
-        -replace github.com/resumeee-app/sql=../sql
-
-WORKDIR /workspace/server
-
-# Build fully static pure-Go binaries (CGO_ENABLED=0)
+# Build static CGO binaries (required by mattn/go-sqlite3)
 # -trimpath strips host paths from stack traces
-# -ldflags="-s -w -extldflags '-static'" strips debug tables
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# -ldflags="-s -w -extldflags '-static'" strips debug tables and links statically against musl
+RUN CGO_ENABLED=1 go build \
     -trimpath \
     -ldflags="-s -w -extldflags '-static'" \
     -o /bin/resumeee-server \
     ./cmd/server && \
-    CGO_ENABLED=0 GOOS=linux go build \
+    CGO_ENABLED=1 go build \
     -trimpath \
     -ldflags="-s -w -extldflags '-static'" \
     -o /bin/resumeee-mcp \
     ./cmd/mcp
-
-# Provide symlink /bin/resumeee -> /bin/resumeee-server for backward compatibility
-RUN ln -s /bin/resumeee-server /bin/resumeee
 
 # ==============================================================================
 # Stage 2: Minimal Rootless Runtime (Alpine Base)
@@ -70,18 +47,13 @@ WORKDIR /home/appuser
 # Copy static binaries from builder
 COPY --from=builder /bin/resumeee-server /usr/local/bin/resumeee-server
 COPY --from=builder /bin/resumeee-mcp /usr/local/bin/resumeee-mcp
-COPY --from=builder /bin/resumeee /usr/local/bin/resumeee
 
 # Copy entrypoint router script
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# 12-Factor default environment configuration
-ENV PORT=8080 \
-    DB_PATH=/data/resumeee.db \
-    DEFAULT_USER_ID=default \
-    WORKER_CONCURRENCY=2 \
-    ENV=production \
+# Container environment defaults
+ENV ENV=production \
     LOG_LEVEL=INFO
 
 # Drop root privileges immediately
